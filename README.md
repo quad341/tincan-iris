@@ -68,6 +68,12 @@ The audio foundation this builds on was validated end-to-end on 2026-06-11 (RTL8
 
 This project depends on **[tincan](https://github.com/quad341/tincan)** — see its docs for phone-bridge setup (Bluetooth adapter, HFP/SCO, oFono, SELinux, MCP).
 
+## More
+
+- **[Architecture](ARCHITECTURE.md)** — how the secretary works: the loop, the dispatch layer (skills vs. LLM), pluggable providers, the tincan contract
+- **[Security](SECURITY.md)** — network-isolated model inference + call-data privacy
+- **[Roadmap](https://github.com/quad341/tincan-iris/issues?q=is%3Aissue+label%3Aroadmap)** — where we're headed (intent, not promises)
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
