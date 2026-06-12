@@ -8,6 +8,14 @@
 
 </div>
 
+<div align="center">
+
+<img src="assets/iris-hero.png" width="320" alt="Iris, Bearer of the Can"/>
+
+<sub><i>“Iris, Bearer of the Can” — generated locally on an AMD iGPU, network-isolated, in 44 seconds.</i></sub>
+
+</div>
+
 ---
 
 ## What is this?
