@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.env
+*.log
+.DS_Store
+# never commit real numbers / contacts / local secrets
+*.local
+secrets.*
+config.local.*
