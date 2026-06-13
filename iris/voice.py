@@ -12,7 +12,7 @@ from __future__ import annotations
 import sys
 
 from .audio.endpoint import AudioEndpoint, LocalAudio
-from .audio.tts import TTS, EspeakTTS
+from .audio.tts import TTS, default_tts
 from .brain import Brain
 from .fillers import filler_picker
 
@@ -27,7 +27,7 @@ class Voice:
         endpoint: AudioEndpoint | None = None,
     ) -> None:
         self.brain = brain or Brain()
-        self.tts = tts or EspeakTTS()
+        self.tts = tts or default_tts()
         self.endpoint = endpoint or LocalAudio()
         self._pick = filler_picker()
 

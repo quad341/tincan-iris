@@ -2,9 +2,13 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+.venv-kokoro/
 .env
 *.env
 *.log
+
+# Local ML models (downloaded, never committed — e.g. Kokoro TTS)
+/models/
 .DS_Store
 # never commit real numbers / contacts / local secrets
 *.local
@@ -16,3 +20,7 @@ config.local.*
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Gas City
+.beads/*
+!.beads/identity.toml
