@@ -1,0 +1,18 @@
+[project]
+name = "tincan-iris"
+version = "0.0.1"
+description = "Iris — a local-first voice-agent brain that rides tincan."
+requires-python = ">=3.11"
+# v0 brain is intentionally zero-dependency: it talks to a local llama-server
+# over stdlib urllib. Audio/STT/TTS deps arrive with the voice I/O PR.
+dependencies = []
+
+[project.scripts]
+iris-chat = "iris.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["iris*"]
