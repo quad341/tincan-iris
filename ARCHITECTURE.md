@@ -64,8 +64,10 @@ Not every utterance needs a frontier model. Iris routes each turn:
 
 - **Known actions → skills (fast path).** A registered set of well-known intents —
   *schedule an appointment, send a text, read me my messages, take a message, what's on my
-  calendar* — handled deterministically via **MCP tools + OAuth-scoped integrations**
-  (e.g. Google Calendar). Snappy, cheap, reliable, predictable.
+  calendar* — handled deterministically via **self-authored direct-API integrations**
+  (e.g. Google Calendar REST), orchestrated by the warm local model. **No MCP servers at
+  runtime, and the cloud model never touches tools** — see
+  [ADR-0001](docs/adr/0001-no-mcp-direct-api-via-qwen.md). Snappy, cheap, reliable, predictable.
 - **Everything else → the LLM (smart path).** Open-ended conversation and ambiguous/novel
   requests fall back to the generic LLM brain (local Qwen or Claude Haiku).
 
