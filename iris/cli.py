@@ -3,8 +3,9 @@
     python -m iris.cli        # or, once installed:  iris-chat
 
 Type a line; Iris responds, and the per-lane latency is printed so the timing
-budget stays visible while we build. Requires a local llama-server running at
-the configured URL (see ``iris/config.py``).
+budget stays visible while we build. If a lane is slow, a filler line appears
+first (the text stand-in for the spoken "umm, one sec"). Requires a local
+llama-server running at the configured URL (see ``iris/config.py``).
 """
 from __future__ import annotations
 
@@ -22,11 +23,16 @@ def main() -> int:
             text = input("you › ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\nbye!")
+            brain.close()
             return 0
         if not text:
             continue
+
+        def on_filler() -> None:
+            print("iris … (umm, one sec)", flush=True)
+
         try:
-            reply = brain.respond(text)
+            reply = brain.respond(text, on_filler=on_filler)
         except Exception as exc:  # noqa: BLE001 — REPL: surface errors, don't crash
             print(f"iris ✗ {type(exc).__name__}: {exc}\n")
             continue
