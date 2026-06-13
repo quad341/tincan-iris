@@ -18,9 +18,17 @@ class Config:
     qwen_max_tokens: int = 96
 
     # --- Tier 2: cloud raw-text tier. Driven ONLY through the vendor TUI
-    # (Claude Code), in a lean, tool-less, MCP-less config. See docs/adr/0001.
+    # (Claude Code), lean + text-only, NEVER tools/MCP. See docs/adr/0001.
+    haiku_enabled: bool = True
     haiku_model: str = "claude-haiku-4-5"
-    haiku_enabled: bool = False  # off until the TUI driver lands (next PR)
+    haiku_tmux_session: str = "iris-haiku"
+    haiku_ready_timeout_s: float = 40.0
+    # Forced brevity keeps it voice-appropriate AND fast — latency scales with
+    # answer length, so a one-line spoken answer comes back in ~1-2 s.
+    haiku_system_prompt: str = (
+        "You are Iris, answering aloud on the user's behalf. Reply in ONE short, "
+        "warm, spoken sentence (under ~30 words). No markdown, no lists, no preamble."
+    )
 
 
 DEFAULT = Config()
