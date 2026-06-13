@@ -6,9 +6,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from .config import DEFAULT, Config
-from .lanes import Tier0Rules, Tier1Qwen, Tier2RawHaiku
+from .lanes import LaneResult, Tier0Rules, Tier1Qwen, Tier2RawHaiku
 from .latency import Timeline
-from .masking import run_with_filler
+from .masking import run_with_masking
 from .skills import SkillRegistry, default_registry
 
 
@@ -21,14 +21,14 @@ class Reply:
 
 
 class Brain:
-    """Tiered router with latency masking.
+    """Tiered router with latency masking, a hard fallback, and a local stop.
 
     Explicit escalation ("ask Haiku about X") routes to Tier 2 (raw text).
     Otherwise the cheapest viable lane wins: Tier 0 rules -> Tier 1 local Qwen.
-    Slow lanes (1 and 2) are wrapped so that if they exceed a threshold, an
-    optional ``on_filler`` fires *in parallel* — the latency mask ("umm, one
-    sec") that keeps dead air off the line. Actions never leave the local tiers
-    (direct-API skill adapters; see ``docs/adr/0001``).
+    Slow lanes (1 and 2) get masked: ``on_filler(i)`` fires (and repeats) while
+    they lag; the user can Ctrl-C to stop instantly ("Okay — stopping."); and if
+    a lane blows the deadline it falls back to a graceful spoken line instead of
+    dead air. Actions never leave the local tiers (see ``docs/adr/0001``).
     """
 
     # "ask Haiku about <X>" / "ask Haiku <X>" — optional leading wake word.
@@ -41,40 +41,54 @@ class Brain:
         self.tier1 = Tier1Qwen(cfg)
         self.tier2 = Tier2RawHaiku(cfg)
 
-    def respond(self, text: str, on_filler: Callable[[], None] | None = None) -> Reply:
+    def _masked(
+        self,
+        work: Callable[[], LaneResult],
+        lane: str,
+        on_filler: Callable[[int], None] | None,
+    ) -> LaneResult:
+        """Run a lane with repeating fillers, a Ctrl-C stop, and a deadline fallback."""
+        fallback = LaneResult(self.cfg.lane_timeout_reply, f"{lane}(timeout)")
+        interrupted = LaneResult("Okay — stopping.", f"{lane}(stopped)")
+        result = run_with_masking(
+            work,
+            first_filler_s=self.cfg.first_filler_s,
+            repeat_filler_s=self.cfg.repeat_filler_s,
+            deadline_s=self.cfg.lane_deadline_s,
+            on_filler=on_filler,
+            fallback=fallback,
+            interrupted=interrupted,
+        )
+        return result if result is not None else fallback
+
+    def respond(self, text: str, on_filler: Callable[[int], None] | None = None) -> Reply:
         tl = Timeline()
 
         # Explicit escalation — "ask Haiku about X" -> Tier 2 (raw text, slow).
         m = self._ASK_HAIKU.match(text.strip())
         if m and self.cfg.haiku_enabled:
             try:
-                r2 = run_with_filler(
-                    lambda: self.tier2.handle(m.group(1).strip()),
-                    self.cfg.filler_threshold_s,
-                    on_filler,
-                )
+                r2 = self._masked(lambda: self.tier2.handle(m.group(1).strip()), "tier2-haiku", on_filler)
                 tl.mark("tier2-haiku")
                 return Reply(r2.text, r2.lane, tl)
             except Exception as exc:  # noqa: BLE001 — degrade gracefully, don't crash
                 tl.mark("tier2-haiku(failed)")
                 return Reply(f"(couldn't reach Haiku: {exc})", "tier2-haiku", tl)
 
-        # Tier 0 — deterministic rules (sub-millisecond, never slow).
+        # Tier 0 — deterministic local commands (sub-millisecond, never slow).
         r0 = self.tier0.handle(text)
         tl.mark("tier0")
         if r0 is not None:
             return Reply(r0.text, r0.lane, tl, r0.skill)
 
-        # Tier 1 — local Qwen (warm). Usually fast; masked + graceful just in case.
+        # Tier 1 — local Qwen (warm). Masked + deadline-bounded for the busy box.
         try:
-            r1 = run_with_filler(
-                lambda: self.tier1.handle(text), self.cfg.filler_threshold_s, on_filler
-            )
+            r1 = self._masked(lambda: self.tier1.handle(text), "tier1-qwen", on_filler)
             tl.mark("tier1-qwen")
             return Reply(r1.text, r1.lane, tl, r1.skill)
         except Exception as exc:  # noqa: BLE001 — local model hiccup: degrade, don't crash
             tl.mark("tier1-qwen(failed)")
-            return Reply(f"(the local model didn't answer in time: {exc})", "tier1-qwen", tl)
+            return Reply(f"(the local model didn't answer: {exc})", "tier1-qwen", tl)
 
     def close(self) -> None:
         """Tear down any warm sessions (e.g. the Tier-2 Claude TUI)."""

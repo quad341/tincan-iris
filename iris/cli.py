@@ -3,21 +3,26 @@
     python -m iris.cli        # or, once installed:  iris-chat
 
 Type a line; Iris responds, and the per-lane latency is printed so the timing
-budget stays visible while we build. If a lane is slow, a filler line appears
-first (the text stand-in for the spoken "umm, one sec"). Requires a local
-llama-server running at the configured URL (see ``iris/config.py``).
+budget stays visible while we build. If a lane lags, randomized filler lines
+appear (the text stand-in for the spoken "umm, one sec"); if it blows the
+deadline she falls back gracefully. Requires a local llama-server (see
+``iris/config.py``).
 """
 from __future__ import annotations
 
 import sys
 
 from .brain import Brain
+from .fillers import filler_picker
 
 
 def main() -> int:
     brain = Brain()
+    pick = filler_picker()
     print("Iris brain REPL — type a message (Ctrl-D to quit).")
-    print("(I'm an AI. Local Qwen must be serving at the configured URL.)\n")
+    examples = brain.tier0.examples()
+    print("Try: " + " · ".join(examples[:5]) + ' · or "what can you do" for the full list.')
+    print("(I'm an AI.)\n")
     while True:
         try:
             text = input("you › ").strip()
@@ -27,12 +32,10 @@ def main() -> int:
             return 0
         if not text:
             continue
-
-        def on_filler() -> None:
-            print("iris … (umm, one sec)", flush=True)
-
         try:
-            reply = brain.respond(text, on_filler=on_filler)
+            reply = brain.respond(
+                text, on_filler=lambda i: print(f"iris … ({pick()})", flush=True)
+            )
         except Exception as exc:  # noqa: BLE001 — REPL: surface errors, don't crash
             print(f"iris ✗ {type(exc).__name__}: {exc}\n")
             continue

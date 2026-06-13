@@ -12,10 +12,15 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Config:
-    # --- Latency masking. If a lane runs longer than this, fire a filler
-    # ("umm, one sec") in parallel so there's no dead air. Tier 0/1 rarely trip
-    # it; the cloud Tier 2 always does.
-    filler_threshold_s: float = 0.6
+    # --- Latency masking. Fire a filler at first_filler_s, repeat every
+    # repeat_filler_s; if a lane runs past lane_deadline_s, abandon it and fall
+    # back (the box is shared with the city, so the local model can stall).
+    first_filler_s: float = 0.6
+    repeat_filler_s: float = 2.5
+    lane_deadline_s: float = 6.0
+    lane_timeout_reply: str = (
+        "Sorry — I'm running slow right now. Let me get back to you on that."
+    )
 
     # --- Tier 1: local brain (warm). llama.cpp server, OpenAI/Anthropic-compatible.
     qwen_base_url: str = "http://127.0.0.1:8080"
@@ -28,8 +33,6 @@ class Config:
     haiku_model: str = "claude-haiku-4-5"
     haiku_tmux_session: str = "iris-haiku"
     haiku_ready_timeout_s: float = 40.0
-    # Forced brevity keeps it voice-appropriate AND fast — latency scales with
-    # answer length, so a one-line spoken answer comes back in ~1-2 s.
     haiku_system_prompt: str = (
         "You are Iris, answering aloud on the user's behalf. Reply in ONE short, "
         "warm, spoken sentence (under ~30 words). No markdown, no lists, no preamble."

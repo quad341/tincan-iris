@@ -1,8 +1,9 @@
 """Voice mode — Iris speaks her replies aloud.
 
-For now: text in (you type), voice out (TTS -> speaker), with the latency filler
-spoken too ("umm, one sec") when a lane is slow. The mic side (STT) lands with
-whisper.cpp; this is the half that's testable today on any box with espeak-ng.
+For now: text in (you type), voice out (TTS -> speaker). While a lane lags she
+speaks randomized fillers ("let me think" / "hang on" / ...); Ctrl-C stops her
+instantly; and if a lane blows the deadline she speaks a graceful fallback
+instead of dead air. The mic side (STT) lands with whisper.cpp.
 
     python -m iris.voice        # or, once installed:  iris-speak
 """
@@ -13,6 +14,7 @@ import sys
 from .audio.endpoint import AudioEndpoint, LocalAudio
 from .audio.tts import TTS, EspeakTTS
 from .brain import Brain
+from .fillers import filler_picker
 
 
 class Voice:
@@ -27,13 +29,14 @@ class Voice:
         self.brain = brain or Brain()
         self.tts = tts or EspeakTTS()
         self.endpoint = endpoint or LocalAudio()
+        self._pick = filler_picker()
 
     def speak(self, text: str) -> None:
         self.endpoint.playback(self.tts.synth(text))
 
     def say_reply(self, user_text: str):
-        # the masking filler becomes an audible "umm" on slow lanes
-        reply = self.brain.respond(user_text, on_filler=lambda: self.speak("umm, one sec"))
+        # randomized spoken fillers while a lane lags; Ctrl-C stops it
+        reply = self.brain.respond(user_text, on_filler=lambda i: self.speak(self._pick()))
         self.speak(reply.text)
         return reply
 
@@ -43,15 +46,19 @@ class Voice:
 
 def main() -> int:
     v = Voice()
-    print("Iris voice mode — type a message; Iris speaks the reply (Ctrl-D to quit).")
-    print(f"(TTS: {v.tts.name} · out: {v.endpoint.name} · I'm an AI.)\n")
+    print("Iris voice mode — type a message; Iris speaks the reply.")
+    print("Try: " + " · ".join(v.brain.tier0.examples()[:5]) + ' · or "what can you do".')
+    print("(Ctrl-C stops her mid-thought · Ctrl-D quits · I'm an AI.)\n")
     try:
         while True:
             try:
                 text = input("you › ").strip()
-            except (EOFError, KeyboardInterrupt):
+            except EOFError:
                 print("\nbye!")
                 return 0
+            except KeyboardInterrupt:
+                print()  # Ctrl-C at the prompt: fresh line, keep going
+                continue
             if not text:
                 continue
             try:
