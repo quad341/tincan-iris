@@ -3,12 +3,14 @@ name = "tincan-iris"
 version = "0.0.1"
 description = "Iris — a local-first voice-agent brain that rides tincan."
 requires-python = ">=3.11"
-# v0 brain is intentionally zero-dependency: it talks to a local llama-server
-# over stdlib urllib. Audio/STT/TTS deps arrive with the voice I/O PR.
+# v0 brain is zero-dependency (stdlib urllib -> local llama-server). The voice
+# mode shells out to espeak-ng (TTS) and pw-cat/aplay (playback); whisper.cpp +
+# Kokoro arrive with the mic loop and the natural-voice swap.
 dependencies = []
 
 [project.scripts]
 iris-chat = "iris.cli:main"
+iris-speak = "iris.voice:main"
 
 [build-system]
 requires = ["setuptools>=68"]
