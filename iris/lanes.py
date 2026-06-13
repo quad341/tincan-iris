@@ -75,20 +75,35 @@ class Tier1Qwen:
 
 
 class Tier2RawHaiku:
-    """Cloud Haiku as raw TEXT only — driven through the Claude Code TUI in a
-    lean config, NEVER tools/MCP (``docs/adr/0001``).
+    """Cloud Haiku as raw TEXT only — driven through a persistent lean Claude
+    Code TUI session, NEVER tools/MCP (``docs/adr/0001``).
 
-    The persistent-TUI driver (validated as a spike: lean Claude Code, ~1-2 s
-    warm) is not productized yet — that's the next PR.
+    Lazy-started on first use and kept warm so subsequent turns skip the boot.
     """
 
     name = "tier2-haiku"
 
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
+        self._session = None
+
+    def _ensure(self):
+        if self._session is None:
+            from .claude_tui import ClaudeTuiSession
+
+            self._session = ClaudeTuiSession(
+                model=self.cfg.haiku_model,
+                system_prompt=self.cfg.haiku_system_prompt,
+                session=self.cfg.haiku_tmux_session,
+                ready_timeout_s=self.cfg.haiku_ready_timeout_s,
+            )
+            self._session.start()
+        return self._session
 
     def handle(self, text: str) -> LaneResult:
-        raise NotImplementedError(
-            "Tier-2 raw-Haiku driver (lean Claude Code over a persistent TUI "
-            "session) is not wired yet — see docs/adr/0001."
-        )
+        return LaneResult(self._ensure().ask(text), self.name)
+
+    def close(self) -> None:
+        if self._session is not None:
+            self._session.close()
+            self._session = None

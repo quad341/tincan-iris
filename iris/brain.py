@@ -1,6 +1,7 @@
 """Brain — route a turn through the cheapest viable lane, timed end to end."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from .config import DEFAULT, Config
@@ -18,12 +19,16 @@ class Reply:
 
 
 class Brain:
-    """Tiered router. v0 wires Tier 0 (rules) -> Tier 1 (local Qwen).
+    """Tiered router.
 
-    Tier 2 (raw Haiku, text-only) is constructed but not yet invoked; routing
-    to it lands with its driver. Actions never leave the local tiers — they run
-    as direct-API skill adapters (see ``docs/adr/0001``).
+    Explicit escalation ("ask Haiku about X") routes to Tier 2 (raw text).
+    Otherwise the cheapest viable lane wins: Tier 0 rules -> Tier 1 local Qwen.
+    Actions never leave the local tiers — they run as direct-API skill adapters
+    (see ``docs/adr/0001``).
     """
+
+    # "ask Haiku about <X>" / "ask Haiku <X>" — optional leading wake word.
+    _ASK_HAIKU = re.compile(r"(?:iris[,\s]+)?ask haiku(?:\s+about)?\s+(.+)", re.IGNORECASE)
 
     def __init__(self, cfg: Config = DEFAULT, skills: SkillRegistry | None = None) -> None:
         self.cfg = cfg
@@ -35,6 +40,17 @@ class Brain:
     def respond(self, text: str) -> Reply:
         tl = Timeline()
 
+        # Explicit escalation — "ask Haiku about X" -> Tier 2 (raw text).
+        m = self._ASK_HAIKU.match(text.strip())
+        if m and self.cfg.haiku_enabled:
+            try:
+                r2 = self.tier2.handle(m.group(1).strip())
+                tl.mark("tier2-haiku")
+                return Reply(r2.text, r2.lane, tl)
+            except Exception as exc:  # noqa: BLE001 — degrade gracefully, don't crash
+                tl.mark("tier2-haiku(failed)")
+                return Reply(f"(couldn't reach Haiku: {exc})", "tier2-haiku", tl)
+
         # Tier 0 — deterministic rules (sub-millisecond).
         r0 = self.tier0.handle(text)
         tl.mark("tier0")
@@ -42,6 +58,14 @@ class Brain:
             return Reply(r0.text, r0.lane, tl, r0.skill)
 
         # Tier 1 — local Qwen (warm). The workhorse and skill orchestrator.
-        r1 = self.tier1.handle(text)
-        tl.mark("tier1-qwen")
-        return Reply(r1.text, r1.lane, tl, r1.skill)
+        try:
+            r1 = self.tier1.handle(text)
+            tl.mark("tier1-qwen")
+            return Reply(r1.text, r1.lane, tl, r1.skill)
+        except Exception as exc:  # noqa: BLE001 — local model hiccup: degrade, don't crash
+            tl.mark("tier1-qwen(failed)")
+            return Reply(f"(the local model didn't answer in time: {exc})", "tier1-qwen", tl)
+
+    def close(self) -> None:
+        """Tear down any warm sessions (e.g. the Tier-2 Claude TUI)."""
+        self.tier2.close()
