@@ -12,6 +12,11 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Config:
+    # --- Latency masking. If a lane runs longer than this, fire a filler
+    # ("umm, one sec") in parallel so there's no dead air. Tier 0/1 rarely trip
+    # it; the cloud Tier 2 always does.
+    filler_threshold_s: float = 0.6
+
     # --- Tier 1: local brain (warm). llama.cpp server, OpenAI/Anthropic-compatible.
     qwen_base_url: str = "http://127.0.0.1:8080"
     qwen_timeout_s: float = 30.0
