@@ -2,15 +2,17 @@
 
 Measured budget (target box, 2026-06-13; see ``docs/LATENCY.md``):
 
-    Tier 0  hard rules        <1 ms     known actions (deterministic)
+    Tier 0  hard rules        <1 ms     known actions (deterministic, LOCAL)
     Tier 1  local Qwen        ~16 ms TTFT / ~64 tok/s   NLU, dispatch, replies
     Tier 2  raw Haiku (TUI)   ~1-2 s    frontier text/knowledge — NO tools/MCP
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import re
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from .config import Config
@@ -24,25 +26,72 @@ class LaneResult:
     skill: str | None = None
 
 
+_INTRO = (
+    "Hi, I'm Iris — a voice assistant, and I'll always tell you I'm an AI. I ride "
+    "along on tincan to help with calls and messages, and I keep things local and "
+    "quick whenever I can."
+)
+
+
 class Tier0Rules:
-    """Deterministic keyword/regex intents. Sub-millisecond, no model."""
+    """Deterministic, LOCAL commands — sub-millisecond, no model, no network.
+
+    The command table is the source of truth: it drives matching, the spoken
+    help list, and the discoverability banner. "stop" is first and highest
+    priority — the local "stand down" handle that must work even offline.
+    """
 
     name = "tier0-rules"
 
     def __init__(self, skills: SkillRegistry) -> None:
         self.skills = skills
+        # (name, pattern, handler() -> str, example for help/banner)
+        self._commands: list[tuple[str, re.Pattern[str], Callable[[], str], str]] = [
+            ("stop", re.compile(
+                r"^\s*(?:iris[,\s]+)?(?:stop|stand[ -]?down|cancel|never ?mind|abort|"
+                r"that'?s enough|quiet|shush)\b", re.I),
+             lambda: "Okay — standing down.", "iris, stop"),
+            ("time", re.compile(r"\bwhat(?:'s| is)? the time\b|\bwhat time is it\b", re.I),
+             self._time, "what time is it"),
+            ("date", re.compile(r"\bwhat(?:'s| is)?(?: the| today'?s)? date\b|\bwhat day is it\b", re.I),
+             self._date, "what's the date"),
+            ("introduce", re.compile(
+                r"\bintroduce yourself\b|\bwho are you\b|\bwhat are you\b|\btell me about yourself\b", re.I),
+             lambda: _INTRO, "introduce yourself"),
+            ("greet", re.compile(r"^\s*(?:hi|hello|hey|good morning|good afternoon|good evening)\b", re.I),
+             lambda: "Hi — I'm Iris, and I'm an AI. What can I do for you?", "hi / hello"),
+            ("thanks", re.compile(r"^\s*(?:thanks|thank you|cheers|appreciate it)\b", re.I),
+             lambda: "Anytime!", "thank you"),
+            ("bye", re.compile(r"^\s*(?:bye|goodbye|see you|good ?night|talk later)\b", re.I),
+             lambda: "Talk soon — bye!", "goodbye"),
+            ("help", re.compile(
+                r"\bwhat can (?:you do|i (?:ask|say))\b|\b(?:your )?commands\b|\bhelp\b|\bwhat do you do\b", re.I),
+             self._help, "what can you do"),
+        ]
+
+    def _time(self) -> str:
+        skill = self.skills.get("time")
+        return skill.run() if skill is not None else "I can't read the clock right now."
+
+    def _date(self) -> str:
+        return _dt.datetime.now().strftime("Today is %A, %B %-d.")
+
+    def _help(self) -> str:
+        examples = "; ".join(f'"{ex}"' for _n, _p, _h, ex in self._commands if _n != "help")
+        return (
+            "You can say things like: " + examples
+            + ". Ask me anything else and I'll think it through, or say "
+            '"ask Haiku about" something to reach the cloud.'
+        )
 
     def handle(self, text: str) -> LaneResult | None:
-        t = text.lower().strip()
-        if re.search(r"\bwhat(?:'s| is)? the time\b|\bwhat time is it\b", t):
-            skill = self.skills.get("time")
-            if skill is not None:
-                return LaneResult(skill.run(), self.name, skill="time")
-        if t in {"hi", "hello", "hey"}:
-            return LaneResult(
-                "Hi — I'm Iris, and I'm an AI. What can I do for you?", self.name
-            )
-        return None  # not a known action; let a smarter lane handle it
+        for name, pattern, handler, _ex in self._commands:
+            if pattern.search(text):
+                return LaneResult(handler(), self.name, skill=name)
+        return None  # not a known command; let a smarter lane handle it
+
+    def examples(self) -> list[str]:
+        return [ex for _n, _p, _h, ex in self._commands]
 
 
 class Tier1Qwen:
