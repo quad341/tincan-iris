@@ -23,6 +23,7 @@ from typing import Protocol
 
 class AudioEndpoint(Protocol):
     name: str
+    far_source: str | None  # pulse source for the far party, if separate (None = local)
 
     def playback(self, wav_path: str) -> None:
         """Play a WAV out to this endpoint (speaker / call uplink)."""
@@ -86,6 +87,9 @@ class LocalAudio:
         self._recorder = recorder
         self.rate = rate
         self.channels = channels
+        # A separate pulse source for the far party (call downlink / app monitor).
+        # None for plain local audio — the far party is just on your speakers.
+        self.far_source: str | None = None
 
     # --- playback (mouth) ---
     def _player_cmd(self, wav: str) -> list[str]:
@@ -184,11 +188,118 @@ class VirtualDeviceAudio(LocalAudio):
         ]
 
 
+def _pactl_short(kind: str) -> list[str]:
+    """Node names from ``pactl list short <kind>`` (``sinks``/``sources``); [] on failure."""
+    try:
+        out = subprocess.run(
+            ["pactl", "list", "short", kind],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return []
+    names = []
+    for line in out.stdout.splitlines():
+        cols = line.split("\t")
+        if len(cols) >= 2 and cols[1]:
+            names.append(cols[1])
+    return names
+
+
+# HFP/SCO (a phone call) shows up as the headset/hands-free profile, not A2DP.
+_SCO_PROFILE_HINTS = ("head-unit", "headset", "handsfree", "hands-free", "hfp", "sco")
+
+
+def _pick_sco(names: list[str], prefix: str) -> str | None:
+    """Pick the live HFP/SCO call node from ``names``: a ``prefix``
+    (``bluez_output``/``bluez_input``) node, preferring the headset/hands-free
+    (call) profile over A2DP, never a ``.monitor``."""
+    cands = [n for n in names if n.startswith(prefix) and not n.endswith(".monitor")]
+    for n in cands:
+        if any(h in n.lower() for h in _SCO_PROFILE_HINTS):
+            return n
+    return cands[0] if cands else None
+
+
+def discover_sco_nodes() -> tuple[str | None, str | None]:
+    """Find the live bluez HFP/SCO ``(sink, source)`` for an active call via pactl.
+
+    Each is ``None`` if absent. The nodes exist only while a call is up (BlueZ
+    creates them on the SCO link) and embed the device MAC — so they're discovered
+    fresh each call, never persisted (the MAC is PII). A future ``TincanCallControl``
+    re-runs this on the ``CallConnected`` signal to bind the endpoint.
+    """
+    sink = _pick_sco(_pactl_short("sinks"), "bluez_output")
+    source = _pick_sco(_pactl_short("sources"), "bluez_input")
+    return sink, source
+
+
+class TincanSCOAudio(VirtualDeviceAudio):
+    """Ride a real phone call over tincan's HFP/SCO audio.
+
+    Iris's voice plays into the SCO **sink** (``bluez_output.<mac>.*`` — the call
+    uplink the far party hears); her far-ear is the SCO **source**
+    (``bluez_input.<mac>.*`` — the downlink from the far party). Push-to-talk stays
+    on the default mic, so the operator addresses Iris with their own voice (the
+    supervised co-pilot model). Same Conductor/console as the other endpoints —
+    only the nodes differ.
+
+    This is **media only** — it knows nothing about ringing, answering, or call
+    state. Signaling lives in tincan's ``im.tincan.Calls`` D-Bus interface
+    (``IncomingCall`` / ``Answer`` / ``CallConnected`` / ``CallEnded``). The
+    autonomous path (later): a ``TincanCallControl`` client answers an incoming
+    call by policy, then on ``CallConnected`` discovers the now-live SCO nodes and
+    binds this endpoint; on ``CallEnded`` it drops it. Keeping media and signaling
+    separate is what lets that land without touching this class.
+    """
+
+    name = "tincan-sco"
+
+    def __init__(
+        self,
+        sink: str,
+        source: str | None = None,
+        *,
+        rate: int = 16000,
+        channels: int = 1,
+    ) -> None:
+        # capture_target=None -> push-to-talk uses the default mic (the operator).
+        super().__init__(sink, capture_target=None, rate=rate, channels=channels)
+        self.far_source = source  # the SCO downlink — the far party, for _far_stream
+
+
 def default_endpoint() -> AudioEndpoint:
-    """LocalAudio by default; VirtualDeviceAudio when ``IRIS_PLAYBACK_TARGET`` is
-    set (e.g. the ``iris_mic`` null-sink that routes Iris into Discord/Zoom — see
-    scripts/virtual_audio.sh)."""
+    """LocalAudio by default.
+
+    - ``IRIS_AUDIO=tincan-sco`` rides tincan's live HFP/SCO call audio: the bluez
+      nodes are discovered (``IRIS_SCO_SINK`` / ``IRIS_SCO_SOURCE`` override) — a
+      call must be active for them to exist.
+    - else ``IRIS_PLAYBACK_TARGET`` selects VirtualDeviceAudio (e.g. the
+      ``iris_mic`` null-sink routing Iris into Discord/Zoom — see
+      scripts/virtual_audio.sh).
+    """
+    if os.environ.get("IRIS_AUDIO", "").lower() in ("tincan-sco", "sco"):
+        sink = os.environ.get("IRIS_SCO_SINK")
+        source = os.environ.get("IRIS_SCO_SOURCE")
+        if not sink or not source:
+            d_sink, d_source = discover_sco_nodes()
+            sink = sink or d_sink
+            source = source or d_source
+        if not sink:
+            raise RuntimeError(
+                "tincan-sco: no HFP/SCO sink found — is a call active on the dongle? "
+                "Set IRIS_SCO_SINK / IRIS_SCO_SOURCE to override."
+            )
+        return TincanSCOAudio(sink, source)
     target = os.environ.get("IRIS_PLAYBACK_TARGET")
     if target:
         return VirtualDeviceAudio(target, os.environ.get("IRIS_CAPTURE_TARGET"))
     return LocalAudio()
+
+
+if __name__ == "__main__":  # python -m iris.audio.endpoint — probe live SCO nodes
+    _sink, _source = discover_sco_nodes()
+    _miss = "— none found (is a call active on the dongle?)"
+    print(f"SCO sink   (uplink → far party hears Iris): {_sink or _miss}")
+    print(f"SCO source (downlink → Iris hears far party): {_source or _miss}")
+    if _sink:
+        print("\nRun the console on this call:\n  IRIS_AUDIO=tincan-sco python -m iris.console")
