@@ -23,7 +23,8 @@ from typing import Protocol
 
 class AudioEndpoint(Protocol):
     name: str
-    far_source: str | None  # pulse source for the far party, if separate (None = local)
+    far_source: str | None  # source for the far party, if separate (None = local)
+    far_backend: str        # "pulse" (parecord) or "pw" (pw-record) for far_source
 
     def playback(self, wav_path: str) -> None:
         """Play a WAV out to this endpoint (speaker / call uplink)."""
@@ -87,9 +88,12 @@ class LocalAudio:
         self._recorder = recorder
         self.rate = rate
         self.channels = channels
-        # A separate pulse source for the far party (call downlink / app monitor).
+        # A separate source for the far party (call downlink / app monitor).
         # None for plain local audio — the far party is just on your speakers.
         self.far_source: str | None = None
+        # How to capture far_source: "pulse" (parecord --device) or "pw"
+        # (pw-record --target, for native PipeWire nodes like SCO).
+        self.far_backend: str = "pulse"
 
     # --- playback (mouth) ---
     def _player_cmd(self, wav: str) -> list[str]:
@@ -188,60 +192,59 @@ class VirtualDeviceAudio(LocalAudio):
         ]
 
 
-def _pactl_short(kind: str) -> list[str]:
-    """Node names from ``pactl list short <kind>`` (``sinks``/``sources``); [] on failure."""
+def _pw_link_nodes(direction: str) -> list[str]:
+    """Distinct node names from ``pw-link`` ports. ``direction='out'`` lists output
+    ports (sources), ``'in'`` lists input ports (sinks); [] on failure."""
+    flag = "-o" if direction == "out" else "-i"
     try:
         out = subprocess.run(
-            ["pactl", "list", "short", kind],
-            capture_output=True, text=True, timeout=5,
+            ["pw-link", flag], capture_output=True, text=True, timeout=5,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return []
-    names = []
+    names: list[str] = []
     for line in out.stdout.splitlines():
-        cols = line.split("\t")
-        if len(cols) >= 2 and cols[1]:
-            names.append(cols[1])
+        node = line.strip().split(":", 1)[0].strip()  # "node:port" -> node
+        if node and node not in names:
+            names.append(node)
     return names
 
 
-# HFP/SCO (a phone call) shows up as the headset/hands-free profile, not A2DP.
-_SCO_PROFILE_HINTS = ("head-unit", "headset", "handsfree", "hands-free", "hfp", "sco")
-
-
-def _pick_sco(names: list[str], prefix: str) -> str | None:
-    """Pick the live HFP/SCO call node from ``names``: a ``prefix``
-    (``bluez_output``/``bluez_input``) node, preferring the headset/hands-free
-    (call) profile over A2DP, never a ``.monitor``."""
-    cands = [n for n in names if n.startswith(prefix) and not n.endswith(".monitor")]
-    for n in cands:
-        if any(h in n.lower() for h in _SCO_PROFILE_HINTS):
+def _pick_bluez(names: list[str], prefix: str) -> str | None:
+    """First node whose name starts with ``prefix`` (``bluez_output``/``bluez_input``)."""
+    for n in names:
+        if n.startswith(prefix):
             return n
-    return cands[0] if cands else None
+    return None
 
 
 def discover_sco_nodes() -> tuple[str | None, str | None]:
-    """Find the live bluez HFP/SCO ``(sink, source)`` for an active call via pactl.
+    """Find the live HFP/SCO ``(sink, source)`` for an active call via ``pw-link``.
 
-    Each is ``None`` if absent. The nodes exist only while a call is up (BlueZ
-    creates them on the SCO link) and embed the device MAC — so they're discovered
-    fresh each call, never persisted (the MAC is PII). A future ``TincanCallControl``
-    re-runs this on the ``CallConnected`` signal to bind the endpoint.
+    The SCO nodes are **native PipeWire nodes** — the uplink sink
+    ``bluez_output.<mac>.N`` and the downlink source ``bluez_input.<mac>.N``. They
+    do NOT appear in PulseAudio, so ``pactl``/``paplay``/``parecord`` can't see
+    them; only ``pw-link``/``pw-cat`` do. They exist only while a call is up and
+    embed the device MAC (PII), so they're discovered fresh each call, never
+    persisted. A future ``TincanCallControl`` re-runs this on ``CallConnected``.
     """
-    sink = _pick_sco(_pactl_short("sinks"), "bluez_output")
-    source = _pick_sco(_pactl_short("sources"), "bluez_input")
+    sink = _pick_bluez(_pw_link_nodes("in"), "bluez_output")    # uplink — Iris's mouth
+    source = _pick_bluez(_pw_link_nodes("out"), "bluez_input")  # downlink — Iris's ear
     return sink, source
 
 
 class TincanSCOAudio(VirtualDeviceAudio):
     """Ride a real phone call over tincan's HFP/SCO audio.
 
-    Iris's voice plays into the SCO **sink** (``bluez_output.<mac>.*`` — the call
+    Iris's voice plays into the SCO **sink** (``bluez_output.<mac>.N`` — the call
     uplink the far party hears); her far-ear is the SCO **source**
-    (``bluez_input.<mac>.*`` — the downlink from the far party). Push-to-talk stays
+    (``bluez_input.<mac>.N`` — the downlink from the far party). Push-to-talk stays
     on the default mic, so the operator addresses Iris with their own voice (the
-    supervised co-pilot model). Same Conductor/console as the other endpoints —
-    only the nodes differ.
+    supervised co-pilot model).
+
+    Unlike Discord's null-sinks, the SCO nodes are **native PipeWire nodes invisible
+    to PulseAudio**, so this endpoint uses ``pw-cat``/``pw-record --target`` rather
+    than ``paplay``/``parecord`` (hence ``far_backend = "pw"``).
 
     This is **media only** — it knows nothing about ringing, answering, or call
     state. Signaling lives in tincan's ``im.tincan.Calls`` D-Bus interface
@@ -265,6 +268,12 @@ class TincanSCOAudio(VirtualDeviceAudio):
         # capture_target=None -> push-to-talk uses the default mic (the operator).
         super().__init__(sink, capture_target=None, rate=rate, channels=channels)
         self.far_source = source  # the SCO downlink — the far party, for _far_stream
+        self.far_backend = "pw"   # SCO source is a native PipeWire node -> pw-record
+
+    def _player_cmd(self, wav: str) -> list[str]:
+        # SCO nodes are native PipeWire nodes (invisible to PulseAudio/paplay):
+        # play Iris's voice into the uplink with pw-cat --target.
+        return ["pw-cat", "-p", "--target", self.playback_target, wav]
 
 
 def default_endpoint() -> AudioEndpoint:

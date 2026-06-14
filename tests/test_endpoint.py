@@ -9,8 +9,8 @@ from iris.audio.endpoint import (
     LocalAudio,
     TincanSCOAudio,
     VirtualDeviceAudio,
-    _pactl_short,
-    _pick_sco,
+    _pick_bluez,
+    _pw_link_nodes,
     default_endpoint,
 )
 
@@ -96,78 +96,64 @@ def test_default_endpoint_is_virtual_with_env(monkeypatch):
 
 # --- TincanSCOAudio (real phone call over HFP/SCO) ----------------------------
 
-def test_tincan_sco_playback_targets_the_sco_sink():
-    sco = TincanSCOAudio(
-        "bluez_output.AA.headset-head-unit", "bluez_input.AA.headset-head-unit"
-    )
+def test_tincan_sco_playback_uses_pw_cat_target():
+    # SCO nodes are native PipeWire nodes (invisible to pulse) -> pw-cat --target.
+    sco = TincanSCOAudio("bluez_output.AA_BB.1", "bluez_input.AA_BB.0")
     assert sco.name == "tincan-sco"
-    # Iris's voice plays into the SCO uplink sink (the far party hears it).
     assert sco._player_cmd("/tmp/a.wav") == [
-        "paplay", "--device=bluez_output.AA.headset-head-unit", "/tmp/a.wav"
+        "pw-cat", "-p", "--target", "bluez_output.AA_BB.1", "/tmp/a.wav"
     ]
 
 
-def test_tincan_sco_far_source_is_the_downlink():
-    sco = TincanSCOAudio("sink", "bluez_input.AA.headset-head-unit")
-    assert sco.far_source == "bluez_input.AA.headset-head-unit"
+def test_tincan_sco_far_source_and_backend():
+    sco = TincanSCOAudio("bluez_output.AA_BB.1", "bluez_input.AA_BB.0")
+    assert sco.far_source == "bluez_input.AA_BB.0"
+    assert sco.far_backend == "pw"  # far ear captured via pw-record, not pulse
 
 
 def test_tincan_sco_ptt_capture_uses_default_mic():
     # Push-to-talk is the operator addressing Iris -> default mic, NOT the SCO source.
-    sco = TincanSCOAudio("sink", "src")
+    sco = TincanSCOAudio("bluez_output.AA_BB.1", "bluez_input.AA_BB.0")
     with patch("iris.audio.endpoint.shutil.which", side_effect=lambda b: b == "pw-record"):
         rec = sco._recorder_cmd("/tmp/a.wav")
     assert rec[0] == "pw-record"
-    assert not any(a.startswith("--device=") for a in rec)
+    assert not any(a.startswith("--device=") or a == "--target" for a in rec)
 
 
-def test_pick_sco_prefers_headset_profile_over_a2dp():
-    names = [
-        "bluez_output.AA_BB.a2dp-sink",
-        "bluez_output.AA_BB.headset-head-unit",
-        "alsa_output.pci",
-    ]
-    assert _pick_sco(names, "bluez_output") == "bluez_output.AA_BB.headset-head-unit"
+def test_pick_bluez_first_matching_prefix():
+    names = ["alsa_output.pci", "bluez_output.AA_BB.1", "bluez_output.CC.2"]
+    assert _pick_bluez(names, "bluez_output") == "bluez_output.AA_BB.1"
 
 
-def test_pick_sco_ignores_monitor_and_falls_through_to_source():
-    names = [
-        "bluez_output.AA_BB.headset-head-unit.monitor",
-        "bluez_input.AA_BB.headset-head-unit",
-    ]
-    assert _pick_sco(names, "bluez_input") == "bluez_input.AA_BB.headset-head-unit"
-    # the only bluez_output here is a .monitor -> never picked
-    assert _pick_sco(names, "bluez_output") is None
+def test_pick_bluez_none_without_match():
+    assert _pick_bluez(["alsa_output.pci", "alsa_input.usb"], "bluez_input") is None
 
 
-def test_pick_sco_returns_none_without_bluez():
-    assert _pick_sco(["alsa_output.pci", "alsa_input.usb"], "bluez_output") is None
-
-
-def test_pactl_short_parses_node_names():
+def test_pw_link_nodes_parses_distinct_node_names():
     fake = MagicMock()
     fake.stdout = (
-        "53\tbluez_output.AA.headset-head-unit\tmodule\ts16le\tRUNNING\n"
-        "54\talsa_output.pci\tmodule\ts16le\tIDLE\n"
+        "bluez_input.AA_BB.0:output_FL\n"
+        "bluez_input.AA_BB.0:output_FR\n"
+        "alsa_output.pci:playback_FL\n"
     )
     with patch("iris.audio.endpoint.subprocess.run", return_value=fake):
-        names = _pactl_short("sinks")
-    assert names == ["bluez_output.AA.headset-head-unit", "alsa_output.pci"]
+        names = _pw_link_nodes("out")
+    assert names == ["bluez_input.AA_BB.0", "alsa_output.pci"]  # de-duped per node
 
 
-def test_pactl_short_empty_when_pactl_missing():
+def test_pw_link_nodes_empty_when_pw_link_missing():
     with patch("iris.audio.endpoint.subprocess.run", side_effect=FileNotFoundError):
-        assert _pactl_short("sinks") == []
+        assert _pw_link_nodes("in") == []
 
 
 def test_default_endpoint_sco_with_env_override(monkeypatch):
     monkeypatch.setenv("IRIS_AUDIO", "tincan-sco")
-    monkeypatch.setenv("IRIS_SCO_SINK", "bluez_output.AA.headset-head-unit")
-    monkeypatch.setenv("IRIS_SCO_SOURCE", "bluez_input.AA.headset-head-unit")
+    monkeypatch.setenv("IRIS_SCO_SINK", "bluez_output.AA_BB.1")
+    monkeypatch.setenv("IRIS_SCO_SOURCE", "bluez_input.AA_BB.0")
     ep = default_endpoint()
     assert isinstance(ep, TincanSCOAudio)
-    assert ep.playback_target == "bluez_output.AA.headset-head-unit"
-    assert ep.far_source == "bluez_input.AA.headset-head-unit"
+    assert ep.playback_target == "bluez_output.AA_BB.1"
+    assert ep.far_source == "bluez_input.AA_BB.0"
 
 
 def test_default_endpoint_sco_discovers_nodes(monkeypatch):
@@ -176,15 +162,12 @@ def test_default_endpoint_sco_discovers_nodes(monkeypatch):
     monkeypatch.delenv("IRIS_SCO_SOURCE", raising=False)
     with patch(
         "iris.audio.endpoint.discover_sco_nodes",
-        return_value=(
-            "bluez_output.AA.headset-head-unit",
-            "bluez_input.AA.headset-head-unit",
-        ),
+        return_value=("bluez_output.AA_BB.1", "bluez_input.AA_BB.0"),
     ):
         ep = default_endpoint()
     assert isinstance(ep, TincanSCOAudio)
-    assert ep.playback_target == "bluez_output.AA.headset-head-unit"
-    assert ep.far_source == "bluez_input.AA.headset-head-unit"
+    assert ep.playback_target == "bluez_output.AA_BB.1"
+    assert ep.far_source == "bluez_input.AA_BB.0"
 
 
 def test_default_endpoint_sco_raises_when_no_call(monkeypatch):

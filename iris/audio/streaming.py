@@ -27,7 +27,8 @@ class StreamingTranscriber:
         self,
         on_text: Callable[[str], None],
         *,
-        source: str | None = None,    # pulse source to capture (None = default mic)
+        source: str | None = None,    # source to capture (None = default mic)
+        backend: str = "pulse",       # "pulse" (parecord) or "pw" (pw-record, for SCO nodes)
         python: str | None = None,
         model: str | None = None,
         isolate: bool = True,
@@ -35,6 +36,7 @@ class StreamingTranscriber:
     ) -> None:
         self.on_text = on_text
         self.source = source
+        self.backend = backend
         self.python = python or os.environ.get(
             "IRIS_WHISPER_PYTHON", str(_REPO_ROOT / ".venv-whisper" / "bin" / "python")
         )
@@ -52,6 +54,15 @@ class StreamingTranscriber:
         return all(Path(p).exists() for p in (self.python, self.model, _STREAM_SCRIPT))
 
     def _recorder_cmd(self) -> list[str]:
+        if self.backend == "pw":
+            # Native PipeWire nodes (SCO) aren't pulse devices: pw-record --target,
+            # --raw for headerless s16le PCM piped to the worker.
+            cmd = ["pw-record", "--raw", "--rate", "16000",
+                   "--channels", "1", "--format", "s16"]
+            if self.source:
+                cmd += ["--target", self.source]
+            cmd.append("-")
+            return cmd
         cmd = ["parecord", "--raw", "--rate=16000", "--channels=1", "--format=s16le"]
         if self.source:
             cmd.append(f"--device={self.source}")

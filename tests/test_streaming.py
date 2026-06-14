@@ -14,6 +14,16 @@ def test_recorder_cmd_default_and_named_source():
     assert "--device=far_end" in st2._recorder_cmd()
 
 
+def test_recorder_cmd_pw_backend_targets_native_node():
+    # SCO/native PipeWire nodes: pw-record --target, raw PCM to stdout.
+    st = StreamingTranscriber(lambda t: None, source="bluez_input.AA_BB.0", backend="pw")
+    cmd = st._recorder_cmd()
+    assert cmd[0] == "pw-record"
+    assert "--raw" in cmd
+    assert "--target" in cmd and "bluez_input.AA_BB.0" in cmd
+    assert cmd[-1] == "-"  # raw PCM to stdout for the worker
+
+
 def test_worker_cmd_isolated_with_paths():
     st = StreamingTranscriber(lambda t: None, python="/x/py", model="/x/m")
     cmd = st._worker_cmd()

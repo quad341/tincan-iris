@@ -215,7 +215,9 @@ class IrisConsole(App):
             self._refresh_status()
             return
         src = self.mic.far_source or "iris_ear.monitor"
-        stream = StreamingTranscriber(self._on_heard_far, source=src)
+        stream = StreamingTranscriber(
+            self._on_heard_far, source=src, backend=self.mic.far_backend
+        )
         if not stream.available():
             log.write("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
             return
