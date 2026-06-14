@@ -51,6 +51,8 @@ def main() -> int:
     ap.add_argument("--aggressiveness", type=int, default=2, help="webrtcvad 0-3")
     ap.add_argument("--min-silence-ms", type=int, default=800,
                     help="silence that ends an utterance (your pause tolerance)")
+    ap.add_argument("--no-speech", type=float, default=0.6,
+                    help="drop utterances whose mean no_speech_prob exceeds this")
     args = ap.parse_args()
 
     import numpy as np
@@ -64,11 +66,19 @@ def main() -> int:
     def transcribe(pcm: bytes) -> None:
         audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
         segments, _info = model.transcribe(
-            audio, language=args.language, beam_size=args.beam_size
+            audio, language=args.language, beam_size=args.beam_size,
+            no_speech_threshold=0.6, condition_on_previous_text=False,
         )
-        text = "".join(s.text for s in segments).strip()
-        if text:
-            print(json.dumps({"text": text}), flush=True)
+        segs = list(segments)
+        if not segs:
+            return
+        text = "".join(s.text for s in segs).strip()
+        # Drop whisper's silence/noise hallucinations (it loves "Thank you." on
+        # near-silence) — if the segments are mostly non-speech, ignore the turn.
+        avg_no_speech = sum(s.no_speech_prob for s in segs) / len(segs)
+        if not text or avg_no_speech > args.no_speech:
+            return
+        print(json.dumps({"text": text}), flush=True)
 
     stdin = sys.stdin.buffer
     preroll: list = []

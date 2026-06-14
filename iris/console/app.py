@@ -16,6 +16,7 @@ Keys:  [space] talk/stop · [l] listen · [i] interrupt · [m] mute · [c] comma
 from __future__ import annotations
 
 import queue
+import re
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -29,6 +30,12 @@ from ..audio.tts import default_tts
 from ..brain import Brain
 from ..fillers import filler_picker
 from .conductor import Conductor, State
+
+# Addressed stop words -> a hard interrupt (cut her off now, no spoken reply).
+_STOP = re.compile(
+    r"^\s*(?:stop|stand[ -]?down|cancel|never ?mind|quiet|enough|shush|hush)\b",
+    re.IGNORECASE,
+)
 
 
 class IrisConsole(App):
@@ -119,6 +126,10 @@ class IrisConsole(App):
         log.write(f"[bold]you[/] → iris: {text}")
         if not cmd:
             log.write('[dim](yes? — say "Iris, <command>")[/]')
+        elif _STOP.match(cmd):
+            self.conductor.interrupt()  # cut her off now; no spoken reply
+            log.write("[yellow](stopped)[/]")
+            self._refresh_status()
         elif self.conductor.state is State.IDLE:
             self.run_worker(
                 lambda c=cmd: self.conductor.respond_to(c), thread=True, exclusive=True
