@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 venv/
 .venv-kokoro/
+.venv-whisper/
 .env
 *.env
 *.log
