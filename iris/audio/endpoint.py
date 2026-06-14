@@ -50,6 +50,24 @@ class _Recording:
         return self.wav_path
 
 
+class _Playback:
+    """A running playback. ``.stop()`` cuts it off (barge-in); ``.wait()`` blocks."""
+
+    def __init__(self, proc: subprocess.Popen) -> None:
+        self._proc = proc
+
+    def wait(self) -> None:
+        self._proc.wait()
+
+    def stop(self) -> None:
+        self._proc.send_signal(signal.SIGINT)
+        try:
+            self._proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self._proc.kill()
+            self._proc.wait()
+
+
 class LocalAudio:
     """Local mic/speaker via PipeWire (``pw-cat``/``pw-record``), ALSA/Pulse fallback."""
 
@@ -80,8 +98,17 @@ class LocalAudio:
             return ["paplay", wav]
         raise RuntimeError("no audio player found (pw-cat / aplay / paplay)")
 
+    def start_playback(self, wav_path: str) -> _Playback:
+        """Begin playing now; the handle's ``.stop()`` cuts it off (barge-in)."""
+        proc = subprocess.Popen(
+            self._player_cmd(wav_path),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return _Playback(proc)
+
     def playback(self, wav_path: str) -> None:
-        subprocess.run(self._player_cmd(wav_path), check=False)
+        self.start_playback(wav_path).wait()
 
     # --- capture (ears) ---
     def _recorder_cmd(self, wav: str) -> list[str]:
