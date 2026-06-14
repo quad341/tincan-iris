@@ -93,6 +93,10 @@ class Tier0Rules:
     def examples(self) -> list[str]:
         return [ex for _n, _p, _h, ex in self._commands]
 
+    def commands(self) -> list[tuple[str, str]]:
+        """(name, example) for every known command — drives the console's dump."""
+        return [(name, ex) for name, _p, _h, ex in self._commands]
+
 
 class Tier1Qwen:
     """Local Qwen via llama-server. Warm and fast — the workhorse / orchestrator."""
