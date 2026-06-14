@@ -76,7 +76,14 @@ class Conductor:
         if not text:
             self._set_state(State.IDLE)
             return
+        self.respond_to(text)
 
+    def respond_to(self, text: str) -> None:
+        """Brain + speak for one utterance (the post-STT half). Blocking — call from
+        a worker thread. Shared by push-to-talk and streaming/listen mode."""
+        if not text or self.state in (State.THINKING, State.SPEAKING):
+            return
+        self._cancel.clear()
         self._set_state(State.THINKING)
         try:
             reply = self.brain.respond(
@@ -91,7 +98,6 @@ class Conductor:
             return
         tag = reply.lane + (f"/{reply.skill}" if reply.skill else "")
         self.emit(("reply", reply.text, tag, reply.timeline.summary()))
-
         if not self.muted:
             self._set_state(State.SPEAKING)
             try:

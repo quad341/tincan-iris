@@ -1,17 +1,17 @@
 """Textual operator console for Iris — the local 'admin app'.
 
-Live transcription, per-turn tier + latency, a hard interrupt (barge-in), and a
-mute toggle, over the standalone local voice loop (Iris in isolation). It drives
-the UI-agnostic ``Conductor`` and renders the events it posts to a thread-safe
-queue; the blocking pipeline runs in a Textual thread-worker so the UI stays
-responsive (and the interrupt key always lands).
+Live transcription, per-turn tier + latency, a hard interrupt (barge-in), mute,
+and a command dump — over the local voice loop. Two ways to talk:
+  - push-to-talk: [space] to start/stop a turn;
+  - listen mode [l]: continuous — just talk, and Iris acts only when addressed
+    ("Iris, …"); everything else is shown as overheard context.
+
+Drives the UI-agnostic Conductor; the blocking pipeline runs in a Textual thread-
+worker so the UI stays responsive (and the interrupt key always lands).
 
     python -m iris.console      # needs scripts/setup_whisper.sh + a llama-server
 
-Keys:  [space] talk/stop · [i] interrupt (barge-in) · [m] mute · [q] quit
-
-The supervised-call controls (who-hears-what, addressing) layer on with the
-tincan-SCO endpoint — this is Iris in isolation.
+Keys:  [space] talk/stop · [l] listen · [i] interrupt · [m] mute · [c] commands · [q] quit
 """
 from __future__ import annotations
 
@@ -21,7 +21,9 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer, Header, RichLog, Static
 
+from ..addressing import address
 from ..audio.endpoint import default_endpoint
+from ..audio.streaming import StreamingTranscriber
 from ..audio.stt import default_stt
 from ..audio.tts import default_tts
 from ..brain import Brain
@@ -39,6 +41,7 @@ class IrisConsole(App):
 
     BINDINGS = [
         Binding("space", "talk", "talk/stop", priority=True),
+        Binding("l", "listen", "listen"),
         Binding("i", "interrupt", "interrupt", priority=True),
         Binding("m", "mute", "mute"),
         Binding("c", "commands", "commands"),
@@ -57,6 +60,7 @@ class IrisConsole(App):
             emit=self.events.put, pick=filler_picker(),
         )
         self._note = ""
+        self._stream: StreamingTranscriber | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -74,7 +78,7 @@ class IrisConsole(App):
         self._refresh_status()
 
     def _drain(self) -> None:
-        """Pump conductor events (posted from the worker thread) into the UI."""
+        """Pump conductor + stream events (posted from worker threads) into the UI."""
         log = self.query_one("#log", RichLog)
         try:
             while True:
@@ -89,6 +93,8 @@ class IrisConsole(App):
                 elif kind == "reply":
                     log.write(f"[bold cyan]iris[/] › {ev[1]}")
                     log.write(f"        [dim]⟮{ev[2]} · {ev[3]}⟯[/]")
+                elif kind == "heard":
+                    self._on_heard_main(ev[1])
                 elif kind == "error":
                     log.write(f"[red]✗ {ev[1]}[/]")
                 elif kind == "filler":
@@ -103,12 +109,30 @@ class IrisConsole(App):
         except queue.Empty:
             pass
 
+    def _on_heard_main(self, text: str) -> None:
+        """A streamed utterance (on the main thread): act only if addressed."""
+        log = self.query_one("#log", RichLog)
+        cmd = address(text)
+        if cmd is None:
+            log.write(f"[dim]· {text}[/]")  # overheard, not for Iris
+            return
+        log.write(f"[bold]you[/] → iris: {text}")
+        if not cmd:
+            log.write('[dim](yes? — say "Iris, <command>")[/]')
+        elif self.conductor.state is State.IDLE:
+            self.run_worker(
+                lambda c=cmd: self.conductor.respond_to(c), thread=True, exclusive=True
+            )
+        else:
+            log.write("[dim](busy — one sec)[/]")
+
     def _refresh_status(self) -> None:
         c = self.conductor
         state = c.state.value.upper()
         mute = "  ·  [b]MUTED[/]" if c.muted else ""
+        listen = "  ·  [b]LISTENING[/]" if self._stream is not None else ""
         note = f"  ·  {self._note}" if self._note else ""
-        self.query_one("#status", Static).update(f" {state}{mute}{note}")
+        self.query_one("#status", Static).update(f" {state}{mute}{listen}{note}")
 
     def action_talk(self) -> None:
         c = self.conductor
@@ -117,6 +141,26 @@ class IrisConsole(App):
             self._refresh_status()
         elif c.state is State.RECORDING:
             self.run_worker(c.stop_and_respond, thread=True, exclusive=True)
+
+    def action_listen(self) -> None:
+        log = self.query_one("#log", RichLog)
+        if self._stream is not None:
+            self._stream.stop()
+            self._stream = None
+            log.write("[yellow]listening off[/]")
+            self._refresh_status()
+            return
+        stream = StreamingTranscriber(self._on_heard)
+        if not stream.available():
+            log.write("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
+            return
+        self._stream = stream
+        stream.start()
+        log.write('[green]listening — just talk; say "Iris, …" to address her[/]')
+        self._refresh_status()
+
+    def _on_heard(self, text: str) -> None:
+        self.events.put(("heard", text))  # reader thread -> main thread via the queue
 
     def action_interrupt(self) -> None:
         self.conductor.interrupt()
@@ -135,6 +179,8 @@ class IrisConsole(App):
         log.write('[dim]Anything else → local model · "ask Haiku about …" → cloud[/]')
 
     def on_unmount(self) -> None:
+        if self._stream is not None:
+            self._stream.stop()
         self.conductor.interrupt()
         self.conductor.close()
 
