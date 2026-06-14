@@ -19,8 +19,8 @@ MODELS="$ROOT/models/whisper/$SIZE"
 echo "==> Creating 3.12 venv at $VENV"
 uv venv --python 3.12 "$VENV"
 
-echo "==> Installing faster-whisper"
-uv pip install --python "$VENV/bin/python" faster-whisper
+echo "==> Installing faster-whisper + webrtcvad (slim streaming VAD)"
+uv pip install --python "$VENV/bin/python" faster-whisper webrtcvad-wheels
 
 echo "==> Downloading whisper model '$SIZE' to $MODELS"
 mkdir -p "$MODELS"
