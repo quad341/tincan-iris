@@ -4,8 +4,9 @@ version = "0.0.1"
 description = "Iris — a local-first voice-agent brain that rides tincan."
 requires-python = ">=3.11"
 # v0 brain is zero-dependency (stdlib urllib -> local llama-server). The voice
-# mode shells out to espeak-ng (TTS) and pw-cat/aplay (playback); whisper.cpp +
-# Kokoro arrive with the mic loop and the natural-voice swap.
+# mode shells out to espeak-ng / Kokoro (TTS) and pw-cat/aplay (playback). Kokoro
+# runs in a separate 3.12 venv (scripts/setup_kokoro.sh); whisper.cpp (mic/STT)
+# is still to come.
 dependencies = []
 
 [project.scripts]
