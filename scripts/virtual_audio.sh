@@ -41,12 +41,18 @@ up() {
     pactl load-module module-remap-source \
         master=iris_mic.monitor source_name=iris_mic_src \
         source_properties=device.description=Iris_Microphone >> "$STATE"
+    echo "==> null-sink 'iris_ear' — set the app's OUTPUT here so Iris can hear the other party"
+    pactl load-module module-null-sink \
+        sink_name=iris_ear sink_properties=device.description=Iris_Ear >> "$STATE"
+    echo "==> loopback: iris_ear -> your speakers ($spk) so you still hear the call"
+    pactl load-module module-loopback \
+        source=iris_ear.monitor sink="$spk" latency_msec=20 >> "$STATE"
     cat <<EOF
 
 Ready. Next:
-  1. In Discord/Vesktop, set the mic/input to:  Iris_Microphone
+  1. In Discord/Vesktop:  microphone/input = Iris_Microphone,  output = Iris_Ear
   2. Run:  IRIS_PLAYBACK_TARGET=iris_out python -m iris.console
-  3. Say "Iris, introduce yourself" — you'll hear her, and so will the call.
+  3. Keys:  [l] hear you · [f] hear the respondent · [a] approve their commands
 Tear down:  $0 down
 EOF
 }
