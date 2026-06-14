@@ -111,6 +111,25 @@ def test_tincan_sco_far_source_and_backend():
     assert sco.far_backend == "pw"  # far ear captured via pw-record, not pulse
 
 
+def test_tincan_sco_monitor_plays_to_uplink_and_local_speakers():
+    # Operator must hear Iris too (supervised model): play to uplink AND default sink.
+    sco = TincanSCOAudio("bluez_output.AA_BB.1", "bluez_input.AA_BB.0")  # monitor=True default
+    assert sco._monitor_cmd("/tmp/a.wav") == ["pw-cat", "-p", "/tmp/a.wav"]  # default sink
+    fake = MagicMock()
+    with patch("iris.audio.endpoint.subprocess.Popen", return_value=fake) as popen:
+        pb = sco.start_playback("/tmp/a.wav")
+    assert popen.call_count == 2  # uplink (mom) + local monitor (operator)
+    pb.stop()
+    assert fake.send_signal.call_count == 2  # barge-in cuts both
+
+
+def test_tincan_sco_monitor_disabled_plays_only_uplink():
+    sco = TincanSCOAudio("bluez_output.AA_BB.1", "bluez_input.AA_BB.0", monitor=False)
+    with patch("iris.audio.endpoint.subprocess.Popen", return_value=MagicMock()) as popen:
+        sco.start_playback("/tmp/a.wav")
+    assert popen.call_count == 1  # uplink only
+
+
 def test_tincan_sco_ptt_capture_uses_default_mic():
     # Push-to-talk is the operator addressing Iris -> default mic, NOT the SCO source.
     sco = TincanSCOAudio("bluez_output.AA_BB.1", "bluez_input.AA_BB.0")

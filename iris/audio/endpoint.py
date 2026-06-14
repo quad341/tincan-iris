@@ -71,6 +71,30 @@ class _Playback:
             self._proc.wait()
 
 
+class _MultiPlayback:
+    """Playback fanned out to several targets (e.g. call uplink + local monitor).
+
+    ``wait()`` blocks on the first proc (the primary — the call), so timing tracks
+    what the far party hears; ``stop()`` cuts them all at once (barge-in)."""
+
+    def __init__(self, procs: list[subprocess.Popen]) -> None:
+        self._procs = procs
+
+    def wait(self) -> None:
+        if self._procs:
+            self._procs[0].wait()
+
+    def stop(self) -> None:
+        for p in self._procs:
+            p.send_signal(signal.SIGINT)
+        for p in self._procs:
+            try:
+                p.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait()
+
+
 class LocalAudio:
     """Local mic/speaker via PipeWire (``pw-cat``/``pw-record``), ALSA/Pulse fallback."""
 
@@ -262,6 +286,7 @@ class TincanSCOAudio(VirtualDeviceAudio):
         sink: str,
         source: str | None = None,
         *,
+        monitor: bool = True,
         rate: int = 16000,
         channels: int = 1,
     ) -> None:
@@ -269,11 +294,34 @@ class TincanSCOAudio(VirtualDeviceAudio):
         super().__init__(sink, capture_target=None, rate=rate, channels=channels)
         self.far_source = source  # the SCO downlink — the far party, for _far_stream
         self.far_backend = "pw"   # SCO source is a native PipeWire node -> pw-record
+        # Also play Iris to the local default sink so the OPERATOR hears her too —
+        # the supervised model means hearing both sides (mom on the downlink, Iris's
+        # replies on the monitor). Use headphones to keep the monitor out of the mic.
+        self.monitor = monitor
 
     def _player_cmd(self, wav: str) -> list[str]:
         # SCO nodes are native PipeWire nodes (invisible to PulseAudio/paplay):
         # play Iris's voice into the uplink with pw-cat --target.
         return ["pw-cat", "-p", "--target", self.playback_target, wav]
+
+    def _monitor_cmd(self, wav: str) -> list[str]:
+        # Local default sink (operator's speakers) — no --target.
+        return ["pw-cat", "-p", wav]
+
+    def start_playback(self, wav_path: str) -> _MultiPlayback:
+        """Play Iris to the call uplink (mom hears) and, if monitoring, the local
+        speakers (operator hears). ``.wait()`` tracks the uplink; ``.stop()`` cuts
+        both (barge-in)."""
+        procs = [subprocess.Popen(
+            self._player_cmd(wav_path),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )]
+        if self.monitor:
+            procs.append(subprocess.Popen(
+                self._monitor_cmd(wav_path),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            ))
+        return _MultiPlayback(procs)
 
 
 def default_endpoint() -> AudioEndpoint:
