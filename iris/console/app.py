@@ -41,6 +41,7 @@ class IrisConsole(App):
         Binding("space", "talk", "talk/stop", priority=True),
         Binding("i", "interrupt", "interrupt", priority=True),
         Binding("m", "mute", "mute"),
+        Binding("c", "commands", "commands"),
         Binding("q", "quit", "quit", priority=True),
     ]
 
@@ -124,6 +125,14 @@ class IrisConsole(App):
     def action_mute(self) -> None:
         self.conductor.toggle_mute()
         self._refresh_status()
+
+    def action_commands(self) -> None:
+        """Dump the well-defined Tier-0 commands — what Iris handles instantly."""
+        log = self.query_one("#log", RichLog)
+        log.write("[b]Known commands[/] [dim](Tier-0 — instant, no model)[/]")
+        for name, example in self.brain.tier0.commands():
+            log.write(f'  [cyan]{name:<10}[/] [dim]e.g.[/] "{example}"')
+        log.write('[dim]Anything else → local model · "ask Haiku about …" → cloud[/]')
 
     def on_unmount(self) -> None:
         self.conductor.interrupt()
