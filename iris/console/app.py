@@ -21,7 +21,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer, Header, RichLog, Static
 
-from ..audio.endpoint import LocalAudio
+from ..audio.endpoint import default_endpoint
 from ..audio.stt import default_stt
 from ..audio.tts import default_tts
 from ..brain import Brain
@@ -51,7 +51,7 @@ class IrisConsole(App):
         self.stt = default_stt()
         self.tts = default_tts()
         self.brain = Brain()
-        self.mic = LocalAudio()
+        self.mic = default_endpoint()
         self.conductor = Conductor(
             self.stt, self.brain, self.tts, self.mic,
             emit=self.events.put, pick=filler_picker(),

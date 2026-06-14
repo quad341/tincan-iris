@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-from iris.audio.endpoint import LocalAudio
+from iris.audio.endpoint import LocalAudio, VirtualDeviceAudio, default_endpoint
 
 
 def test_player_cmd_prefers_explicit_override() -> None:
@@ -47,3 +47,36 @@ def test_capture_starts_records_and_stops() -> None:
     sleep.assert_called_once_with(2.0)
     fake_proc.send_signal.assert_called_once()  # SIGINT finalizes the WAV
     assert wav.endswith(".wav")
+
+
+# --- VirtualDeviceAudio (Discord/Zoom routing) --------------------------------
+
+def test_virtual_device_targets_sink_and_source():
+    va = VirtualDeviceAudio("iris_mic", "mysource")
+    assert va._player_cmd("/tmp/a.wav") == [
+        "paplay", "--device=iris_mic", "/tmp/a.wav"
+    ]
+    rec = va._recorder_cmd("/tmp/a.wav")
+    assert rec[0] == "parecord"
+    assert "--device=mysource" in rec
+    assert rec[-1] == "/tmp/a.wav"
+
+
+def test_virtual_device_capture_defaults_to_default_mic():
+    va = VirtualDeviceAudio("iris_mic")  # no capture target -> default mic, no --device
+    rec = va._recorder_cmd("/tmp/a.wav")
+    assert not any(a.startswith("--device=") for a in rec)
+
+
+def test_default_endpoint_is_local_without_env(monkeypatch):
+    monkeypatch.delenv("IRIS_PLAYBACK_TARGET", raising=False)
+    assert type(default_endpoint()) is LocalAudio
+
+
+def test_default_endpoint_is_virtual_with_env(monkeypatch):
+    monkeypatch.setenv("IRIS_PLAYBACK_TARGET", "iris_mic")
+    monkeypatch.setenv("IRIS_CAPTURE_TARGET", "src")
+    ep = default_endpoint()
+    assert isinstance(ep, VirtualDeviceAudio)
+    assert ep.playback_target == "iris_mic"
+    assert ep.capture_target == "src"
