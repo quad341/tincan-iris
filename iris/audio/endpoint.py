@@ -172,14 +172,16 @@ class VirtualDeviceAudio(LocalAudio):
         return ["paplay", f"--device={self.playback_target}", wav]
 
     def _recorder_cmd(self, wav: str) -> list[str]:
-        cmd = [
+        # Default mic: reuse pw-record (LocalAudio) — it finalizes the WAV cleanly
+        # on SIGINT. parecord drops its tail buffer on SIGINT (truncates ~2s),
+        # which cut off paused speech. A named source still uses parecord --device.
+        if self.capture_target is None:
+            return super()._recorder_cmd(wav)
+        return [
             "parecord", f"--rate={self.rate}", f"--channels={self.channels}",
             "--format=s16le", "--file-format=wav",
+            f"--device={self.capture_target}", wav,
         ]
-        if self.capture_target:
-            cmd.append(f"--device={self.capture_target}")
-        cmd.append(wav)
-        return cmd
 
 
 def default_endpoint() -> AudioEndpoint:

@@ -63,8 +63,12 @@ def test_virtual_device_targets_sink_and_source():
 
 
 def test_virtual_device_capture_defaults_to_default_mic():
-    va = VirtualDeviceAudio("iris_mic")  # no capture target -> default mic, no --device
-    rec = va._recorder_cmd("/tmp/a.wav")
+    # No capture target -> default mic via pw-record (finalizes cleanly on SIGINT,
+    # unlike parecord which truncated paused speech).
+    va = VirtualDeviceAudio("iris_mic")
+    with patch("iris.audio.endpoint.shutil.which", side_effect=lambda b: b == "pw-record"):
+        rec = va._recorder_cmd("/tmp/a.wav")
+    assert rec[0] == "pw-record"
     assert not any(a.startswith("--device=") for a in rec)
 
 

@@ -15,9 +15,9 @@ class Config:
     # --- Latency masking. Fire a filler at first_filler_s, repeat every
     # repeat_filler_s; if a lane runs past lane_deadline_s, abandon it and fall
     # back (the box is shared with the city, so the local model can stall).
-    first_filler_s: float = 0.6
-    repeat_filler_s: float = 2.5
-    lane_deadline_s: float = 6.0
+    first_filler_s: float = 2.0
+    repeat_filler_s: float = 6.0
+    lane_deadline_s: float = 30.0
     lane_timeout_reply: str = (
         "Sorry — I'm running slow right now. Let me get back to you on that."
     )

@@ -113,3 +113,23 @@ def test_mute_while_speaking_cuts_playback():
     c.toggle_mute()
     play.stop.assert_called_once()
     assert c.muted is True
+
+
+def test_respond_to_runs_brain_and_speaks():
+    c, events, mic, play = _make()
+    c.respond_to("what time is it")  # streaming/listen path: no recording step
+    states = _states(events)
+    assert State.THINKING in states and State.SPEAKING in states
+    assert states[-1] is State.IDLE
+    assert any(e[0] == "reply" for e in events)
+    mic.start_playback.assert_called_once()
+    play.wait.assert_called_once()
+
+
+def test_respond_to_ignores_empty_and_busy():
+    c, events, mic, _ = _make()
+    c.respond_to("")  # empty -> nothing
+    c.state = State.SPEAKING
+    c.respond_to("hi")  # busy -> nothing
+    assert events == []
+    c.brain.respond.assert_not_called()
