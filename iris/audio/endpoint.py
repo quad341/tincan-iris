@@ -12,6 +12,7 @@ built on it.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import signal
 import subprocess
@@ -140,3 +141,52 @@ class LocalAudio:
         rec = self.start_capture()
         time.sleep(seconds)
         return rec.stop()
+
+
+class VirtualDeviceAudio(LocalAudio):
+    """Bind Iris to virtual PipeWire nodes so she can join an app call (Discord,
+    Zoom, …) — no Bluetooth. Her voice plays into a sink the app reads as its
+    microphone; she captures from a chosen source (the operator's mic for commands
+    now, the far-end later). Same Conductor/console as LocalAudio — only the nodes
+    differ. Requires PipeWire (pw-cat/pw-record --target); set the nodes up with
+    scripts/virtual_audio.sh.
+    """
+
+    name = "virtual-device"
+
+    def __init__(
+        self,
+        playback_target: str,
+        capture_target: str | None = None,
+        *,
+        rate: int = 16000,
+        channels: int = 1,
+    ) -> None:
+        super().__init__(rate=rate, channels=channels)
+        self.playback_target = playback_target   # sink the call app reads as its mic
+        self.capture_target = capture_target     # source Iris hears (None = default mic)
+
+    # PulseAudio tools resolve named sinks/sources reliably; pw-cat/pw-record
+    # --target proved flaky with a null-sink's pulse names (and quieter).
+    def _player_cmd(self, wav: str) -> list[str]:
+        return ["paplay", f"--device={self.playback_target}", wav]
+
+    def _recorder_cmd(self, wav: str) -> list[str]:
+        cmd = [
+            "parecord", f"--rate={self.rate}", f"--channels={self.channels}",
+            "--format=s16le", "--file-format=wav",
+        ]
+        if self.capture_target:
+            cmd.append(f"--device={self.capture_target}")
+        cmd.append(wav)
+        return cmd
+
+
+def default_endpoint() -> AudioEndpoint:
+    """LocalAudio by default; VirtualDeviceAudio when ``IRIS_PLAYBACK_TARGET`` is
+    set (e.g. the ``iris_mic`` null-sink that routes Iris into Discord/Zoom — see
+    scripts/virtual_audio.sh)."""
+    target = os.environ.get("IRIS_PLAYBACK_TARGET")
+    if target:
+        return VirtualDeviceAudio(target, os.environ.get("IRIS_CAPTURE_TARGET"))
+    return LocalAudio()

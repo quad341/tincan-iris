@@ -16,7 +16,7 @@ from __future__ import annotations
 import sys
 import time
 
-from .audio.endpoint import LocalAudio
+from .audio.endpoint import default_endpoint
 from .audio.stt import default_stt
 from .audio.tts import default_tts
 from .brain import Brain
@@ -31,7 +31,7 @@ def main() -> int:
 
     brain = Brain()
     tts = default_tts()
-    mic = LocalAudio()
+    mic = default_endpoint()
     pick = filler_picker()
 
     def speak(text: str) -> None:
