@@ -64,8 +64,33 @@ down() {
     echo "==> removed iris virtual-audio modules."
 }
 
+mute() {
+    # Drop just the mic->iris_mic loopback: your mic is released (light off),
+    # Iris's voice path stays. "Default talk, mute on command."
+    local ids
+    ids=$(pactl list short modules | awk '$2=="module-loopback" && /iris_mic/ {print $1}')
+    if [[ -z "$ids" ]]; then
+        echo "mic already muted (no iris loopback loaded)."
+        return 0
+    fi
+    for id in $ids; do pactl unload-module "$id"; done
+    echo "==> mic MUTED — your mic is released; the call no longer hears you (Iris still can speak)."
+}
+
+unmute() {
+    if pactl list short modules | awk '$2=="module-loopback"' | grep -q iris_mic; then
+        echo "mic already live."
+        return 0
+    fi
+    pactl load-module module-loopback \
+        source=@DEFAULT_SOURCE@ sink=iris_mic latency_msec=20 source_dont_move=true >/dev/null
+    echo "==> mic LIVE — your mic feeds the call again."
+}
+
 case "${1:-}" in
     up) up ;;
     down) down ;;
-    *) echo "usage: $0 {up|down}" >&2; exit 2 ;;
+    mute) mute ;;       # release your mic (drop the loopback); Iris's voice still works
+    unmute) unmute ;;   # re-arm your mic to the call
+    *) echo "usage: $0 {up|down|mute|unmute}" >&2; exit 2 ;;
 esac
