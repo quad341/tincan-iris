@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 # Virtual audio routing so Iris can join an app call (Discord/Zoom) — no Bluetooth.
 #
-# Creates a PipeWire null-sink "iris_mic"; the app uses its MONITOR as its mic.
-# Iris's voice and (with `up`) your real mic both play into iris_mic, so the app
-# transmits both. Iris still listens to your real mic for commands.
+# Graph (no Bluetooth, headphones recommended to avoid acoustic echo):
+#   your mic ──loopback──┐
+#                        ▼
+#   Iris ──► iris_out ──► iris_mic ──► .monitor ──► the app's microphone
+#                  └────► your speakers   (so YOU hear Iris too)
+#   the app's output ──► your speakers     (so you hear the far end, as usual)
 #
-#   scripts/virtual_audio.sh up     # create iris_mic + loop your mic into it
+# So: the call hears you + Iris; you hear the far end + Iris; Iris hears you.
+#
+#   scripts/virtual_audio.sh up     # set it all up
 #   scripts/virtual_audio.sh down   # tear it all down
 #
 # Then set the app's INPUT (mic) to "Monitor of Iris_Mic" and run:
-#   IRIS_PLAYBACK_TARGET=iris_mic python -m iris.console
+#   IRIS_PLAYBACK_TARGET=iris_out python -m iris.console
 set -euo pipefail
 
 STATE="${XDG_RUNTIME_DIR:-/tmp}/iris_virtual_audio.modules"
@@ -26,12 +31,18 @@ up() {
     echo "==> loopback: your mic (@DEFAULT_SOURCE@) -> iris_mic (so the call hears you too)"
     pactl load-module module-loopback \
         source=@DEFAULT_SOURCE@ sink=iris_mic latency_msec=20 source_dont_move=true >> "$STATE"
+    local spk
+    spk="$(pactl get-default-sink)"
+    echo "==> combine-sink 'iris_out' = iris_mic + your speakers ($spk) — so you hear Iris too"
+    pactl load-module module-combine-sink \
+        sink_name=iris_out slaves="iris_mic,$spk" \
+        sink_properties=device.description=Iris_Out >> "$STATE"
     cat <<EOF
 
 Ready. Next:
   1. In Discord/Zoom, set the mic/input to:  Monitor of Iris_Mic
-  2. Run:  IRIS_PLAYBACK_TARGET=iris_mic python -m iris.console
-  3. Say "Iris, introduce yourself" — the call will hear her.
+  2. Run:  IRIS_PLAYBACK_TARGET=iris_out python -m iris.console
+  3. Say "Iris, introduce yourself" — you'll hear her, and so will the call.
 Tear down:  $0 down
 EOF
 }
@@ -41,9 +52,10 @@ down() {
         echo "No saved modules — nothing to tear down." >&2
         exit 0
     fi
-    while read -r id; do
+    # Unload in reverse load order (combine-sink before its slave iris_mic).
+    tac "$STATE" | while read -r id; do
         [[ -n "$id" ]] && pactl unload-module "$id" 2>/dev/null || true
-    done < "$STATE"
+    done
     rm -f "$STATE"
     echo "==> removed iris virtual-audio modules."
 }
