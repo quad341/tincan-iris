@@ -37,10 +37,14 @@ up() {
     pactl load-module module-combine-sink \
         sink_name=iris_out slaves="iris_mic,$spk" \
         sink_properties=device.description=Iris_Out >> "$STATE"
+    echo "==> remap-source 'Iris_Microphone' (apps hide raw monitors; this shows as a real mic)"
+    pactl load-module module-remap-source \
+        master=iris_mic.monitor source_name=iris_mic_src \
+        source_properties=device.description=Iris_Microphone >> "$STATE"
     cat <<EOF
 
 Ready. Next:
-  1. In Discord/Zoom, set the mic/input to:  Monitor of Iris_Mic
+  1. In Discord/Vesktop, set the mic/input to:  Iris_Microphone
   2. Run:  IRIS_PLAYBACK_TARGET=iris_out python -m iris.console
   3. Say "Iris, introduce yourself" — you'll hear her, and so will the call.
 Tear down:  $0 down
