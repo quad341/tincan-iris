@@ -9,6 +9,7 @@ from .config import DEFAULT, Config
 from .lanes import LaneResult, Tier0Rules, Tier1Qwen, Tier2RawHaiku
 from .latency import Timeline
 from .masking import run_with_masking
+from .notes import NotesStore, notes_skills
 from .skills import SkillRegistry, default_registry
 from .trust import TrustMode
 
@@ -36,9 +37,15 @@ class Brain:
     # "ask Haiku about <X>" / "ask Haiku <X>" — optional leading wake word.
     _ASK_HAIKU = re.compile(r"(?:iris[,\s]+)?ask haiku(?:\s+about)?\s+(.+)", re.IGNORECASE)
 
-    def __init__(self, cfg: Config = DEFAULT, skills: SkillRegistry | None = None) -> None:
+    def __init__(self, cfg: Config = DEFAULT, skills: SkillRegistry | None = None,
+                 notes_store: NotesStore | None = None) -> None:
         self.cfg = cfg
-        self.skills = skills or default_registry()
+        if skills is None:
+            self.skills = default_registry()
+            for s in notes_skills(notes_store or NotesStore()):
+                self.skills.register(s)
+        else:
+            self.skills = skills
         self.tier0 = Tier0Rules(self.skills)
         self.tier1 = Tier1Qwen(cfg, skills=self.skills)
         self.tier2 = Tier2RawHaiku(cfg)
