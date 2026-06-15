@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import datetime
 import re
+import threading
 from pathlib import Path
+from typing import Callable
 
 from .list_store import CallList, CallListStore, ListItem
 from .skills import SkillParam
@@ -51,8 +53,16 @@ class ListSkill:
         ),
     ]
 
-    def __init__(self, store: CallListStore) -> None:
+    def __init__(
+        self,
+        store: CallListStore,
+        *,
+        web_skill: object | None = None,
+        emit: Callable | None = None,
+    ) -> None:
         self._store = store
+        self._web_skill = web_skill
+        self._emit = emit or (lambda *_: None)
 
     # ------------------------------------------------------------------
     # Main dispatch
@@ -66,6 +76,7 @@ class ListSkill:
         title: str = "Shopping list",
         confirm_replace: bool = False,
         lookup: bool = False,
+        lookup_url: str = "",
         method: str = "file",
         export_dir: str = "",
         **_kwargs: object,
@@ -73,7 +84,7 @@ class ListSkill:
         if action == "start":
             return self._start(session_id, title, confirm_replace)
         if action == "add":
-            return self._add(session_id, item, lookup)
+            return self._add(session_id, item, lookup, lookup_url)
         if action == "remove":
             return self._remove(session_id, item)
         if action == "check":
@@ -118,15 +129,37 @@ class ListSkill:
         self._store.create_list(session_id, title)
         return f"Started a new list — '{title}'. Say 'add X to the list' to begin."
 
-    def _add(self, session_id: str, item: str, lookup: bool) -> str:
+    def _add(self, session_id: str, item: str, lookup: bool,
+             lookup_url: str = "") -> str:
         lst = self._active_or_auto_start(session_id)
         status = "pending" if lookup else "none"
-        self._store.add_item(lst.id, item, lookup_status=status)
+        list_item = self._store.add_item(lst.id, item, lookup_status=status)
         if lookup:
-            return (
-                f"Added '{item}' to the list and I'm looking up details now."
-            )
+            if self._web_skill is not None:
+                threading.Thread(
+                    target=self._run_lookup,
+                    args=(list_item.id, item, lookup_url),
+                    daemon=True,
+                    name="iris-lookup",
+                ).start()
+            return f"Added '{item}' to the list and I'm looking up details now."
         return f"Got it — '{item}' added to the list."
+
+    def _run_lookup(self, item_id: int, item: str, url: str) -> None:
+        """Background: call web_skill, update lookup_status, store result."""
+        question = f"What is the price and availability of {item!r}?"
+        try:
+            reply = self._web_skill.run(url=url, question=question, speaker="operator")
+            if reply and not reply.startswith("What URL") and "couldn't" not in reply:
+                self._store.set_lookup_status(item_id, "done")
+                self._store.add_lookup(item_id, "web", reply)
+                self._emit(("list", "lookup_done", item_id, reply))
+            else:
+                self._store.set_lookup_status(item_id, "failed")
+                self._emit(("list", "lookup_failed", item_id, "no result"))
+        except Exception as e:  # noqa: BLE001
+            self._store.set_lookup_status(item_id, "failed")
+            self._emit(("list", "lookup_failed", item_id, str(e)))
 
     def _remove(self, session_id: str, item: str) -> str:
         lst = self._active_or_none(session_id)

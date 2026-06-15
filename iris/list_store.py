@@ -175,6 +175,14 @@ class CallListStore:
         return [ListItem(r["id"], r["list_id"], r["text"], bool(r["checked"]),
                          r["position"], r["created_at"], r["lookup_status"]) for r in rows]
 
+    def set_lookup_status(self, item_id: int, status: str) -> bool:
+        """Set the lookup_status for an item. Returns True if the item was found."""
+        with self._connect() as conn:
+            n = conn.execute(
+                "UPDATE list_items SET lookup_status=? WHERE id=?", (status, item_id)
+            ).rowcount
+        return n > 0
+
     def check_item(self, item_id: int, *, checked: bool = True) -> bool:
         with self._connect() as conn:
             n = conn.execute(
