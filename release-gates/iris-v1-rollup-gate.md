@@ -87,8 +87,21 @@ All tests run from the deployer worktree (`rollup/iris-v1-20260615` at HEAD `28d
 - AEC/AGC/device-selection, CallList data layer, async lookup/list panel, PostCallListView, gist playback/proactive config, DEMO-mode brain tests.
 - All are PM-authored; all test suites pass; PM explicitly sanctioned this rollup (ti-lmw.2 bead, source:actual-pm label).
 
+## Amendment — 2026-06-15 (post-initial-gate)
+
+Commit `579e63c` (cherry-pick of `59ed5b9`) added after initial gate evaluation:
+
+| Original | Rollup | Feature | Review |
+|----------|--------|---------|--------|
+| 59ed5b9 | 579e63c | fix(trust): tighten _GRANT regex — require 'full access' adjacency (ti-jen) | ti-oxh PASS |
+
+**Security context:** PR #29's recovery squash did not carry through the tightened `_GRANT` regex from PR #30 commit c7c7bf1. This one-line fix restores it, preventing false-positive trust escalation on common operator speech ('give him directions', 'allow her to speak').
+
+Tests after amendment: 334 passed, 1 skipped, 3 xpassed.
+
 ## Satisfies
 
 - ti-lmw (needs-deploy: ProactiveDelivery engine + ProactiveStore fixes)
 - ti-2gj (needs-deploy: ProactiveDelivery IrisConsole wiring)
+- ti-1s6 (needs-deploy: fix(trust) _GRANT regex tightening — ti-oxh PASS)
 - ti-110 (needs-deploy: proactive TTS log fix — **ADVISORY: fix commit 28737b7 is orphaned; this PR does NOT include the TTS log fix**)
