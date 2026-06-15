@@ -147,6 +147,7 @@ class ProactiveDelivery:
             )
             if silence_ok:
                 self._tts_fn(item.message)
+                self._emit(("proactive_tts", item.message))
                 self._emit(("proactive_badge", item.message, self._store.pending_count()))
                 self._store.mark_delivered(item.id)
                 self.last_delivered = now

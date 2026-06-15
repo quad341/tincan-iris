@@ -249,6 +249,10 @@ class IrisConsole(App):
                     self._proactive_queue_count = ev[2] if len(ev) > 2 else 0
                     self._refresh_status()
                     self._toggle_notification_binding()
+                elif kind == "proactive_tts":
+                    log.write(
+                        f"[b yellow]🔔[/] {ev[1] if len(ev) > 1 else ''}  [dim](proactive)[/]"
+                    )
                 elif kind == "filler":
                     self._note = f"… {ev[1]}"
                     self._refresh_status()
