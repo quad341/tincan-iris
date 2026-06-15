@@ -257,6 +257,11 @@ def discover_sco_nodes() -> tuple[str | None, str | None]:
     return sink, source
 
 
+# PulseAudio source created by module-echo-cancel for the virtual-audio (Discord/Zoom) path.
+# Set up via scripts/virtual_audio.sh aec-up; enabled via IRIS_VA_AEC=1.
+_VA_AEC_SRC = "iris_va_aec_src"
+
+
 class TincanSCOAudio(VirtualDeviceAudio):
     """Ride a real phone call over tincan's HFP/SCO audio.
 
@@ -349,7 +354,10 @@ def default_endpoint() -> AudioEndpoint:
         return TincanSCOAudio(sink, source)
     target = os.environ.get("IRIS_PLAYBACK_TARGET")
     if target:
-        return VirtualDeviceAudio(target, os.environ.get("IRIS_CAPTURE_TARGET"))
+        capture = os.environ.get("IRIS_CAPTURE_TARGET") or (
+            _VA_AEC_SRC if os.environ.get("IRIS_VA_AEC") else None
+        )
+        return VirtualDeviceAudio(target, capture)
     return LocalAudio()
 
 
