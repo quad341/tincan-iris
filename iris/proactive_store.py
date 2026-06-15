@@ -3,6 +3,10 @@
 Stores ProactiveItem rows in the shared transcript DB (same WAL file as
 TranscriptStore and CallListStore).  expires_at is set at enqueue time to
 ``created_at + 86400`` (24h TTL); it is not reset on delivery or dismissal.
+
+Priority convention: lower number = higher urgency (0=critical, 4=backlog).
+next_pending() returns items with priority <= min_priority so callers can
+say "show me everything at P2 or more important" with min_priority=2.
 """
 from __future__ import annotations
 
@@ -81,8 +85,29 @@ class ProactiveStore:
             dismissed=bool(row["dismissed"]),
         )
 
-    def enqueue(self, item: ProactiveItem) -> ProactiveItem:
-        """Insert item; id/created_at/expires_at are set by the store."""
+    def enqueue(
+        self,
+        proto: "ProactiveItem | None" = None,
+        *,
+        trigger_class: str | None = None,
+        priority: int = 2,
+        message: str | None = None,
+        source_skill: str = "",
+        source_id: str | None = None,
+    ) -> ProactiveItem:
+        """Insert a new item; returns the stored ProactiveItem with id and timestamps.
+
+        Accepts either a ProactiveItem proto (positional) or keyword arguments.
+        When a proto is supplied, its fields take precedence over any kwargs.
+        """
+        if proto is not None:
+            trigger_class = proto.trigger_class
+            priority = proto.priority
+            message = proto.message
+            source_skill = proto.source_skill
+            source_id = proto.source_id
+        if trigger_class is None or message is None:
+            raise ValueError("trigger_class and message are required")
         now = time.time()
         with self._connect() as conn:
             cur = conn.execute(
@@ -90,23 +115,16 @@ class ProactiveStore:
                 "(trigger_class, priority, message, source_skill, source_id, "
                 " created_at, expires_at, delivered_at, dismissed) "
                 "VALUES (?,?,?,?,?,?,?,NULL,0)",
-                (
-                    item.trigger_class,
-                    item.priority,
-                    item.message,
-                    item.source_skill,
-                    item.source_id,
-                    now,
-                    now + _TTL_SECONDS,
-                ),
+                (trigger_class, priority, message, source_skill, source_id,
+                 now, now + _TTL_SECONDS),
             )
             return ProactiveItem(
                 id=cur.lastrowid,
-                trigger_class=item.trigger_class,
-                priority=item.priority,
-                message=item.message,
-                source_skill=item.source_skill,
-                source_id=item.source_id,
+                trigger_class=trigger_class,
+                priority=priority,
+                message=message,
+                source_skill=source_skill,
+                source_id=source_id,
                 created_at=now,
                 expires_at=now + _TTL_SECONDS,
                 delivered_at=None,
@@ -115,13 +133,13 @@ class ProactiveStore:
 
     def next_pending(
         self,
-        trigger_classes: list[str],
-        min_priority: int = 0,
+        trigger_classes: tuple[str, ...] | list[str],
+        min_priority: int = 4,
     ) -> ProactiveItem | None:
         """Return the highest-priority, oldest pending item matching the filters.
 
-        Filters: trigger_class IN trigger_classes, priority <= min_priority
-        (lower number = higher priority), undelivered, undismissed, unexpired.
+        Items pass if priority <= min_priority (lower number = higher urgency).
+        Filters out delivered, dismissed, and expired items.
         """
         if not trigger_classes:
             return None
@@ -131,7 +149,7 @@ class ProactiveStore:
             row = conn.execute(
                 f"SELECT * FROM proactive_queue "
                 f"WHERE trigger_class IN ({placeholders}) "
-                f"  AND priority >= ? "
+                f"  AND priority <= ? "
                 f"  AND delivered_at IS NULL "
                 f"  AND dismissed = 0 "
                 f"  AND expires_at > ? "
@@ -162,32 +180,30 @@ class ProactiveStore:
 
         cycle_next(None)     → first pending item.
         cycle_next(after_id) → first pending item with id > after_id,
-                                wrapping to the first if none exists.
-        Returns None if the queue is empty.
+                                wrapping to the first if none exists after N.
+        Returns None if the queue has no pending items.
         """
         now = time.time()
-        _pending_where = (
-            "delivered_at IS NULL AND dismissed = 0 AND expires_at > ?"
-        )
+        _where = "delivered_at IS NULL AND dismissed = 0 AND expires_at > ?"
         with self._connect() as conn:
             if after_id is not None:
                 row = conn.execute(
                     f"SELECT * FROM proactive_queue "
-                    f"WHERE id > ? AND {_pending_where} "
+                    f"WHERE id > ? AND {_where} "
                     f"ORDER BY id ASC LIMIT 1",
                     (after_id, now),
                 ).fetchone()
                 if row is None:
                     row = conn.execute(
                         f"SELECT * FROM proactive_queue "
-                        f"WHERE {_pending_where} "
+                        f"WHERE {_where} "
                         f"ORDER BY id ASC LIMIT 1",
                         (now,),
                     ).fetchone()
             else:
                 row = conn.execute(
                     f"SELECT * FROM proactive_queue "
-                    f"WHERE {_pending_where} "
+                    f"WHERE {_where} "
                     f"ORDER BY id ASC LIMIT 1",
                     (now,),
                 ).fetchone()
