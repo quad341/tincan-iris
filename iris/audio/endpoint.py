@@ -344,6 +344,28 @@ class TincanSCOAudio(VirtualDeviceAudio):
         return _MultiPlayback(procs)
 
 
+def list_audio_devices() -> dict[str, list[str]]:
+    """Return ``{"sinks": [...], "sources": [...]}`` from ``pactl list short``.
+
+    Sinks are playback devices (speakers); sources are capture devices (mics).
+    Returns empty lists if ``pactl`` is not available.
+    """
+    result: dict[str, list[str]] = {"sinks": [], "sources": []}
+    for key, subcmd in (("sinks", "sinks"), ("sources", "sources")):
+        try:
+            out = subprocess.run(
+                ["pactl", "list", "short", subcmd],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in out.stdout.splitlines():
+                parts = line.split("\t")
+                if len(parts) >= 2:
+                    result[key].append(parts[1])
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass
+    return result
+
+
 def default_endpoint() -> AudioEndpoint:
     """LocalAudio by default.
 
@@ -353,6 +375,9 @@ def default_endpoint() -> AudioEndpoint:
     - else ``IRIS_PLAYBACK_TARGET`` selects VirtualDeviceAudio (e.g. the
       ``iris_mic`` null-sink routing Iris into Discord/Zoom — see
       scripts/virtual_audio.sh).
+    - ``IRIS_PLAYBACK_DEVICE`` / ``IRIS_CAPTURE_DEVICE`` select specific
+      PipeWire/PulseAudio devices for local audio (e.g. a USB headset).
+      Run ``python -m iris.audio.endpoint --list`` to see available devices.
     """
     if os.environ.get("IRIS_AUDIO", "").lower() in ("tincan-sco", "sco"):
         sink = os.environ.get("IRIS_SCO_SINK")
@@ -371,13 +396,36 @@ def default_endpoint() -> AudioEndpoint:
     target = os.environ.get("IRIS_PLAYBACK_TARGET")
     if target:
         return VirtualDeviceAudio(target, os.environ.get("IRIS_CAPTURE_TARGET"))
+    # Named local devices (USB headset, etc.)
+    play_dev = os.environ.get("IRIS_PLAYBACK_DEVICE")
+    cap_dev = os.environ.get("IRIS_CAPTURE_DEVICE")
+    if play_dev or cap_dev:
+        player = (["paplay", f"--device={play_dev}"] if play_dev else None)
+        recorder = (
+            ["parecord", f"--device={cap_dev}", "--file-format=wav",
+             "--format=s16le"]
+            if cap_dev else None
+        )
+        return LocalAudio(player=player, recorder=recorder)
     return LocalAudio()
 
 
-if __name__ == "__main__":  # python -m iris.audio.endpoint — probe live SCO nodes
-    _sink, _source = discover_sco_nodes()
-    _miss = "— none found (is a call active on the dongle?)"
-    print(f"SCO sink   (uplink → far party hears Iris): {_sink or _miss}")
-    print(f"SCO source (downlink → Iris hears far party): {_source or _miss}")
-    if _sink:
-        print("\nRun the console on this call:\n  IRIS_AUDIO=tincan-sco python -m iris.console")
+if __name__ == "__main__":  # python -m iris.audio.endpoint
+    import sys as _sys
+    if "--list" in _sys.argv:
+        _devs = list_audio_devices()
+        print("Playback devices (sinks — IRIS_PLAYBACK_DEVICE):")
+        for _d in _devs["sinks"]:
+            print(f"  {_d}")
+        print("Capture devices (sources — IRIS_CAPTURE_DEVICE):")
+        for _d in _devs["sources"]:
+            print(f"  {_d}")
+        print("\nExample:  IRIS_PLAYBACK_DEVICE=alsa_output.usb-... IRIS_CAPTURE_DEVICE=alsa_input.usb-... python -m iris.console")
+    else:
+        _sink, _source = discover_sco_nodes()
+        _miss = "— none found (is a call active on the dongle?)"
+        print(f"SCO sink   (uplink → far party hears Iris): {_sink or _miss}")
+        print(f"SCO source (downlink → Iris hears far party): {_source or _miss}")
+        if _sink:
+            print("\nRun the console on this call:\n  IRIS_AUDIO=tincan-sco python -m iris.console")
+        print("\nList local audio devices:\n  python -m iris.audio.endpoint --list")
