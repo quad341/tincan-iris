@@ -41,8 +41,10 @@ _STOP = re.compile(
 )
 
 # Grant far party full access — operator mic only; cannot be spoofed from downlink.
+# Requires "full access" as an adjacent phrase to avoid false positives on common
+# operator speech like "give him directions" or "allow her to speak".
 _GRANT = re.compile(
-    r"^\s*(?:grant|give|allow|trust)\b.*\b(?:full|access|them|her|him)\b",
+    r"^\s*(?:grant|give|allow|trust)\b.*\bfull\s+access\b",
     re.IGNORECASE,
 )
 
