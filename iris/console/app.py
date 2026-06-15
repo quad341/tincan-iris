@@ -13,12 +13,18 @@ worker so the UI stays responsive (and the interrupt key always lands).
 
     python -m iris.console      # needs scripts/setup_whisper.sh + a llama-server
 
+Every line shown is also appended (plain text) to a session logfile —
+~/.local/state/iris/console.log by default, or $IRIS_LOG_FILE — so a session can
+be read back or shared without copying out of the TUI.
+
 Keys: [space] talk · [l] hear you · [f] hear them · [a] approve them · [i] interrupt · [m] mute · [c] commands · [q] quit
 """
 from __future__ import annotations
 
+import os
 import queue
 import re
+from datetime import datetime
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -45,6 +51,26 @@ _GRANT = re.compile(
     r"^\s*(?:grant|give|allow|trust)\b.*\b(?:full|access|them|her|him)\b",
     re.IGNORECASE,
 )
+
+# Strip Rich markup ([red], [/], [bold cyan]…) so the session logfile is plain text.
+_MARKUP = re.compile(r"\[/?[^\]]*\]")
+
+
+def _open_log():
+    """Open the plain-text session logfile (fresh per run). $IRIS_LOG_FILE overrides
+    the default ~/.local/state/iris/console.log. Returns (file, path) or (None, None)."""
+    path = os.environ.get("IRIS_LOG_FILE")
+    if not path:
+        base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+        try:
+            os.makedirs(os.path.join(base, "iris"), exist_ok=True)
+        except OSError:
+            return None, None
+        path = os.path.join(base, "iris", "console.log")
+    try:
+        return open(path, "w", buffering=1), path
+    except OSError:
+        return None, None
 
 
 class IrisConsole(App):
@@ -81,6 +107,8 @@ class IrisConsole(App):
         self._stream: StreamingTranscriber | None = None      # you (operator mic)
         self._far_stream: StreamingTranscriber | None = None  # the respondent
         self._approved = False                                # act on their commands?
+        self._log: RichLog | None = None                      # cached in on_mount
+        self._logf, self._logpath = _open_log()               # plain-text session log
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -88,37 +116,45 @@ class IrisConsole(App):
         yield Static(id="status")
         yield Footer()
 
+    def _w(self, markup: str) -> None:
+        """Write a line to the on-screen log AND (plain) to the session logfile."""
+        if self._log is not None:
+            self._log.write(markup)
+        if self._logf is not None:
+            self._logf.write(f"{datetime.now():%H:%M:%S} {_MARKUP.sub('', markup)}\n")
+
     def on_mount(self) -> None:
-        log = self.query_one("#log", RichLog)
-        log.can_focus = False  # so [space] is the talk key, not log-scroll
-        log.write(f"[dim]STT: {self.stt.name} · TTS: {self.tts.name} · (I'm an AI.)[/]")
+        self._log = self.query_one("#log", RichLog)
+        self._log.can_focus = False  # so [space] is the talk key, not log-scroll
+        self._w(f"[dim]STT: {self.stt.name} · TTS: {self.tts.name} · (I'm an AI.)[/]")
+        if self._logpath:
+            self._w(f"[dim]session log → {self._logpath}[/]")
         if not self.stt.available():
-            log.write("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
+            self._w("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
         self.set_interval(0.05, self._drain)
         self._refresh_status()
 
     def _drain(self) -> None:
         """Pump conductor + stream events (posted from worker threads) into the UI."""
-        log = self.query_one("#log", RichLog)
         try:
             while True:
                 ev = self.events.get_nowait()
                 kind = ev[0]
                 if kind == "transcript":
                     text, ms = ev[1], ev[2]
-                    log.write(
+                    self._w(
                         f"[bold]you[/]  › {text or '(heard nothing)'}"
                         f"  [dim]⟮stt {ms:.0f}ms⟯[/]"
                     )
                 elif kind == "reply":
-                    log.write(f"[bold cyan]iris[/] › {ev[1]}")
-                    log.write(f"        [dim]⟮{ev[2]} · {ev[3]}⟯[/]")
+                    self._w(f"[bold cyan]iris[/] › {ev[1]}")
+                    self._w(f"        [dim]⟮{ev[2]} · {ev[3]}⟯[/]")
                 elif kind == "heard":
                     self._on_heard_main(ev[1], ev[2] if len(ev) > 2 else "")
                 elif kind == "heard_far":
                     self._on_heard_far_main(ev[1], ev[2] if len(ev) > 2 else "")
                 elif kind == "error":
-                    log.write(f"[red]✗ {ev[1]}[/]")
+                    self._w(f"[red]✗ {ev[1]}[/]")
                 elif kind == "filler":
                     self._note = f"… {ev[1]}"
                     self._refresh_status()
@@ -143,39 +179,37 @@ class IrisConsole(App):
 
     def _on_heard_main(self, text: str, speaker: str = "") -> None:
         """A streamed utterance from YOU (main thread): act only if addressed."""
-        log = self.query_one("#log", RichLog)
         cmd = address(text)
         if cmd is None:
-            log.write(f"[dim]· {text}[/]")  # overheard, not for Iris
+            self._w(f"[dim]· {text}[/]")  # overheard, not for Iris
             return
-        log.write(f"[bold]you[/] → iris: {text}")
+        self._w(f"[bold]you[/] → iris: {text}")
         if not cmd:
-            log.write('[dim](yes? — say "Iris, <command>")[/]')
+            self._w('[dim](yes? — say "Iris, <command>")[/]')
         elif _STOP.match(cmd):
             self.conductor.interrupt()  # cut her off now; no spoken reply
-            log.write("[yellow](stopped)[/]")
+            self._w("[yellow](stopped)[/]")
             self._refresh_status()
         elif _GRANT.match(cmd) and speaker == "operator":
             self.conductor.grant_far()
-            log.write("[green]far party granted FULL access for this call[/]")
+            self._w("[green]far party granted FULL access for this call[/]")
             self._refresh_status()
         elif not self._dispatch(cmd, speaker):
-            log.write("[dim](busy — one sec)[/]")
+            self._w("[dim](busy — one sec)[/]")
 
     def _on_heard_far_main(self, text: str, speaker: str = "") -> None:
         """A streamed utterance from the RESPONDENT: act only if approved."""
-        log = self.query_one("#log", RichLog)
         cmd = address(text)
         if cmd is None:
-            log.write(f"[dim]them: {text}[/]")  # respondent, not addressing Iris
+            self._w(f"[dim]them: {text}[/]")  # respondent, not addressing Iris
             return
-        log.write(f"[magenta]them[/] → iris: {text}")
+        self._w(f"[magenta]them[/] → iris: {text}")
         if not cmd:
             return
         if not self._approved:
-            log.write("[dim](respondent's command — not approved; press 'a' to allow)[/]")
+            self._w("[dim](respondent's command — not approved; press 'a' to allow)[/]")
         elif not self._dispatch(cmd, speaker):
-            log.write("[dim](busy — one sec)[/]")
+            self._w("[dim](busy — one sec)[/]")
 
     def _refresh_status(self) -> None:
         c = self.conductor
@@ -204,29 +238,27 @@ class IrisConsole(App):
             self.run_worker(c.stop_and_respond, thread=True, exclusive=True)
 
     def action_listen(self) -> None:
-        log = self.query_one("#log", RichLog)
         if self._stream is not None:
             self._stream.stop()
             self._stream = None
-            log.write("[yellow]no longer hearing you[/]")
+            self._w("[yellow]no longer hearing you[/]")
             self._refresh_status()
             return
         stream = StreamingTranscriber(self._on_heard, label="operator")
         if not stream.available():
-            log.write("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
+            self._w("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
             return
         self._stream = stream
         stream.start()
-        log.write('[green]hearing you — just talk; say "Iris, …" to address her[/]')
+        self._w('[green]hearing you — just talk; say "Iris, …" to address her[/]')
         self._refresh_status()
 
     def action_far(self) -> None:
-        log = self.query_one("#log", RichLog)
         if self._far_stream is not None:
             self._far_stream.stop()
             self._far_stream = None
             self.conductor.reset_far_trust()  # hangup/disconnect resets to DEMO
-            log.write("[yellow]no longer hearing the respondent[/]")
+            self._w("[yellow]no longer hearing the respondent[/]")
             self._refresh_status()
             return
         src = self.mic.far_source or "iris_ear.monitor"
@@ -234,22 +266,21 @@ class IrisConsole(App):
             self._on_heard_far, source=src, backend=self.mic.far_backend, label="far"
         )
         if not stream.available():
-            log.write("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
+            self._w("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
             return
         self._far_stream = stream
         stream.start()
-        log.write(f"[green]hearing the respondent — capturing {src}[/]")
+        self._w(f"[green]hearing the respondent — capturing {src}[/]")
         if src == "iris_ear.monitor":
-            log.write("[dim]set the app's OUTPUT to Iris_Ear[/]")
+            self._w("[dim]set the app's OUTPUT to Iris_Ear[/]")
         self._refresh_status()
 
     def action_approve(self) -> None:
         self._approved = not self._approved
-        log = self.query_one("#log", RichLog)
         if self._approved:
-            log.write("[green]respondent's commands APPROVED — Iris will act on their \"Iris, …\"[/]")
+            self._w("[green]respondent's commands APPROVED — Iris will act on their \"Iris, …\"[/]")
         else:
-            log.write("[yellow]respondent's commands blocked[/]")
+            self._w("[yellow]respondent's commands blocked[/]")
         self._refresh_status()
 
     def _on_heard(self, text: str, label: str) -> None:
@@ -268,12 +299,17 @@ class IrisConsole(App):
         self._refresh_status()
 
     def action_commands(self) -> None:
-        """Dump the well-defined Tier-0 commands — what Iris handles instantly."""
-        log = self.query_one("#log", RichLog)
-        log.write("[b]Known commands[/] [dim](Tier-0 — instant, no model)[/]")
+        """Dump what Iris handles: Tier-0 instant commands + the Tier-1 skills."""
+        self._w("[b]Known commands[/] [dim](Tier-0 — instant, no model)[/]")
         for name, example in self.brain.tier0.commands():
-            log.write(f'  [cyan]{name:<10}[/] [dim]e.g.[/] "{example}"')
-        log.write('[dim]Anything else → local model · "ask Haiku about …" → cloud[/]')
+            self._w(f'  [cyan]{name:<10}[/] [dim]e.g.[/] "{example}"')
+        skills = [self.brain.skills.get(n) for n in self.brain.skills.names()]
+        skills = [s for s in skills if s is not None]
+        if skills:
+            self._w('[b]Skills[/] [dim](Tier-1 — just ask naturally, e.g. "Iris, …")[/]')
+            for s in skills:
+                self._w(f"  [cyan]{s.name:<12}[/] [dim]{s.description}[/]")
+        self._w('[dim]Anything else → local model · "ask Haiku about …" → cloud[/]')
 
     def on_unmount(self) -> None:
         for stream in (self._stream, self._far_stream):
@@ -281,6 +317,8 @@ class IrisConsole(App):
                 stream.stop()
         self.conductor.interrupt()
         self.conductor.close()
+        if self._logf is not None:
+            self._logf.close()
 
 
 def main() -> int:
