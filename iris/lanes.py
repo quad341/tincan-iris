@@ -24,6 +24,7 @@ class LaneResult:
     text: str
     lane: str
     skill: str | None = None
+    speaker: str = ""  # "operator" | "far" | "" — who spoke; propagated from the call site
 
 
 _INTRO = (

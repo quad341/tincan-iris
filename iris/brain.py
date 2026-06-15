@@ -18,6 +18,7 @@ class Reply:
     lane: str
     timeline: Timeline
     skill: str | None = None
+    speaker: str = ""  # "operator" | "far" | "" — who spoke; set by brain.respond(speaker=)
 
 
 class Brain:
@@ -61,7 +62,13 @@ class Brain:
         )
         return result if result is not None else fallback
 
-    def respond(self, text: str, on_filler: Callable[[int], None] | None = None) -> Reply:
+    def respond(
+        self,
+        text: str,
+        *,
+        speaker: str = "",
+        on_filler: Callable[[int], None] | None = None,
+    ) -> Reply:
         tl = Timeline()
 
         # Explicit escalation — "ask Haiku about X" -> Tier 2 (raw text, slow).
@@ -70,25 +77,25 @@ class Brain:
             try:
                 r2 = self._masked(lambda: self.tier2.handle(m.group(1).strip()), "tier2-haiku", on_filler)
                 tl.mark("tier2-haiku")
-                return Reply(r2.text, r2.lane, tl)
+                return Reply(r2.text, r2.lane, tl, speaker=speaker)
             except Exception as exc:  # noqa: BLE001 — degrade gracefully, don't crash
                 tl.mark("tier2-haiku(failed)")
-                return Reply(f"(couldn't reach Haiku: {exc})", "tier2-haiku", tl)
+                return Reply(f"(couldn't reach Haiku: {exc})", "tier2-haiku", tl, speaker=speaker)
 
         # Tier 0 — deterministic local commands (sub-millisecond, never slow).
         r0 = self.tier0.handle(text)
         tl.mark("tier0")
         if r0 is not None:
-            return Reply(r0.text, r0.lane, tl, r0.skill)
+            return Reply(r0.text, r0.lane, tl, r0.skill, speaker=speaker)
 
         # Tier 1 — local Qwen (warm). Masked + deadline-bounded for the busy box.
         try:
             r1 = self._masked(lambda: self.tier1.handle(text), "tier1-qwen", on_filler)
             tl.mark("tier1-qwen")
-            return Reply(r1.text, r1.lane, tl, r1.skill)
+            return Reply(r1.text, r1.lane, tl, r1.skill, speaker=speaker)
         except Exception as exc:  # noqa: BLE001 — local model hiccup: degrade, don't crash
             tl.mark("tier1-qwen(failed)")
-            return Reply(f"(the local model didn't answer: {exc})", "tier1-qwen", tl)
+            return Reply(f"(the local model didn't answer: {exc})", "tier1-qwen", tl, speaker=speaker)
 
     def close(self) -> None:
         """Tear down any warm sessions (e.g. the Tier-2 Claude TUI)."""
