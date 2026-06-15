@@ -165,14 +165,15 @@ class Tier1Qwen:
             f'<|im_start|>user\n{text}<|im_end|>\n<|im_start|>assistant\n'
         )
 
-    def _chat_prompt(self, text: str) -> str:
+    def _chat_prompt(self, text: str, context_hint: str = "") -> str:
+        pref_line = f" Caller prefs — {context_hint}." if context_hint else ""
         return (
-            "<|im_start|>system\nYou are Iris, a warm, concise voice assistant. "
+            f"<|im_start|>system\nYou are Iris, a warm, concise voice assistant.{pref_line} "
             "Reply in one or two short sentences.<|im_end|>\n"
             f"<|im_start|>user\n{text}<|im_end|>\n<|im_start|>assistant\n"
         )
 
-    def handle(self, text: str, *, allow_skills: bool = True) -> LaneResult:
+    def handle(self, text: str, *, allow_skills: bool = True, context_hint: str = "") -> LaneResult:
         if allow_skills and self.skills and self.skills.names():
             if self.skills.grammar_dirty or self._grammar_cache is None:
                 self._grammar_cache = self._build_grammar()
@@ -192,7 +193,7 @@ class Tier1Qwen:
                     return LaneResult(result, self.name, skill=skill_name)
         # no skill selected, DEMO mode, or no registry — regular chat completion
         return LaneResult(
-            self._complete(self._chat_prompt(text), self.cfg.qwen_max_tokens), self.name
+            self._complete(self._chat_prompt(text, context_hint), self.cfg.qwen_max_tokens), self.name
         )
 
 

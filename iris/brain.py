@@ -10,6 +10,7 @@ from .lanes import LaneResult, Tier0Rules, Tier1Qwen, Tier2RawHaiku
 from .latency import Timeline
 from .masking import run_with_masking
 from .notes import NotesStore, notes_skills
+from .prefs import PreferencesStore
 from .skills import SkillRegistry, default_registry
 from .trust import TrustMode
 
@@ -38,8 +39,11 @@ class Brain:
     _ASK_HAIKU = re.compile(r"(?:iris[,\s]+)?ask haiku(?:\s+about)?\s+(.+)", re.IGNORECASE)
 
     def __init__(self, cfg: Config = DEFAULT, skills: SkillRegistry | None = None,
-                 notes_store: NotesStore | None = None) -> None:
+                 notes_store: NotesStore | None = None,
+                 prefs: PreferencesStore | None = None) -> None:
         self.cfg = cfg
+        self.prefs = prefs or PreferencesStore()
+        self.call_context: str = ""   # set to a contact ID before each call
         if skills is None:
             self.skills = default_registry()
             for s in notes_skills(notes_store or NotesStore()):
@@ -106,13 +110,25 @@ class Brain:
             return Reply(r0.text, r0.lane, tl, r0.skill, speaker=speaker)
 
         # Tier 1 — local Qwen (warm). Masked + deadline-bounded for the busy box.
+        hint = self.prefs.hint(self.call_context) if self.call_context else ""
         try:
-            r1 = self._masked(lambda: self.tier1.handle(text), "tier1-qwen", on_filler)
+            r1 = self._masked(
+                lambda: self.tier1.handle(text, allow_skills=not demo_mode, context_hint=hint),
+                "tier1-qwen", on_filler,
+            )
             tl.mark("tier1-qwen")
             return Reply(r1.text, r1.lane, tl, r1.skill, speaker=speaker)
         except Exception as exc:  # noqa: BLE001 — local model hiccup: degrade, don't crash
             tl.mark("tier1-qwen(failed)")
             return Reply(f"(the local model didn't answer: {exc})", "tier1-qwen", tl, speaker=speaker)
+
+    def set_pref(self, key: str, value: str, *, context: str | None = None) -> None:
+        """Write a caller preference.  Falls back to ``self.call_context`` when no
+        explicit context is given; no-op if neither is set."""
+        ctx = context or self.call_context
+        if not ctx:
+            return
+        self.prefs.set(ctx, key, value)
 
     def close(self) -> None:
         """Tear down any warm sessions (e.g. the Tier-2 Claude TUI)."""
