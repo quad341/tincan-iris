@@ -34,12 +34,13 @@ CREATE TABLE IF NOT EXISTS call_lists (
 CREATE INDEX IF NOT EXISTS call_lists_session ON call_lists(session_id);
 
 CREATE TABLE IF NOT EXISTS list_items (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    list_id    INTEGER NOT NULL REFERENCES call_lists(id) ON DELETE CASCADE,
-    text       TEXT    NOT NULL,
-    checked    INTEGER NOT NULL DEFAULT 0,
-    position   INTEGER NOT NULL DEFAULT 0,
-    created_at REAL    NOT NULL
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    list_id       INTEGER NOT NULL REFERENCES call_lists(id) ON DELETE CASCADE,
+    text          TEXT    NOT NULL,
+    checked       INTEGER NOT NULL DEFAULT 0,
+    position      INTEGER NOT NULL DEFAULT 0,
+    created_at    REAL    NOT NULL,
+    lookup_status TEXT    NOT NULL DEFAULT 'none' CHECK(lookup_status IN ('none','pending','done'))
 );
 CREATE INDEX IF NOT EXISTS list_items_list ON list_items(list_id, position);
 
@@ -74,6 +75,7 @@ class ListItem:
     checked: bool
     position: int
     created_at: float
+    lookup_status: str = "none"
 
 
 @dataclass
@@ -149,18 +151,21 @@ class CallListStore:
 
     # --- ListItem CRUD ---
 
-    def add_item(self, list_id: int, text: str) -> ListItem:
+    def add_item(self, list_id: int, text: str, *,
+                 lookup_status: str = "none") -> ListItem:
         now = time.time()
         with self._connect() as conn:
             pos = (conn.execute(
                 "SELECT COALESCE(MAX(position),0)+1 FROM list_items WHERE list_id=?", (list_id,)
             ).fetchone()[0])
             cur = conn.execute(
-                "INSERT INTO list_items (list_id, text, checked, position, created_at) VALUES (?,?,0,?,?)",
-                (list_id, text.strip(), pos, now),
+                "INSERT INTO list_items (list_id, text, checked, position, created_at, lookup_status)"
+                " VALUES (?,?,0,?,?,?)",
+                (list_id, text.strip(), pos, now, lookup_status),
             )
             conn.execute("UPDATE call_lists SET updated_at=? WHERE id=?", (now, list_id))
-            return ListItem(cur.lastrowid, list_id, text.strip(), False, pos, now)
+            return ListItem(cur.lastrowid, list_id, text.strip(), False, pos, now,
+                            lookup_status)
 
     def get_items(self, list_id: int) -> list[ListItem]:
         with self._connect() as conn:
@@ -168,7 +173,7 @@ class CallListStore:
                 "SELECT * FROM list_items WHERE list_id=? ORDER BY position", (list_id,)
             ).fetchall()
         return [ListItem(r["id"], r["list_id"], r["text"], bool(r["checked"]),
-                         r["position"], r["created_at"]) for r in rows]
+                         r["position"], r["created_at"], r["lookup_status"]) for r in rows]
 
     def check_item(self, item_id: int, *, checked: bool = True) -> bool:
         with self._connect() as conn:
