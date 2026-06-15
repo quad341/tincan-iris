@@ -1,8 +1,14 @@
 """The Tier-0 command table exposes (name, example) pairs for the console's
-command dump. Also covers SkillRegistry manifest + param schema."""
+command dump. Also covers SkillRegistry manifest + param schema, and Tier1Qwen
+grammar-constrained dispatch."""
 from __future__ import annotations
 
-from iris.lanes import Tier0Rules
+import io
+import json
+from unittest.mock import MagicMock, patch
+
+from iris.config import Config
+from iris.lanes import Tier0Rules, Tier1Qwen
 from iris.skills import EchoSkill, SkillParam, SkillRegistry, TimeSkill, default_registry
 
 
@@ -48,3 +54,75 @@ def test_registry_grammar_dirty_flag():
     assert reg.grammar_dirty is False
     reg.register(TimeSkill())
     assert reg.grammar_dirty is True
+
+
+# --- Tier1Qwen grammar-constrained dispatch ---
+
+def _fake_urlopen(response_content: str):
+    """Return a context manager whose .read() gives JSON content bytes."""
+    body = json.dumps({"content": response_content}).encode()
+    cm = MagicMock()
+    cm.__enter__ = lambda s: MagicMock(read=lambda: body)
+    cm.__exit__ = MagicMock(return_value=False)
+    return cm
+
+
+def _qwen(skills=None) -> Tier1Qwen:
+    cfg = Config()
+    return Tier1Qwen(cfg, skills=skills)
+
+
+def test_tier1_dispatches_skill_and_runs_it():
+    reg = default_registry()
+    t1 = _qwen(skills=reg)
+    dispatch_resp = json.dumps({"skill": "echo", "args": {"text": "hello"}})
+    with patch("urllib.request.urlopen", return_value=_fake_urlopen(dispatch_resp)):
+        result = t1.handle("echo hello")
+    assert result.text == "hello"
+    assert result.skill == "echo"
+    assert result.lane == "tier1-qwen"
+
+
+def test_tier1_falls_back_to_chat_on_none_skill():
+    reg = default_registry()
+    t1 = _qwen(skills=reg)
+    none_resp = json.dumps({"skill": "none", "args": {}})
+    chat_resp = "I'm Iris, a voice assistant."
+    responses = [none_resp, chat_resp]
+    call_count = 0
+
+    def fake_urlopen(req, timeout):
+        nonlocal call_count
+        resp = responses[call_count]
+        call_count += 1
+        return _fake_urlopen(resp)
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        result = t1.handle("who are you")
+    assert result.text == chat_resp
+    assert result.skill is None
+    assert call_count == 2
+
+
+def test_tier1_allow_skills_false_skips_dispatch():
+    reg = default_registry()
+    t1 = _qwen(skills=reg)
+    chat_resp = "Just chatting."
+    with patch("urllib.request.urlopen", return_value=_fake_urlopen(chat_resp)) as mock_open:
+        result = t1.handle("hi", allow_skills=False)
+    assert result.text == chat_resp
+    assert result.skill is None
+    # only one HTTP call — no dispatch pass
+    assert mock_open.call_count == 1
+
+
+def test_tier1_grammar_rebuilt_when_dirty():
+    reg = SkillRegistry()
+    reg.register(EchoSkill())
+    t1 = _qwen(skills=reg)
+    reg.grammar_dirty = True  # simulate new skill registered after init
+    dispatch_resp = json.dumps({"skill": "echo", "args": {"text": "x"}})
+    with patch("urllib.request.urlopen", return_value=_fake_urlopen(dispatch_resp)):
+        t1.handle("say x")
+    assert t1._grammar_cache is not None
+    assert reg.grammar_dirty is False  # cleared after rebuild

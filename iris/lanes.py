@@ -100,17 +100,30 @@ class Tier0Rules:
 
 
 class Tier1Qwen:
-    """Local Qwen via llama-server. Warm and fast — the workhorse / orchestrator."""
+    """Local Qwen via llama-server. Warm and fast — the workhorse / orchestrator.
+
+    When a ``SkillRegistry`` is provided and ``allow_skills=True``, the handler
+    runs a grammar-constrained dispatch pass first. The grammar forces Qwen to
+    emit ``{"skill":"<name>","args":{...}}``; if it chooses ``"none"`` the call
+    falls through to a regular chat completion. Skills are only dispatched in
+    FULL-trust turns — the brain passes ``allow_skills=False`` for far+DEMO.
+    """
 
     name = "tier1-qwen"
 
-    def __init__(self, cfg: Config) -> None:
+    def __init__(self, cfg: Config, skills: SkillRegistry | None = None) -> None:
         self.cfg = cfg
+        self.skills = skills
+        self._grammar_cache: str | None = None
 
-    def _complete(self, prompt: str, n_predict: int) -> str:
-        body = json.dumps(
-            {"prompt": prompt, "n_predict": n_predict, "stream": False, "cache_prompt": True}
-        ).encode()
+    def _complete(self, prompt: str, n_predict: int, *, grammar: str | None = None) -> str:
+        payload: dict = {
+            "prompt": prompt, "n_predict": n_predict,
+            "stream": False, "cache_prompt": True,
+        }
+        if grammar:
+            payload["grammar"] = grammar
+        body = json.dumps(payload).encode()
         req = urllib.request.Request(
             self.cfg.qwen_base_url + "/completion",
             body,
@@ -119,13 +132,69 @@ class Tier1Qwen:
         with urllib.request.urlopen(req, timeout=self.cfg.qwen_timeout_s) as resp:
             return json.loads(resp.read()).get("content", "").strip()
 
-    def handle(self, text: str) -> LaneResult:
-        prompt = (
-            "<|im_start|>system\nYou are Iris, a warm, concise voice assistant. "
+    def _build_grammar(self) -> str:
+        """Generate a GBNF grammar that constrains Qwen to emit a dispatch JSON.
+
+        Output shape: ``{"skill":"<name>","args":{...}}``.  Skill name is one of
+        the registered names or ``"none"`` (fall through to chat). Args object
+        allows an optional single string key/value pair — sufficient for demo
+        skills; richer arg grammars land with ti-ccc.7+.
+        """
+        names = list(self.skills.names()) if self.skills else []
+        skill_choices = " | ".join(f'"{n}"' for n in names) or '"none"'
+        return "\n".join([
+            'root         ::= "{" ws "\\"skill\\"" ws ":" ws "\\"" skill-choice "\\"" ws "," ws "\\"args\\"" ws ":" ws args-obj ws "}"',
+            f'skill-choice ::= "none" | {skill_choices}',
+            'args-obj     ::= "{}" | "{" ws str-kv ws "}"',
+            'str-kv       ::= "\\"" key "\\"" ws ":" ws "\\"" str-val "\\""',
+            'key          ::= [a-z_]+',
+            'str-val      ::= [^"\\\\\\n]*',
+            'ws           ::= [ \\t\\n]*',
+        ])
+
+    def _dispatch_prompt(self, text: str) -> str:
+        skills = self.skills
+        skill_list = "; ".join(
+            f'"{e["name"]}" — {e["description"]}'
+            for e in (skills.manifest() if skills else [])
+        )
+        return (
+            '<|im_start|>system\nYou are Iris. Choose the best skill to call, or output '
+            '{"skill":"none","args":{}} to reply in natural language.\n'
+            f'Available skills: {skill_list}<|im_end|>\n'
+            f'<|im_start|>user\n{text}<|im_end|>\n<|im_start|>assistant\n'
+        )
+
+    def _chat_prompt(self, text: str, context_hint: str = "") -> str:
+        pref_line = f" Caller prefs — {context_hint}." if context_hint else ""
+        return (
+            f"<|im_start|>system\nYou are Iris, a warm, concise voice assistant.{pref_line} "
             "Reply in one or two short sentences.<|im_end|>\n"
             f"<|im_start|>user\n{text}<|im_end|>\n<|im_start|>assistant\n"
         )
-        return LaneResult(self._complete(prompt, self.cfg.qwen_max_tokens), self.name)
+
+    def handle(self, text: str, *, allow_skills: bool = True, context_hint: str = "") -> LaneResult:
+        if allow_skills and self.skills and self.skills.names():
+            if self.skills.grammar_dirty or self._grammar_cache is None:
+                self._grammar_cache = self._build_grammar()
+                self.skills.grammar_dirty = False
+            raw = self._complete(self._dispatch_prompt(text), 96, grammar=self._grammar_cache)
+            try:
+                dispatch = json.loads(raw)
+                skill_name = dispatch.get("skill", "none")
+                args = dispatch.get("args") or {}
+            except (ValueError, AttributeError):
+                skill_name = "none"
+                args = {}
+            if skill_name != "none":
+                skill = self.skills.get(skill_name)
+                if skill is not None:
+                    result = skill.run(**{k: v for k, v in args.items()})
+                    return LaneResult(result, self.name, skill=skill_name)
+        # no skill selected, DEMO mode, or no registry — regular chat completion
+        return LaneResult(
+            self._complete(self._chat_prompt(text, context_hint), self.cfg.qwen_max_tokens), self.name
+        )
 
 
 class Tier2RawHaiku:

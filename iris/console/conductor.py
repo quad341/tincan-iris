@@ -15,6 +15,8 @@ import threading
 import time
 from enum import Enum
 
+from ..trust import TrustMode
+
 
 class State(str, Enum):
     IDLE = "idle"
@@ -37,6 +39,7 @@ class Conductor:
         self.pick = pick or (lambda: "one sec")
         self.state = State.IDLE
         self.muted = False
+        self.far_trust: TrustMode = TrustMode.DEMO  # far party DEMO by default; grant elevates
         self._rec = None
         self._play = None
         self._cancel = threading.Event()
@@ -78,6 +81,16 @@ class Conductor:
             return
         self.respond_to(text)
 
+    def grant_far(self) -> None:
+        """Elevate the far party to FULL trust for the current call."""
+        self.far_trust = TrustMode.FULL
+        self.emit(("far_trust", self.far_trust))
+
+    def reset_far_trust(self) -> None:
+        """Reset far-party trust to DEMO (called on CallEnded / call teardown)."""
+        self.far_trust = TrustMode.DEMO
+        self.emit(("far_trust", self.far_trust))
+
     def respond_to(self, text: str, *, speaker: str = "") -> None:
         """Brain + speak for one utterance (the post-STT half). Blocking — call from
         a worker thread. Shared by push-to-talk and streaming/listen mode."""
@@ -87,7 +100,8 @@ class Conductor:
         self._set_state(State.THINKING)
         try:
             reply = self.brain.respond(
-                text, speaker=speaker, on_filler=lambda i: self.emit(("filler", self.pick()))
+                text, speaker=speaker, far_trust=self.far_trust,
+                on_filler=lambda i: self.emit(("filler", self.pick())),
             )
         except Exception as exc:  # noqa: BLE001
             self.emit(("error", f"brain: {exc}"))
