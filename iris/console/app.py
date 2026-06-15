@@ -214,13 +214,18 @@ class IrisConsole(App):
             log.write("[yellow]no longer hearing the respondent[/]")
             self._refresh_status()
             return
-        stream = StreamingTranscriber(self._on_heard_far, source="iris_ear.monitor")
+        src = self.mic.far_source or "iris_ear.monitor"
+        stream = StreamingTranscriber(
+            self._on_heard_far, source=src, backend=self.mic.far_backend
+        )
         if not stream.available():
             log.write("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
             return
         self._far_stream = stream
         stream.start()
-        log.write("[green]hearing the respondent — set the app's OUTPUT to Iris_Ear[/]")
+        log.write(f"[green]hearing the respondent — capturing {src}[/]")
+        if src == "iris_ear.monitor":
+            log.write("[dim]set the app's OUTPUT to Iris_Ear[/]")
         self._refresh_status()
 
     def action_approve(self) -> None:

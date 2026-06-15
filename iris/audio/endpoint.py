@@ -23,6 +23,8 @@ from typing import Protocol
 
 class AudioEndpoint(Protocol):
     name: str
+    far_source: str | None  # source for the far party, if separate (None = local)
+    far_backend: str        # "pulse" (parecord) or "pw" (pw-record) for far_source
 
     def playback(self, wav_path: str) -> None:
         """Play a WAV out to this endpoint (speaker / call uplink)."""
@@ -69,6 +71,30 @@ class _Playback:
             self._proc.wait()
 
 
+class _MultiPlayback:
+    """Playback fanned out to several targets (e.g. call uplink + local monitor).
+
+    ``wait()`` blocks on the first proc (the primary — the call), so timing tracks
+    what the far party hears; ``stop()`` cuts them all at once (barge-in)."""
+
+    def __init__(self, procs: list[subprocess.Popen]) -> None:
+        self._procs = procs
+
+    def wait(self) -> None:
+        if self._procs:
+            self._procs[0].wait()
+
+    def stop(self) -> None:
+        for p in self._procs:
+            p.send_signal(signal.SIGINT)
+        for p in self._procs:
+            try:
+                p.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait()
+
+
 class LocalAudio:
     """Local mic/speaker via PipeWire (``pw-cat``/``pw-record``), ALSA/Pulse fallback."""
 
@@ -86,6 +112,12 @@ class LocalAudio:
         self._recorder = recorder
         self.rate = rate
         self.channels = channels
+        # A separate source for the far party (call downlink / app monitor).
+        # None for plain local audio — the far party is just on your speakers.
+        self.far_source: str | None = None
+        # How to capture far_source: "pulse" (parecord --device) or "pw"
+        # (pw-record --target, for native PipeWire nodes like SCO).
+        self.far_backend: str = "pulse"
 
     # --- playback (mouth) ---
     def _player_cmd(self, wav: str) -> list[str]:
@@ -184,11 +216,147 @@ class VirtualDeviceAudio(LocalAudio):
         ]
 
 
+def _pw_link_nodes(direction: str) -> list[str]:
+    """Distinct node names from ``pw-link`` ports. ``direction='out'`` lists output
+    ports (sources), ``'in'`` lists input ports (sinks); [] on failure."""
+    flag = "-o" if direction == "out" else "-i"
+    try:
+        out = subprocess.run(
+            ["pw-link", flag], capture_output=True, text=True, timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return []
+    names: list[str] = []
+    for line in out.stdout.splitlines():
+        node = line.strip().split(":", 1)[0].strip()  # "node:port" -> node
+        if node and node not in names:
+            names.append(node)
+    return names
+
+
+def _pick_bluez(names: list[str], prefix: str) -> str | None:
+    """First node whose name starts with ``prefix`` (``bluez_output``/``bluez_input``)."""
+    for n in names:
+        if n.startswith(prefix):
+            return n
+    return None
+
+
+def discover_sco_nodes() -> tuple[str | None, str | None]:
+    """Find the live HFP/SCO ``(sink, source)`` for an active call via ``pw-link``.
+
+    The SCO nodes are **native PipeWire nodes** — the uplink sink
+    ``bluez_output.<mac>.N`` and the downlink source ``bluez_input.<mac>.N``. They
+    do NOT appear in PulseAudio, so ``pactl``/``paplay``/``parecord`` can't see
+    them; only ``pw-link``/``pw-cat`` do. They exist only while a call is up and
+    embed the device MAC (PII), so they're discovered fresh each call, never
+    persisted. A future ``TincanCallControl`` re-runs this on ``CallConnected``.
+    """
+    sink = _pick_bluez(_pw_link_nodes("in"), "bluez_output")    # uplink — Iris's mouth
+    source = _pick_bluez(_pw_link_nodes("out"), "bluez_input")  # downlink — Iris's ear
+    return sink, source
+
+
+class TincanSCOAudio(VirtualDeviceAudio):
+    """Ride a real phone call over tincan's HFP/SCO audio.
+
+    Iris's voice plays into the SCO **sink** (``bluez_output.<mac>.N`` — the call
+    uplink the far party hears); her far-ear is the SCO **source**
+    (``bluez_input.<mac>.N`` — the downlink from the far party). Push-to-talk stays
+    on the default mic, so the operator addresses Iris with their own voice (the
+    supervised co-pilot model).
+
+    Unlike Discord's null-sinks, the SCO nodes are **native PipeWire nodes invisible
+    to PulseAudio**, so this endpoint uses ``pw-cat``/``pw-record --target`` rather
+    than ``paplay``/``parecord`` (hence ``far_backend = "pw"``).
+
+    This is **media only** — it knows nothing about ringing, answering, or call
+    state. Signaling lives in tincan's ``im.tincan.Calls`` D-Bus interface
+    (``IncomingCall`` / ``Answer`` / ``CallConnected`` / ``CallEnded``). The
+    autonomous path (later): a ``TincanCallControl`` client answers an incoming
+    call by policy, then on ``CallConnected`` discovers the now-live SCO nodes and
+    binds this endpoint; on ``CallEnded`` it drops it. Keeping media and signaling
+    separate is what lets that land without touching this class.
+    """
+
+    name = "tincan-sco"
+
+    def __init__(
+        self,
+        sink: str,
+        source: str | None = None,
+        *,
+        monitor: bool = True,
+        rate: int = 16000,
+        channels: int = 1,
+    ) -> None:
+        # capture_target=None -> push-to-talk uses the default mic (the operator).
+        super().__init__(sink, capture_target=None, rate=rate, channels=channels)
+        self.far_source = source  # the SCO downlink — the far party, for _far_stream
+        self.far_backend = "pw"   # SCO source is a native PipeWire node -> pw-record
+        # Also play Iris to the local default sink so the OPERATOR hears her too —
+        # the supervised model means hearing both sides (mom on the downlink, Iris's
+        # replies on the monitor). Use headphones to keep the monitor out of the mic.
+        self.monitor = monitor
+
+    def _player_cmd(self, wav: str) -> list[str]:
+        # SCO nodes are native PipeWire nodes (invisible to PulseAudio/paplay):
+        # play Iris's voice into the uplink with pw-cat --target.
+        return ["pw-cat", "-p", "--target", self.playback_target, wav]
+
+    def _monitor_cmd(self, wav: str) -> list[str]:
+        # Local default sink (operator's speakers) — no --target.
+        return ["pw-cat", "-p", wav]
+
+    def start_playback(self, wav_path: str) -> _MultiPlayback:
+        """Play Iris to the call uplink (mom hears) and, if monitoring, the local
+        speakers (operator hears). ``.wait()`` tracks the uplink; ``.stop()`` cuts
+        both (barge-in)."""
+        procs = [subprocess.Popen(
+            self._player_cmd(wav_path),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )]
+        if self.monitor:
+            procs.append(subprocess.Popen(
+                self._monitor_cmd(wav_path),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            ))
+        return _MultiPlayback(procs)
+
+
 def default_endpoint() -> AudioEndpoint:
-    """LocalAudio by default; VirtualDeviceAudio when ``IRIS_PLAYBACK_TARGET`` is
-    set (e.g. the ``iris_mic`` null-sink that routes Iris into Discord/Zoom — see
-    scripts/virtual_audio.sh)."""
+    """LocalAudio by default.
+
+    - ``IRIS_AUDIO=tincan-sco`` rides tincan's live HFP/SCO call audio: the bluez
+      nodes are discovered (``IRIS_SCO_SINK`` / ``IRIS_SCO_SOURCE`` override) — a
+      call must be active for them to exist.
+    - else ``IRIS_PLAYBACK_TARGET`` selects VirtualDeviceAudio (e.g. the
+      ``iris_mic`` null-sink routing Iris into Discord/Zoom — see
+      scripts/virtual_audio.sh).
+    """
+    if os.environ.get("IRIS_AUDIO", "").lower() in ("tincan-sco", "sco"):
+        sink = os.environ.get("IRIS_SCO_SINK")
+        source = os.environ.get("IRIS_SCO_SOURCE")
+        if not sink or not source:
+            d_sink, d_source = discover_sco_nodes()
+            sink = sink or d_sink
+            source = source or d_source
+        if not sink:
+            raise RuntimeError(
+                "tincan-sco: no HFP/SCO sink found — is a call active on the dongle? "
+                "Set IRIS_SCO_SINK / IRIS_SCO_SOURCE to override."
+            )
+        return TincanSCOAudio(sink, source)
     target = os.environ.get("IRIS_PLAYBACK_TARGET")
     if target:
         return VirtualDeviceAudio(target, os.environ.get("IRIS_CAPTURE_TARGET"))
     return LocalAudio()
+
+
+if __name__ == "__main__":  # python -m iris.audio.endpoint — probe live SCO nodes
+    _sink, _source = discover_sco_nodes()
+    _miss = "— none found (is a call active on the dongle?)"
+    print(f"SCO sink   (uplink → far party hears Iris): {_sink or _miss}")
+    print(f"SCO source (downlink → Iris hears far party): {_source or _miss}")
+    if _sink:
+        print("\nRun the console on this call:\n  IRIS_AUDIO=tincan-sco python -m iris.console")
