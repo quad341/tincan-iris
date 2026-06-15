@@ -7,7 +7,16 @@ never handed to the cloud model (see ``docs/adr/0001``).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+# Safety invariant — NOT a config key, never moved to Config.proactive_*:
+# Iris must NOT speak while a call is in progress without an explicit
+# operator approval gesture. Changing this to True would let Iris interrupt
+# the far party unbidden, which is the most jarring failure mode in the
+# co-pilot model. It must stay a hard-coded constant until that whole path
+# (interrupt policy, approval gate, conflict resolution) is designed and shipped.
+SPEAK_DURING_CALL: bool = False
 
 
 @dataclass(frozen=True)
@@ -38,5 +47,41 @@ class Config:
         "warm, spoken sentence (under ~30 words). No markdown, no lists, no preamble."
     )
 
+    # --- [proactive] — v1 ships disabled; schema is here so operators can see what
+    # will be available and enable it in a future release.
+    #
+    # proactive_enabled        — master gate; False in v1.
+    # proactive_classes        — which notification classes to deliver (empty = all
+    #                            are suppressed). E.g. ("lookup_done", "calendar").
+    # proactive_min_priority   — only deliver notifications at or above this priority
+    #                            (0 = critical … 4 = backlog; 2 = medium default).
+    # proactive_cooldown_s     — global minimum gap between proactive utterances.
+    # proactive_speak_during_listen — allow proactive speech while operator is silent
+    #                            (True = safe; SPEAK_DURING_CALL stays False always).
+    proactive_enabled: bool = False
+    proactive_classes: tuple[str, ...] = field(default_factory=tuple)
+    proactive_min_priority: int = 2
+    proactive_cooldown_s: float = 60.0
+    proactive_speak_during_listen: bool = True
+
 
 DEFAULT = Config()
+
+_PROACTIVE_STARTUP_NOTICE = (
+    "[proactive] Proactive notifications are available but disabled in v1. "
+    "To enable, set proactive_enabled=True in your config and choose classes. "
+    "See docs/adr/ for design context."
+)
+
+
+def proactive_startup_notice(cfg: Config) -> str | None:
+    """Return a one-time startup notice if [proactive] section is at defaults.
+
+    Returns ``None`` when the operator has explicitly configured the section
+    (i.e., ``proactive_enabled=True`` or ``proactive_classes`` is non-empty) —
+    in that case they already know it exists.  Returns the notice string when
+    the section is absent (all defaults), so new operators discover the feature.
+    """
+    if cfg.proactive_enabled or cfg.proactive_classes:
+        return None
+    return _PROACTIVE_STARTUP_NOTICE
