@@ -1,0 +1,116 @@
+# Release Gate: Iris v1 Rollup (ti-lmw.2)
+
+**Branch:** `rollup/iris-v1-20260615`  
+**Approach:** 20 commits cherry-picked from `origin/iris/tincan-sco` onto current main  
+**Base:** `origin/main` @ `5424a46` (post PRs #25–#29)  
+**HEAD:** `d5b981e` (fix(proactive): emit proactive_tts event so console logs TTS deliveries)  
+**Gate evaluated:** 2026-06-15  
+**Plan context:** ti-lmw.2 two-phase deployment plan; Phase 1 (PRs #25–28 + #29) already merged
+
+## Result: PASS
+
+| # | Criterion | Result | Evidence |
+|---|-----------|--------|----------|
+| 1 | Review PASS present | **PASS** | ti-hm4 PASS (ProactiveDelivery engine); ti-cul resolved + ti-hm4 verified (ProactiveStore); ti-h69 PASS (IrisConsole wiring). All other features are PM-authored with closed test-suite acceptance beads (see §Review Coverage). |
+| 2 | Acceptance criteria met | **PASS** | All ti-ccc sub-beads for included features are closed. P2 advisory (TTS log line missing) resolved — fix commit 28737b7 (ti-110) cherry-picked as d5b981e and IS included in this PR (see Amendment 2). |
+| 3 | Tests pass | **PASS** | 334 passed, 1 skipped, 3 xpassed |
+| 4 | No high-severity findings open | **PASS** | P0 blocker in ti-cul (enqueue() API mismatch) was resolved in commit aad6f9c and verified PASS in ti-hm4 review. Remaining findings are P2/P3 advisories. |
+| 5 | Final branch is clean | **PASS** | Cherry-picked 20 commits; no conflicts; diff is pure additions (4504 ins, 15 del within code files; zero deletion of docs/gate files). |
+| 6 | Branch diverges cleanly from main | **PASS** | 20 cherry-picks onto origin/main with 0 conflicts. Diff: 20 files, +4504/−15. |
+| 7 | Single feature theme | **EXCEPTION — PM-approved** | Multi-feature rollup per ti-lmw.2 plan. PM sanctioned bundling all remaining iris/tincan-sco features as a single Phase 2 PR after foundation PRs #25–29 merged. |
+
+## Cherry-Picked Commits (original SHA → rollup SHA)
+
+| Original | Rollup | Feature | Bead |
+|----------|--------|---------|------|
+| 0a487d8 | a22c4d5 | feat(data): CallList/ListItem/LookupResult data layer + SQLite schema | ti-ccc.16.1 |
+| 8be29ac | 84f0afc | test: TDD suites for context/web-search/calendar/list-skill | — |
+| d8ab0eb | 1857043 | feat(context): ConversationContext — window + gist tiers | ti-ccc.11.1.1 |
+| a2ad52e | 811945b | feat(list_skill): ListSkill + lookup_status on ListItem | ti-ccc.16.2 |
+| 1a84972 | 75def64 | feat(web_search): core fetch engine + SSRF guard | ti-ccc.15.1.1 |
+| 58dd141 | 8cb35d5 | feat(web_search): DATA block Q&A isolation layer | ti-ccc.15.1.2 |
+| bf6d45c | f3108bf | feat(web_search): PM-approved UX wording + no-URL prompt | ti-ccc.15.1.3 |
+| 26f758c | cc9730a | feat(context): TranscriptContext — third tier on-demand lookup | ti-ccc.11.1.2 |
+| 4683220 | 6b448d8 | feat(calendar): CalendarClient + three skills + OAuth token management | ti-ccc.14.1.1/14.1.3/14.1.4 |
+| f9289f1 | 6b4c5ae | feat(list): async lookup integration + list panel | ti-ccc.16.3/16.4 |
+| 6b12fb1 | 0db288c | feat(console): PostCallListView + list_store.set_lookup_status | ti-ccc.16.5 |
+| 0177abd | c4c56a0 | feat(audio): AEC support in TincanSCOAudio + scripts/aec_audio.sh | ti-ccc.9 |
+| 4add757 | e833fea | feat(context,config): gist playback + proactive config skeleton | ti-ccc.11.1.3/ti-ccc.17.1 |
+| 2a9a9a6 | dd7631b | feat(audio): AGC + noise suppression on AEC module | ti-ccc.10 |
+| 782109f | 60c4a9b | feat(audio): device selection via IRIS_PLAYBACK_DEVICE + IRIS_CAPTURE_DEVICE | ti-3eh |
+| 381f21b | a52028f | test(brain): DEMO-mode Tier2 and skill-dispatch blocking | ti-93w |
+| 4476e74 | 6c0d251 | feat(proactive): ProactiveStore + ProactiveItem SQLite CRUD | ti-ccc.17.2.2 |
+| c4bd1d1 | f38d108 | test(proactive): pre-author store + delivery test suites | ti-ccc.17.2.4 |
+| aad6f9c | 181a82c | feat(proactive): ProactiveDelivery engine + SilenceTracker + ContextInferenceTrigger | ti-ccc.17.2.3 |
+| 0945641 | 28d636d | feat(console): wire ProactiveDelivery into IrisConsole | ti-ccc.17.2.5 |
+
+**Skipped (already in main via PRs #26–29):** 1b151fa (trust tighten), 4b8b234 (trust default far_trust=DEMO)
+
+## Review Coverage
+
+| Feature group | Review bead | Verdict |
+|--------------|-------------|---------|
+| ProactiveDelivery engine (aad6f9c) | ti-hm4 | PASS — "334 tests pass, safety invariant verified" |
+| ProactiveStore CRUD (4476e74) | ti-cul → ti-hm4 | P0 BLOCKER resolved in aad6f9c; PASS verified in ti-hm4 |
+| IrisConsole wiring (0945641) | ti-h69 | PASS — "334 tests pass, all safety invariants verified" |
+| Context system (ti-ccc.11) | ti-ccc.11.1.4 closed | PM-authored; test-suite acceptance bead closed |
+| Calendar (ti-ccc.14) | ti-ccc.14.1.4 + ti-ccc.14.1.5 closed | PM-authored; UX integration + test-suite acceptance beads closed |
+| web_search (ti-ccc.15) | ti-ccc.15.1.4 closed | PM-authored; test-suite acceptance bead closed |
+| AEC/AGC/device-selection (ti-ccc.9/10, ti-3eh) | — | PM-authored; no separate reviewer bead |
+| Data layer/list/post-call (ti-ccc.16) | — | PM-authored; no separate reviewer bead |
+| Proactive config skeleton (ti-ccc.17.1) | — | PM-authored; covered by ProactiveDelivery review context |
+| DEMO-mode brain tests (ti-93w) | — | PM-authored test additions |
+
+## Test Run
+
+```
+$ python -m pytest tests/ -x -q --tb=short
+334 passed, 1 skipped, 3 xpassed in 3.98s
+```
+
+All tests run from the deployer worktree (`rollup/iris-v1-20260615` at HEAD `d5b981e`).
+
+## Known Gaps / Advisories
+
+### ~~P2 ADVISORY — TTS log line missing~~ RESOLVED (Amendment 2)
+- Fix commit 28737b7 cherry-picked as d5b981e — see §Amendment 2.
+
+### Multi-feature rollup exception (criterion #7)
+- 20 commits spanning 10+ feature areas bundled per PM two-phase deployment plan.
+- Phase 1 (PRs #25–#29) established the spine: trust model, dispatch, notes, call-control, transcript, prefs, STT/speaker/skill-param, docs.
+- This Phase 2 PR covers everything that was building on that spine on iris/tincan-sco.
+
+### Features with no external reviewer bead
+- AEC/AGC/device-selection, CallList data layer, async lookup/list panel, PostCallListView, gist playback/proactive config, DEMO-mode brain tests.
+- All are PM-authored; all test suites pass; PM explicitly sanctioned this rollup (ti-lmw.2 bead, source:actual-pm label).
+
+## Amendment — 2026-06-15 (post-initial-gate)
+
+Commit `579e63c` (cherry-pick of `59ed5b9`) added after initial gate evaluation:
+
+| Original | Rollup | Feature | Review |
+|----------|--------|---------|--------|
+| 59ed5b9 | 579e63c | fix(trust): tighten _GRANT regex — require 'full access' adjacency (ti-jen) | ti-oxh PASS |
+
+**Security context:** PR #29's recovery squash did not carry through the tightened `_GRANT` regex from PR #30 commit c7c7bf1. This one-line fix restores it, preventing false-positive trust escalation on common operator speech ('give him directions', 'allow her to speak').
+
+Tests after amendment: 334 passed, 1 skipped, 3 xpassed.
+
+## Amendment 2 — 2026-06-15 (proactive TTS log fix, ti-110)
+
+Commit `d5b981e` (cherry-pick of `28737b7`) added after Amendment 1:
+
+| Original | Rollup | Feature | Review |
+|----------|--------|---------|--------|
+| 28737b7 | d5b981e | fix(proactive): emit proactive_tts event so console logs TTS deliveries (ti-110) | ti-nq7 PASS |
+
+**Context:** This resolves the P2 advisory from ti-h69/ti-2gj. ProactiveDelivery.tick() now emits `('proactive_tts', message)` after TTS fires; IrisConsole._drain() handles the event and writes the 🔔 log line. All AC for ti-ccc.17.2.5 are now met.
+
+Tests after Amendment 2: 334 passed, 1 skipped, 3 xpassed.
+
+## Satisfies
+
+- ti-lmw (needs-deploy: ProactiveDelivery engine + ProactiveStore fixes)
+- ti-2gj (needs-deploy: ProactiveDelivery IrisConsole wiring)
+- ti-1s6 (needs-deploy: fix(trust) _GRANT regex tightening — ti-oxh PASS)
+- ti-110 (needs-deploy: proactive TTS log fix — included as d5b981e, ti-nq7 PASS)
