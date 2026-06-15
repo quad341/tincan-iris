@@ -222,3 +222,67 @@ class ConversationContext:
             self._gist = new_gist
             self._gist_active = True
         self._emit(("context", "gist_updated", new_gist))
+
+
+class TranscriptContext:
+    """Third context tier: on-demand lookup into the transcript store (ti-ccc.12).
+
+    Wraps a ``ConversationContext`` and falls through to the transcript store
+    when the window + gist tiers both return no match.
+
+    Acceptance criteria (ti-ccc.11.1.2):
+    - Reply starts with ``"Checking the transcript:"`` when a match is found.
+    - When store is ``None``: spoken fallback + ``[context: transcript store not
+      yet available — clarification sent]`` console annotation in ``matches``.
+    """
+
+    TRANSCRIPT_PREFIX = "Checking the transcript:"
+    TRANSCRIPT_UNAVAILABLE = (
+        "I don't have the earlier part of the call stored yet — "
+        "could you ask her to repeat it?"
+    )
+    _UNAVAILABLE_ANN = (
+        "[context: transcript store not yet available — clarification sent]"
+    )
+
+    def __init__(
+        self,
+        *,
+        base: ConversationContext,
+        transcript_store: object | None = None,
+    ) -> None:
+        self._base = base
+        self._store = transcript_store
+
+    def lookup(self, query: str) -> LookupResult:
+        """Lookup with fallthrough: window → gist → transcript → no-match."""
+        result = self._base.lookup(query)
+        if result.tier != "none":
+            return result
+
+        if self._store is None:
+            return LookupResult(
+                tier="none",
+                reply=self.TRANSCRIPT_UNAVAILABLE,
+                matches=[
+                    LookupMatch(
+                        text=self._UNAVAILABLE_ANN,
+                        speaker="iris",
+                        tier="gist",
+                        score=0.0,
+                    )
+                ],
+            )
+
+        turns = self._store.query(query) or []
+        if not turns:
+            return LookupResult(tier="none", reply=NO_MATCH_REPLY, matches=[])
+
+        snippets = "; ".join(t.text for t in turns[:2])
+        return LookupResult(
+            tier="gist",
+            reply=f"{self.TRANSCRIPT_PREFIX} {snippets}",
+            matches=[
+                LookupMatch(t.text, "far", "gist", 1.0) for t in turns
+            ],
+        )
