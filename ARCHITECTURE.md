@@ -82,6 +82,58 @@ decides the path. **Skills are plugins:** a new one registers an *intent* + its 
 the expensive model for reasoning that actually needs it. _(planned — formalize the skill/router
 contract early; see beads.)_
 
+## 4b. Capabilities, trust & context — the v1 plan
+
+> Decided 2026-06-15; the safety model is **[ADR-0002](docs/adr/0002-capability-gating-by-speaker-channel.md)**.
+
+**Who is speaking is known from the audio channel, not voice recognition.** The
+operator is on the local mic; the far party arrives on `bluez_input`. Each
+transcript is tagged with its source and that tag rides through the pipeline — so
+Iris can attribute every command and gate by *who asked*.
+
+**Two capability modes, chosen per call:**
+
+| Mode | Who gets it | What she can do |
+|---|---|---|
+| **Demo** *(default — any caller)* | everyone, always | introduce herself · the time · answer from model knowledge. **No tools, no personal data either way.** Telemarketer-safe. |
+| **Full** | the operator always; the far party only when the operator flips a **per-call, non-sticky** trust flag (re-armed every call, auto-off on hangup) | the real skills — calendar, notes, lookups, messaging |
+
+The trust flag is **operator-only and spoof-proof**: honored only when granted on
+the *mic* channel. For the far party the rule is **requests push *in*, data never
+pulls *out*** — they can create a follow-up *for the operator*, never extract the
+operator's data. Iris also **acts without disclosing** (answers "that works" to a
+free/busy check, never the underlying appointment). Web fetch is **full-mode,
+operator-initiated only** (a fetched page is untrusted, prompt-injection input).
+
+**Dispatch, concretely.** In demo mode the router never reaches a skill — Tier 0
+(introduce/time) + the LLM knowledge lane only. In full mode the warm local model
+**orchestrates the skills**: it picks `{skill, args}` or decides "just talk."
+
+**First full-mode skill: explicit notes & follow-ups** — *"Iris, note that…"* /
+*"follow up on…"*. Deterministic, reliable, and it proves the action loop. The
+**conversation summary is the same artifact as the context "gist" below**, so we
+take notes now and the summary emerges for free.
+
+**Context — always listen, act only when addressed.** Ambient *listening* is
+cheap (local STT → a buffer); ambient *acting* is rare and addressed-only. When
+addressed, she resolves references from three layers:
+
+1. **Rolling window** — the last few minutes verbatim (a cyclic buffer); resolves *"search for that."*
+2. **Running gist** — periodically the local model compresses older turns into a tiny summary that persists across a long call.
+3. **On-demand** — for specifics that aged out: retrieve from the local transcript, or simply *ask* ("which trip do you mean?").
+
+This keeps her out of "kiosk mode" (you needn't restate everything) without ever
+holding an hour of transcript in the model. **Nothing proactive/unprompted in
+v1** — she speaks only when addressed; proactive behavior is a later design.
+
+**Personality has to *do* something.** A beat must either be intrinsically
+relational (the AI disclosure, a warm greeting, a signature sign-off — those
+build the entity, that is their point) or drive a real action. So "how'd I do?"
+becomes *"I caught two follow-ups — want me to handle either?"*, and feedback
+("you were too formal with Mom") **writes to a preferences store** that actually
+changes the next call. Tone of every action + a feedback channel — not a
+decorative layer.
+
 ## 5. Provider slots
 
 Each slot has a local-first default and swaps via config:
