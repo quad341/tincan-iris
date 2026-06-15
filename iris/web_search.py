@@ -114,8 +114,11 @@ class WebSearchSkill:
         on_tts:
             TTS callback — receives spoken strings (e.g. "Still fetching…").
         """
+        if not url:
+            return "What URL should I look at?"
+
         if speaker != "operator":
-            return "This feature is only available to the operator."
+            return "Web search is only available to the operator."
 
         if is_private_url(url):
             return "I can't fetch that — it's a private address."
@@ -145,9 +148,7 @@ class WebSearchSkill:
             done.wait()
 
         if exc[0] is not None:
-            if isinstance(exc[0], TimeoutError):
-                return "I couldn't get that — the page took too long to respond."
-            return "I couldn't access that page."
+            return "I couldn't reach that page — may require login or timed out."
 
         content, fetch_annotations = result[0]
         for ann in fetch_annotations or []:
@@ -157,7 +158,9 @@ class WebSearchSkill:
         answer, injected = self._qa(content, question)
 
         if injected and on_annotation is not None:
-            on_annotation("⚠ Possible instruction injection detected — ignored.")
+            on_annotation(
+                "⚠ page contained text that looked like instructions. It was ignored."
+            )
 
         if answer is None:
             return "I couldn't get a useful answer from that page."
