@@ -118,6 +118,8 @@ class LocalAudio:
         # How to capture far_source: "pulse" (parecord --device) or "pw"
         # (pw-record --target, for native PipeWire nodes like SCO).
         self.far_backend: str = "pulse"
+        # Microphone source for StreamingTranscriber; None = default device.
+        self.capture_target: str | None = None
 
     # --- playback (mouth) ---
     def _player_cmd(self, wav: str) -> list[str]:
