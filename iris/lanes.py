@@ -119,7 +119,7 @@ class Tier1Qwen:
         with urllib.request.urlopen(req, timeout=self.cfg.qwen_timeout_s) as resp:
             return json.loads(resp.read()).get("content", "").strip()
 
-    def handle(self, text: str) -> LaneResult:
+    def handle(self, text: str, *, allow_skills: bool = True) -> LaneResult:
         prompt = (
             "<|im_start|>system\nYou are Iris, a warm, concise voice assistant. "
             "Reply in one or two short sentences.<|im_end|>\n"

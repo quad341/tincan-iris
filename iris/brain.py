@@ -100,7 +100,10 @@ class Brain:
 
         # Tier 1 — local Qwen (warm). Masked + deadline-bounded for the busy box.
         try:
-            r1 = self._masked(lambda: self.tier1.handle(text), "tier1-qwen", on_filler)
+            r1 = self._masked(
+                lambda: self.tier1.handle(text, allow_skills=not demo_mode),
+                "tier1-qwen", on_filler,
+            )
             tl.mark("tier1-qwen")
             return Reply(r1.text, r1.lane, tl, r1.skill, speaker=speaker)
         except Exception as exc:  # noqa: BLE001 — local model hiccup: degrade, don't crash
