@@ -133,3 +133,17 @@ def test_respond_to_ignores_empty_and_busy():
     c.respond_to("hi")  # busy -> nothing
     assert events == []
     c.brain.respond.assert_not_called()
+
+
+def test_respond_to_threads_speaker_operator():
+    c, _events, _mic, _play = _make()
+    c.respond_to("what time is it", speaker="operator")
+    _, kwargs = c.brain.respond.call_args
+    assert kwargs.get("speaker") == "operator"
+
+
+def test_respond_to_threads_speaker_far():
+    c, _events, _mic, _play = _make()
+    c.respond_to("what time is it", speaker="far")
+    _, kwargs = c.brain.respond.call_args
+    assert kwargs.get("speaker") == "far"

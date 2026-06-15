@@ -107,9 +107,9 @@ class IrisConsole(App):
                     log.write(f"[bold cyan]iris[/] › {ev[1]}")
                     log.write(f"        [dim]⟮{ev[2]} · {ev[3]}⟯[/]")
                 elif kind == "heard":
-                    self._on_heard_main(ev[1])
+                    self._on_heard_main(ev[1], ev[2] if len(ev) > 2 else "")
                 elif kind == "heard_far":
-                    self._on_heard_far_main(ev[1])
+                    self._on_heard_far_main(ev[1], ev[2] if len(ev) > 2 else "")
                 elif kind == "error":
                     log.write(f"[red]✗ {ev[1]}[/]")
                 elif kind == "filler":
@@ -124,16 +124,17 @@ class IrisConsole(App):
         except queue.Empty:
             pass
 
-    def _dispatch(self, cmd: str) -> bool:
+    def _dispatch(self, cmd: str, speaker: str = "") -> bool:
         """Run an addressed command if Iris is free. Returns True if dispatched."""
         if self.conductor.state is State.IDLE:
             self.run_worker(
-                lambda c=cmd: self.conductor.respond_to(c), thread=True, exclusive=True
+                lambda c=cmd, s=speaker: self.conductor.respond_to(c, speaker=s),
+                thread=True, exclusive=True,
             )
             return True
         return False
 
-    def _on_heard_main(self, text: str) -> None:
+    def _on_heard_main(self, text: str, speaker: str = "") -> None:
         """A streamed utterance from YOU (main thread): act only if addressed."""
         log = self.query_one("#log", RichLog)
         cmd = address(text)
@@ -147,10 +148,10 @@ class IrisConsole(App):
             self.conductor.interrupt()  # cut her off now; no spoken reply
             log.write("[yellow](stopped)[/]")
             self._refresh_status()
-        elif not self._dispatch(cmd):
+        elif not self._dispatch(cmd, speaker):
             log.write("[dim](busy — one sec)[/]")
 
-    def _on_heard_far_main(self, text: str) -> None:
+    def _on_heard_far_main(self, text: str, speaker: str = "") -> None:
         """A streamed utterance from the RESPONDENT: act only if approved."""
         log = self.query_one("#log", RichLog)
         cmd = address(text)
@@ -162,7 +163,7 @@ class IrisConsole(App):
             return
         if not self._approved:
             log.write("[dim](respondent's command — not approved; press 'a' to allow)[/]")
-        elif not self._dispatch(cmd):
+        elif not self._dispatch(cmd, speaker):
             log.write("[dim](busy — one sec)[/]")
 
     def _refresh_status(self) -> None:

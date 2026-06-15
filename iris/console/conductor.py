@@ -78,7 +78,7 @@ class Conductor:
             return
         self.respond_to(text)
 
-    def respond_to(self, text: str) -> None:
+    def respond_to(self, text: str, *, speaker: str = "") -> None:
         """Brain + speak for one utterance (the post-STT half). Blocking — call from
         a worker thread. Shared by push-to-talk and streaming/listen mode."""
         if not text or self.state in (State.THINKING, State.SPEAKING):
@@ -87,7 +87,7 @@ class Conductor:
         self._set_state(State.THINKING)
         try:
             reply = self.brain.respond(
-                text, on_filler=lambda i: self.emit(("filler", self.pick()))
+                text, speaker=speaker, on_filler=lambda i: self.emit(("filler", self.pick()))
             )
         except Exception as exc:  # noqa: BLE001
             self.emit(("error", f"brain: {exc}"))
