@@ -35,6 +35,23 @@ GIST_PREFIX = "According to my notes from earlier:"
 PRIVACY_NOTICE = "Context memory: local only."
 NO_MATCH_REPLY = "I don't have that in my notes — could you ask her to repeat it?"
 
+# Gist playback (ti-ccc.11.1.3)
+GIST_PLAYBACK_PREFIX = "According to my notes:"
+GIST_PLAYBACK_NO_GIST_REPLY = (
+    "I haven't compressed any notes yet — we're still early in the call."
+)
+GIST_PLAYBACK_TRIGGERS: frozenset[str] = frozenset({
+    "read me your notes",
+    "what are your notes",
+    "what are your notes?",
+    "read your notes",
+    "summarise what you have so far",
+    "summarize what you have so far",
+    "what have you got so far",
+    "what do you have so far",
+    "tell me your notes",
+})
+
 # High-precision fields: digit numbers, written amounts, proper names, codes.
 _HEDGE_PATTERN = re.compile(
     r"\b\d[\d.,]*\b"                           # digit numbers (42, $80,000)
@@ -49,6 +66,16 @@ _HEDGE_PATTERN = re.compile(
     r"|\b[A-Z]{2,}[-]?\d+\b"                   # codes (RL-4492, ABC123)
     r"|\b\d{4,}\b",                             # long standalone numbers
 )
+
+def is_gist_request(phrase: str) -> bool:
+    """Return True if ``phrase`` is a gist-playback trigger.
+
+    Strips a leading wake word ("Iris, …") before matching so the operator can
+    say "Iris, read me your notes" or just "read me your notes".
+    """
+    p = re.sub(r"^iris[,\s]+", "", phrase.strip(), flags=re.IGNORECASE).lower().rstrip("?.")
+    return p in GIST_PLAYBACK_TRIGGERS
+
 
 _STOP_WORDS = frozenset({
     "a", "an", "the", "is", "it", "at", "what", "was", "did", "you",
@@ -186,6 +213,22 @@ class ConversationContext:
             )
 
         return LookupResult(tier="none", reply=NO_MATCH_REPLY, matches=[])
+
+    def read_gist(self) -> tuple[str, str]:
+        """Return (spoken_reply, console_annotation) for a gist playback request.
+
+        Spoken reply is prefixed with ``GIST_PLAYBACK_PREFIX`` when a gist exists,
+        or ``GIST_PLAYBACK_NO_GIST_REPLY`` when fewer than 12 turns have been added.
+        Console annotation: ``[context: gist playback requested — turns N]``.
+        """
+        size = len(self._window)
+        ann = f"[context: gist playback requested — turns {size}]"
+        with self._gist_lock:
+            gist = self._gist
+            active = self._gist_active
+        if active and gist:
+            return f"{GIST_PLAYBACK_PREFIX} {gist}", ann
+        return GIST_PLAYBACK_NO_GIST_REPLY, ann
 
     # --- properties ---
 
