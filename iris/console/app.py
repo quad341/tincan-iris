@@ -27,6 +27,7 @@ from textual.containers import Horizontal
 from textual.widgets import Footer, Header, RichLog, Static
 
 from ..addressing import address
+from .list_view import PostCallListView
 from ..audio.endpoint import default_endpoint
 from ..audio.streaming import StreamingTranscriber
 from ..audio.stt import default_stt
@@ -124,6 +125,13 @@ class ListPanel(Static):
         self.add_class("visible-panel")
         return True
 
+    def on_key(self, event) -> None:
+        if event.key == "v":
+            self.app.action_open_list_view()
+        elif event.key == "escape":
+            self.toggle_visible()
+            self.app.query_one("#log", RichLog).focus()
+
 
 class IrisConsole(App):
     TITLE = "Iris console"
@@ -203,6 +211,9 @@ class IrisConsole(App):
                     log.write(f"[red]✗ {ev[1]}[/]")
                 elif kind == "list":
                     self._on_list_event(ev)
+                elif kind == "call_ended":
+                    session_id = ev[1] if len(ev) > 1 else ""
+                    self._maybe_show_post_call_list(str(session_id))
                 elif kind == "filler":
                     self._note = f"… {ev[1]}"
                     self._refresh_status()
@@ -228,6 +239,17 @@ class IrisConsole(App):
             item_id, msg = ev[2], ev[3]
             log.write(f"[dim red]⟨list: lookup failed — {msg}⟩[/]")
             panel.on_lookup_failed(item_id, msg)
+
+    def _maybe_show_post_call_list(self, session_id: str) -> None:
+        """Auto-display PostCallListView when a call ends if an active list exists."""
+        try:
+            from ..list_store import CallListStore
+            store = CallListStore()
+            active = store.active_list(session_id)
+            if active is not None and store.get_items(active.id):
+                self.push_screen(PostCallListView(store, active))
+        except Exception:  # noqa: BLE001
+            pass
 
     def _dispatch(self, cmd: str, speaker: str = "") -> bool:
         """Run an addressed command if Iris is free. Returns True if dispatched."""
@@ -340,6 +362,12 @@ class IrisConsole(App):
         if src == "iris_ear.monitor":
             log.write("[dim]set the app's OUTPUT to Iris_Ear[/]")
         self._refresh_status()
+
+    def action_open_list_view(self) -> None:
+        """Open PostCallListView for the most recent active list."""
+        self._maybe_show_post_call_list(
+            getattr(self.conductor, "session_id", "") or ""
+        )
 
     def action_list_panel(self) -> None:
         """Toggle the right-side list panel (WCAG 2.1 AA: [L] moves focus in, [Esc] returns)."""
