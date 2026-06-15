@@ -197,7 +197,7 @@ class IrisConsole(App):
             log.write("[yellow]no longer hearing you[/]")
             self._refresh_status()
             return
-        stream = StreamingTranscriber(self._on_heard)
+        stream = StreamingTranscriber(self._on_heard, label="operator")
         if not stream.available():
             log.write("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
             return
@@ -216,7 +216,7 @@ class IrisConsole(App):
             return
         src = self.mic.far_source or "iris_ear.monitor"
         stream = StreamingTranscriber(
-            self._on_heard_far, source=src, backend=self.mic.far_backend
+            self._on_heard_far, source=src, backend=self.mic.far_backend, label="far"
         )
         if not stream.available():
             log.write("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
@@ -237,11 +237,11 @@ class IrisConsole(App):
             log.write("[yellow]respondent's commands blocked[/]")
         self._refresh_status()
 
-    def _on_heard(self, text: str) -> None:
-        self.events.put(("heard", text))  # reader thread -> main thread via the queue
+    def _on_heard(self, text: str, label: str) -> None:
+        self.events.put(("heard", text, label))  # reader thread -> main thread via the queue
 
-    def _on_heard_far(self, text: str) -> None:
-        self.events.put(("heard_far", text))
+    def _on_heard_far(self, text: str, label: str) -> None:
+        self.events.put(("heard_far", text, label))
 
     # --- controls --------------------------------------------------------------
     def action_interrupt(self) -> None:

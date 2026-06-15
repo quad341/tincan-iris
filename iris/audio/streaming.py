@@ -21,14 +21,19 @@ _DEFAULT_SIZE = os.environ.get("IRIS_WHISPER_MODEL_SIZE", "small.en")
 
 
 class StreamingTranscriber:
-    """Continuous mic -> VAD -> faster-whisper, calling ``on_text(text)`` per utterance."""
+    """Continuous mic -> VAD -> faster-whisper, calling ``on_text(text, label)`` per utterance.
+
+    ``label`` tags the logical source — e.g. ``"operator"`` for the local mic and
+    ``"far"`` for the call downlink — so the trust model can distinguish who spoke.
+    """
 
     def __init__(
         self,
-        on_text: Callable[[str], None],
+        on_text: Callable[[str, str], None],
         *,
-        source: str | None = None,    # source to capture (None = default mic)
+        source: str | None = None,    # audio device/node to capture (None = default mic)
         backend: str = "pulse",       # "pulse" (parecord) or "pw" (pw-record, for SCO nodes)
+        label: str = "",              # logical source tag emitted with each transcript
         python: str | None = None,
         model: str | None = None,
         isolate: bool = True,
@@ -37,6 +42,7 @@ class StreamingTranscriber:
         self.on_text = on_text
         self.source = source
         self.backend = backend
+        self.label = label
         self.python = python or os.environ.get(
             "IRIS_WHISPER_PYTHON", str(_REPO_ROOT / ".venv-whisper" / "bin" / "python")
         )
@@ -101,7 +107,7 @@ class StreamingTranscriber:
             if msg.get("ready"):
                 self._ready.set()
             elif "text" in msg:
-                self.on_text(msg["text"])
+                self.on_text(msg["text"], self.label)
 
     def wait_ready(self, timeout: float = 60.0) -> bool:
         return self._ready.wait(timeout)
