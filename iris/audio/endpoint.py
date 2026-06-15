@@ -257,6 +257,10 @@ def discover_sco_nodes() -> tuple[str | None, str | None]:
     return sink, source
 
 
+_AEC_SINK = "iris_aec_sink"
+_AEC_SRC = "iris_aec_src"
+
+
 class TincanSCOAudio(VirtualDeviceAudio):
     """Ride a real phone call over tincan's HFP/SCO audio.
 
@@ -269,6 +273,14 @@ class TincanSCOAudio(VirtualDeviceAudio):
     Unlike Discord's null-sinks, the SCO nodes are **native PipeWire nodes invisible
     to PulseAudio**, so this endpoint uses ``pw-cat``/``pw-record --target`` rather
     than ``paplay``/``parecord`` (hence ``far_backend = "pw"``).
+
+    AEC (headphone-free speakerphone):
+    Set ``aec=True`` after running ``scripts/aec_audio.sh up``.  The monitor no
+    longer plays through the default sink — it routes through ``iris_aec_sink``
+    instead, which is the reference input for PipeWire's WebRTC echo-canceller.
+    Push-to-talk then captures from ``iris_aec_src`` (the cleaned mic: Iris's voice
+    subtracted).  Result: the operator can address Iris over open speakers without
+    echo.  Enabled via ``IRIS_AEC=1`` in the environment.
 
     This is **media only** — it knows nothing about ringing, answering, or call
     state. Signaling lives in tincan's ``im.tincan.Calls`` D-Bus interface
@@ -287,17 +299,21 @@ class TincanSCOAudio(VirtualDeviceAudio):
         source: str | None = None,
         *,
         monitor: bool = True,
+        aec: bool = False,
         rate: int = 16000,
         channels: int = 1,
     ) -> None:
-        # capture_target=None -> push-to-talk uses the default mic (the operator).
-        super().__init__(sink, capture_target=None, rate=rate, channels=channels)
+        # With AEC: push-to-talk captures from iris_aec_src (cleaned mic).
+        # Without AEC: capture_target=None → default mic.
+        capture = _AEC_SRC if aec else None
+        super().__init__(sink, capture_target=capture, rate=rate, channels=channels)
         self.far_source = source  # the SCO downlink — the far party, for _far_stream
         self.far_backend = "pw"   # SCO source is a native PipeWire node -> pw-record
         # Also play Iris to the local default sink so the OPERATOR hears her too —
         # the supervised model means hearing both sides (mom on the downlink, Iris's
         # replies on the monitor). Use headphones to keep the monitor out of the mic.
         self.monitor = monitor
+        self.aec = aec
 
     def _player_cmd(self, wav: str) -> list[str]:
         # SCO nodes are native PipeWire nodes (invisible to PulseAudio/paplay):
@@ -305,7 +321,11 @@ class TincanSCOAudio(VirtualDeviceAudio):
         return ["pw-cat", "-p", "--target", self.playback_target, wav]
 
     def _monitor_cmd(self, wav: str) -> list[str]:
-        # Local default sink (operator's speakers) — no --target.
+        if self.aec:
+            # Route monitor through the AEC sink so it becomes the echo reference;
+            # module-echo-cancel then subtracts it from the mic before capture.
+            return ["paplay", f"--device={_AEC_SINK}", wav]
+        # Default: local speakers, no --target.
         return ["pw-cat", "-p", wav]
 
     def start_playback(self, wav_path: str) -> _MultiPlayback:
@@ -346,7 +366,8 @@ def default_endpoint() -> AudioEndpoint:
                 "tincan-sco: no HFP/SCO sink found — is a call active on the dongle? "
                 "Set IRIS_SCO_SINK / IRIS_SCO_SOURCE to override."
             )
-        return TincanSCOAudio(sink, source)
+        aec = os.environ.get("IRIS_AEC", "").strip() in ("1", "true", "yes")
+        return TincanSCOAudio(sink, source, aec=aec)
     target = os.environ.get("IRIS_PLAYBACK_TARGET")
     if target:
         return VirtualDeviceAudio(target, os.environ.get("IRIS_CAPTURE_TARGET"))
