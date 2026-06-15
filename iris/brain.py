@@ -40,7 +40,7 @@ class Brain:
         self.cfg = cfg
         self.skills = skills or default_registry()
         self.tier0 = Tier0Rules(self.skills)
-        self.tier1 = Tier1Qwen(cfg)
+        self.tier1 = Tier1Qwen(cfg, skills=self.skills)
         self.tier2 = Tier2RawHaiku(cfg)
 
     def _masked(
