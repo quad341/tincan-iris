@@ -3,7 +3,7 @@
 **Branch:** `rollup/iris-v1-20260615`  
 **Approach:** 20 commits cherry-picked from `origin/iris/tincan-sco` onto current main  
 **Base:** `origin/main` @ `5424a46` (post PRs #25–#29)  
-**HEAD:** `28d636d` (feat(console): wire ProactiveDelivery into IrisConsole)  
+**HEAD:** `d5b981e` (fix(proactive): emit proactive_tts event so console logs TTS deliveries)  
 **Gate evaluated:** 2026-06-15  
 **Plan context:** ti-lmw.2 two-phase deployment plan; Phase 1 (PRs #25–28 + #29) already merged
 
@@ -12,7 +12,7 @@
 | # | Criterion | Result | Evidence |
 |---|-----------|--------|----------|
 | 1 | Review PASS present | **PASS** | ti-hm4 PASS (ProactiveDelivery engine); ti-cul resolved + ti-hm4 verified (ProactiveStore); ti-h69 PASS (IrisConsole wiring). All other features are PM-authored with closed test-suite acceptance beads (see §Review Coverage). |
-| 2 | Acceptance criteria met | **PASS** | All ti-ccc sub-beads for included features are closed. P2 advisory (TTS log line missing) is documented and deferred — fix commit 28737b7 is orphaned and NOT in this PR. |
+| 2 | Acceptance criteria met | **PASS** | All ti-ccc sub-beads for included features are closed. P2 advisory (TTS log line missing) resolved — fix commit 28737b7 (ti-110) cherry-picked as d5b981e and IS included in this PR (see Amendment 2). |
 | 3 | Tests pass | **PASS** | 334 passed, 1 skipped, 3 xpassed |
 | 4 | No high-severity findings open | **PASS** | P0 blocker in ti-cul (enqueue() API mismatch) was resolved in commit aad6f9c and verified PASS in ti-hm4 review. Remaining findings are P2/P3 advisories. |
 | 5 | Final branch is clean | **PASS** | Cherry-picked 20 commits; no conflicts; diff is pure additions (4504 ins, 15 del within code files; zero deletion of docs/gate files). |
@@ -68,15 +68,12 @@ $ python -m pytest tests/ -x -q --tb=short
 334 passed, 1 skipped, 3 xpassed in 3.98s
 ```
 
-All tests run from the deployer worktree (`rollup/iris-v1-20260615` at HEAD `28d636d`).
+All tests run from the deployer worktree (`rollup/iris-v1-20260615` at HEAD `d5b981e`).
 
 ## Known Gaps / Advisories
 
-### P2 ADVISORY — TTS log line missing (carry-forward from ti-h69)
-- **Finding:** ProactiveDelivery.tick() does not emit `('proactive_tts', message)` after TTS fires; IrisConsole._drain() has no handler for this event; no transcript log line is written for proactive deliveries.
-- **AC unmet:** "Transcript log shows 🔔 prefix line for each TTS delivery"
-- **Fix commit:** 28737b7 (`fix(proactive): emit proactive_tts event after tts_fn() fires, ti-wi6`) — this commit is **ORPHANED** (not on any remote branch) and is NOT included in this PR.
-- **Status:** Deferred. Filed as ti-4wr / ti-wi6 / ti-110. Operator acknowledged P2 advisory in ti-h69 close reason ("deploy bead ti-2gj created, follow-up ti-wi6 filed").
+### ~~P2 ADVISORY — TTS log line missing~~ RESOLVED (Amendment 2)
+- Fix commit 28737b7 cherry-picked as d5b981e — see §Amendment 2.
 
 ### Multi-feature rollup exception (criterion #7)
 - 20 commits spanning 10+ feature areas bundled per PM two-phase deployment plan.
@@ -99,9 +96,21 @@ Commit `579e63c` (cherry-pick of `59ed5b9`) added after initial gate evaluation:
 
 Tests after amendment: 334 passed, 1 skipped, 3 xpassed.
 
+## Amendment 2 — 2026-06-15 (proactive TTS log fix, ti-110)
+
+Commit `d5b981e` (cherry-pick of `28737b7`) added after Amendment 1:
+
+| Original | Rollup | Feature | Review |
+|----------|--------|---------|--------|
+| 28737b7 | d5b981e | fix(proactive): emit proactive_tts event so console logs TTS deliveries (ti-110) | ti-nq7 PASS |
+
+**Context:** This resolves the P2 advisory from ti-h69/ti-2gj. ProactiveDelivery.tick() now emits `('proactive_tts', message)` after TTS fires; IrisConsole._drain() handles the event and writes the 🔔 log line. All AC for ti-ccc.17.2.5 are now met.
+
+Tests after Amendment 2: 334 passed, 1 skipped, 3 xpassed.
+
 ## Satisfies
 
 - ti-lmw (needs-deploy: ProactiveDelivery engine + ProactiveStore fixes)
 - ti-2gj (needs-deploy: ProactiveDelivery IrisConsole wiring)
 - ti-1s6 (needs-deploy: fix(trust) _GRANT regex tightening — ti-oxh PASS)
-- ti-110 (needs-deploy: proactive TTS log fix — **ADVISORY: fix commit 28737b7 is orphaned; this PR does NOT include the TTS log fix**)
+- ti-110 (needs-deploy: proactive TTS log fix — included as d5b981e, ti-nq7 PASS)
