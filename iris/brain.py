@@ -10,6 +10,7 @@ from .lanes import LaneResult, Tier0Rules, Tier1Qwen, Tier2RawHaiku
 from .latency import Timeline
 from .masking import run_with_masking
 from .skills import SkillRegistry, default_registry
+from .trust import TrustMode
 
 
 @dataclass
@@ -67,13 +68,16 @@ class Brain:
         text: str,
         *,
         speaker: str = "",
+        far_trust: TrustMode = TrustMode.FULL,
         on_filler: Callable[[int], None] | None = None,
     ) -> Reply:
         tl = Timeline()
+        demo_mode = speaker == "far" and far_trust is TrustMode.DEMO
 
         # Explicit escalation — "ask Haiku about X" -> Tier 2 (raw text, slow).
+        # Blocked in DEMO mode: the far party cannot reach the cloud tier.
         m = self._ASK_HAIKU.match(text.strip())
-        if m and self.cfg.haiku_enabled:
+        if m and self.cfg.haiku_enabled and not demo_mode:
             try:
                 r2 = self._masked(lambda: self.tier2.handle(m.group(1).strip()), "tier2-haiku", on_filler)
                 tl.mark("tier2-haiku")
@@ -81,6 +85,12 @@ class Brain:
             except Exception as exc:  # noqa: BLE001 — degrade gracefully, don't crash
                 tl.mark("tier2-haiku(failed)")
                 return Reply(f"(couldn't reach Haiku: {exc})", "tier2-haiku", tl, speaker=speaker)
+        if m and demo_mode:
+            tl.mark("tier2-haiku(blocked-demo)")
+            return Reply(
+                "Sorry — I can only help with that once the operator grants full access.",
+                "tier2-haiku(blocked-demo)", tl, speaker=speaker,
+            )
 
         # Tier 0 — deterministic local commands (sub-millisecond, never slow).
         r0 = self.tier0.handle(text)

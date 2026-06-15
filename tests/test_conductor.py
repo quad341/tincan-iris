@@ -147,3 +147,43 @@ def test_respond_to_threads_speaker_far():
     c.respond_to("what time is it", speaker="far")
     _, kwargs = c.brain.respond.call_args
     assert kwargs.get("speaker") == "far"
+
+
+# --- trust model ---
+
+from iris.trust import TrustMode  # noqa: E402
+
+
+def test_far_trust_default_is_demo():
+    c, _events, _mic, _play = _make()
+    assert c.far_trust is TrustMode.DEMO
+
+
+def test_grant_far_elevates_to_full():
+    c, events, _mic, _play = _make()
+    c.grant_far()
+    assert c.far_trust is TrustMode.FULL
+    assert any(e == ("far_trust", TrustMode.FULL) for e in events)
+
+
+def test_reset_far_trust_restores_demo():
+    c, events, _mic, _play = _make()
+    c.grant_far()
+    c.reset_far_trust()
+    assert c.far_trust is TrustMode.DEMO
+    assert any(e == ("far_trust", TrustMode.DEMO) for e in events)
+
+
+def test_far_trust_threaded_to_brain():
+    c, _events, _mic, _play = _make()
+    c.grant_far()
+    c.respond_to("tell me something", speaker="far")
+    _, kwargs = c.brain.respond.call_args
+    assert kwargs.get("far_trust") is TrustMode.FULL
+
+
+def test_far_demo_trust_threaded_to_brain():
+    c, _events, _mic, _play = _make()
+    c.respond_to("tell me something", speaker="far")
+    _, kwargs = c.brain.respond.call_args
+    assert kwargs.get("far_trust") is TrustMode.DEMO

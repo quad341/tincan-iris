@@ -31,11 +31,18 @@ from ..audio.stt import default_stt
 from ..audio.tts import default_tts
 from ..brain import Brain
 from ..fillers import filler_picker
+from ..trust import TrustMode
 from .conductor import Conductor, State
 
 # Addressed stop words -> a hard interrupt (cut her off now, no spoken reply).
 _STOP = re.compile(
     r"^\s*(?:stop|stand[ -]?down|cancel|never ?mind|quiet|enough|shush|hush)\b",
+    re.IGNORECASE,
+)
+
+# Grant far party full access — operator mic only; cannot be spoofed from downlink.
+_GRANT = re.compile(
+    r"^\s*(?:grant|give|allow|trust)\b.*\b(?:full|access|them|her|him)\b",
     re.IGNORECASE,
 )
 
@@ -148,6 +155,10 @@ class IrisConsole(App):
             self.conductor.interrupt()  # cut her off now; no spoken reply
             log.write("[yellow](stopped)[/]")
             self._refresh_status()
+        elif _GRANT.match(cmd) and speaker == "operator":
+            self.conductor.grant_far()
+            log.write("[green]far party granted FULL access for this call[/]")
+            self._refresh_status()
         elif not self._dispatch(cmd, speaker):
             log.write("[dim](busy — one sec)[/]")
 
@@ -177,6 +188,8 @@ class IrisConsole(App):
             parts.append("[b]HEAR-THEM[/]")
         if self._approved:
             parts.append("[b green]THEM-APPROVED[/]")
+        if self._far_stream is not None and c.far_trust is TrustMode.FULL:
+            parts.append("[b green]FAR-FULL[/]")
         if self._note:
             parts.append(self._note)
         self.query_one("#status", Static).update(" " + "  ·  ".join(parts))
@@ -212,6 +225,7 @@ class IrisConsole(App):
         if self._far_stream is not None:
             self._far_stream.stop()
             self._far_stream = None
+            self.conductor.reset_far_trust()  # hangup/disconnect resets to DEMO
             log.write("[yellow]no longer hearing the respondent[/]")
             self._refresh_status()
             return
