@@ -18,6 +18,7 @@ from .proactive_store import ProactiveStore
 
 _SILENCE_GAP_S = 3.0
 _PRUNE_INTERVAL_S = 3600.0
+_AUTO_DISMISS_S = 10.0
 
 
 class SilenceTracker:
@@ -69,8 +70,13 @@ class ProactiveDelivery:
 
     Call tick() every ~0.5s from the console main loop.
 
-    Mode is read from ``self._mode`` (a string set externally by IrisConsole).
-    All dependencies are injected via constructor for unit-testability.
+    Mode is determined by ``mode_fn`` (a callable set at construction) if provided,
+    otherwise falls back to ``self._mode`` (string set externally, default 'idle').
+    All other dependencies are injected via constructor for unit-testability.
+
+    10s auto-dismiss: an item that has been delivered but not cycled away by
+    the operator within ``_AUTO_DISMISS_S`` seconds is dismissed and the badge
+    is cleared (PM decision Q1).
     """
 
     def __init__(
@@ -81,6 +87,7 @@ class ProactiveDelivery:
         silence_tracker: SilenceTracker,
         tts_fn: Callable[[str], None],
         emit: Callable[[tuple], None],
+        mode_fn: Callable[[], str] | None = None,
         last_delivered: float = 0.0,
     ) -> None:
         self._store = store
@@ -88,15 +95,29 @@ class ProactiveDelivery:
         self.silence_tracker = silence_tracker
         self._tts_fn = tts_fn
         self._emit = emit
+        self._mode_fn = mode_fn
         self.last_delivered = last_delivered
         self._last_prune: float = 0.0
         self._mode: str = "idle"
+        self._shown_id: int | None = None
+        self._shown_at: float = 0.0
+
+    def reset_shown(self) -> None:
+        """Call when the operator cycles away from the current badge item."""
+        self._shown_id = None
+        self._shown_at = 0.0
 
     def tick(self) -> None:
         if not self._cfg.proactive_enabled:
             return
 
         now = time.time()
+
+        if self._shown_id is not None and now - self._shown_at > _AUTO_DISMISS_S:
+            self._store.dismiss(self._shown_id)
+            self._emit(("proactive_badge", "", 0))
+            self._shown_id = None
+            self._shown_at = 0.0
 
         if now - self._last_prune >= _PRUNE_INTERVAL_S:
             self._store.prune()
@@ -112,7 +133,7 @@ class ProactiveDelivery:
         if now - self.last_delivered < self._cfg.proactive_cooldown_s:
             return
 
-        mode = self._mode
+        mode = self._mode_fn() if self._mode_fn is not None else self._mode
 
         if mode == "far":
             # Safety invariant: no TTS during live call (SPEAK_DURING_CALL=False).
@@ -129,5 +150,7 @@ class ProactiveDelivery:
                 self._emit(("proactive_badge", item.message, self._store.pending_count()))
                 self._store.mark_delivered(item.id)
                 self.last_delivered = now
+                self._shown_id = item.id
+                self._shown_at = now
             else:
                 self._emit(("proactive_badge", item.message, self._store.pending_count()))

@@ -34,6 +34,8 @@ from ..audio.stt import default_stt
 from ..audio.tts import default_tts
 from ..brain import Brain
 from ..fillers import filler_picker
+from ..proactive_delivery import ProactiveDelivery, SilenceTracker
+from ..proactive_store import ProactiveStore
 from ..trust import TrustMode
 from .conductor import Conductor, State
 
@@ -150,6 +152,7 @@ class IrisConsole(App):
         Binding("a", "approve", "approve them"),
         Binding("i", "interrupt", "interrupt", priority=True),
         Binding("m", "mute", "mute"),
+        Binding("n", "notification", "next notif", show=False),
         Binding("c", "commands", "commands"),
         Binding("q", "quit", "quit", priority=True),
     ]
@@ -169,6 +172,11 @@ class IrisConsole(App):
         self._stream: StreamingTranscriber | None = None      # you (operator mic)
         self._far_stream: StreamingTranscriber | None = None  # the respondent
         self._approved = False                                # act on their commands?
+        self._proactive_badge: str = ""
+        self._proactive_queue_count: int = 0
+        self._current_notification_id: int | None = None
+        self._silence_tracker = SilenceTracker()
+        self._proactive_store = ProactiveStore()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -185,6 +193,26 @@ class IrisConsole(App):
         if not self.stt.available():
             log.write("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
         self.set_interval(0.05, self._drain)
+
+        def _current_mode() -> str:
+            if self._far_stream is not None:
+                return "far"
+            if self._stream is not None:
+                return "listen"
+            return "idle"
+
+        self._proactive_delivery = ProactiveDelivery(
+            store=self._proactive_store,
+            cfg=self.brain.cfg,
+            mode_fn=_current_mode,
+            silence_tracker=self._silence_tracker,
+            tts_fn=lambda msg: self.run_worker(
+                lambda m=msg: self.mic.start_playback(self.conductor.tts.synth(m)),
+                thread=True,
+            ),
+            emit=self.events.put,
+        )
+        self.set_interval(0.5, self._proactive_delivery.tick)
         self._refresh_status()
 
     def _drain(self) -> None:
@@ -214,6 +242,11 @@ class IrisConsole(App):
                 elif kind == "call_ended":
                     session_id = ev[1] if len(ev) > 1 else ""
                     self._maybe_show_post_call_list(str(session_id))
+                elif kind == "proactive_badge":
+                    self._proactive_badge = ev[1][:40] if ev[1] else ""
+                    self._proactive_queue_count = ev[2] if len(ev) > 2 else 0
+                    self._refresh_status()
+                    self._toggle_notification_binding()
                 elif kind == "filler":
                     self._note = f"… {ev[1]}"
                     self._refresh_status()
@@ -263,6 +296,7 @@ class IrisConsole(App):
 
     def _on_heard_main(self, text: str, speaker: str = "") -> None:
         """A streamed utterance from YOU (main thread): act only if addressed."""
+        self._silence_tracker.touch()
         log = self.query_one("#log", RichLog)
         cmd = address(text)
         if cmd is None:
@@ -310,6 +344,13 @@ class IrisConsole(App):
             parts.append("[b green]THEM-APPROVED[/]")
         if self._far_stream is not None and c.far_trust is TrustMode.FULL:
             parts.append("[b green]FAR-FULL[/]")
+        if self._proactive_badge:
+            if self._proactive_queue_count > 1:
+                parts.append(
+                    f"[b yellow]🔔 {self._proactive_queue_count} pending  ·  press [n] to cycle[/]"
+                )
+            else:
+                parts.append(f"[b yellow]🔔 {self._proactive_badge}[/]")
         if self._note:
             parts.append(self._note)
         self.query_one("#status", Static).update(" " + "  ·  ".join(parts))
@@ -413,6 +454,30 @@ class IrisConsole(App):
         for name, example in self.brain.tier0.commands():
             log.write(f'  [cyan]{name:<10}[/] [dim]e.g.[/] "{example}"')
         log.write('[dim]Anything else → local model · "ask Haiku about …" → cloud[/]')
+
+    def action_notification(self) -> None:
+        """Cycle to the next pending proactive notification ([n] key)."""
+        item = self._proactive_store.cycle_next(after_id=self._current_notification_id)
+        if item is None:
+            self._proactive_badge = ""
+            self._proactive_queue_count = 0
+            self._current_notification_id = None
+        else:
+            self._proactive_badge = item.message[:40]
+            self._proactive_queue_count = self._proactive_store.pending_count()
+            self._current_notification_id = item.id
+        self._proactive_delivery.reset_shown()
+        self._refresh_status()
+        self._toggle_notification_binding()
+
+    def _toggle_notification_binding(self) -> None:
+        """Show [n] in the footer only when a badge is active."""
+        self.refresh_bindings()
+
+    def check_action(self, action: str, parameters: tuple) -> bool:
+        if action == "notification":
+            return bool(self._proactive_badge)
+        return True
 
     def on_unmount(self) -> None:
         for stream in (self._stream, self._far_stream):
