@@ -118,6 +118,8 @@ class LocalAudio:
         # How to capture far_source: "pulse" (parecord --device) or "pw"
         # (pw-record --target, for native PipeWire nodes like SCO).
         self.far_backend: str = "pulse"
+        # Microphone source for StreamingTranscriber; None = default device.
+        self.capture_target: str | None = None
 
     # --- playback (mouth) ---
     def _player_cmd(self, wav: str) -> list[str]:
@@ -257,8 +259,13 @@ def discover_sco_nodes() -> tuple[str | None, str | None]:
     return sink, source
 
 
+# SCO (HFP phone-call) AEC nodes — see TincanSCOAudio.
 _AEC_SINK = "iris_aec_sink"
 _AEC_SRC = "iris_aec_src"
+
+# PulseAudio source created by module-echo-cancel for the virtual-audio (Discord/Zoom) path.
+# Set up via scripts/virtual_audio.sh aec-up; enabled via IRIS_VA_AEC=1.
+_VA_AEC_SRC = "iris_va_aec_src"
 
 
 class TincanSCOAudio(VirtualDeviceAudio):
@@ -395,7 +402,10 @@ def default_endpoint() -> AudioEndpoint:
         return TincanSCOAudio(sink, source, aec=aec)
     target = os.environ.get("IRIS_PLAYBACK_TARGET")
     if target:
-        return VirtualDeviceAudio(target, os.environ.get("IRIS_CAPTURE_TARGET"))
+        capture = os.environ.get("IRIS_CAPTURE_TARGET") or (
+            _VA_AEC_SRC if os.environ.get("IRIS_VA_AEC") else None
+        )
+        return VirtualDeviceAudio(target, capture)
     # Named local devices (USB headset, etc.)
     play_dev = os.environ.get("IRIS_PLAYBACK_DEVICE")
     cap_dev = os.environ.get("IRIS_CAPTURE_DEVICE")
