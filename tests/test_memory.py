@@ -24,6 +24,7 @@ from iris.memory import (
     MemoryManager,
     MemoryProvider,
     MemoryStore,
+    Note,
     RollingWindow,
     TranscriptStore,
     _cosine,
@@ -523,3 +524,209 @@ def test_config_default_embedding_model():
 def test_config_embedding_model_overridable():
     cfg = Config(embedding_model="mxbai-embed-large")
     assert cfg.embedding_model == "mxbai-embed-large"
+
+
+# ---------------------------------------------------------------------------
+# TranscriptStore new helpers
+# ---------------------------------------------------------------------------
+
+
+def test_transcript_store_is_session_ended_false_before_end():
+    ts = TranscriptStore()
+    ts.start_session("s1", "alice")
+    assert ts.is_session_ended("s1") is False
+
+
+def test_transcript_store_is_session_ended_true_after_end():
+    ts = TranscriptStore()
+    ts.start_session("s1", "alice")
+    ts.end_session("s1")
+    assert ts.is_session_ended("s1") is True
+
+
+def test_transcript_store_is_session_ended_unknown_session():
+    ts = TranscriptStore()
+    assert ts.is_session_ended("no-such") is False
+
+
+def test_transcript_store_get_session_contact_id():
+    ts = TranscriptStore()
+    ts.start_session("s1", "alice")
+    assert ts.get_session_contact_id("s1") == "alice"
+
+
+def test_transcript_store_get_session_contact_id_unknown():
+    ts = TranscriptStore()
+    assert ts.get_session_contact_id("no-such") is None
+
+
+def test_transcript_store_end_session_with_gist():
+    ts = TranscriptStore()
+    ts.start_session("s1", "alice")
+    ts.end_session_with_gist("s1", "We discussed the Q3 budget.")
+    row = ts._conn.execute(
+        "SELECT ended_at, final_gist FROM SESSIONS WHERE session_id='s1'"
+    ).fetchone()
+    assert row[0] is not None
+    assert row[1] == "We discussed the Q3 budget."
+
+
+def test_transcript_store_end_session_with_gist_idempotent():
+    ts = TranscriptStore()
+    ts.start_session("s1", "alice")
+    ts.end_session_with_gist("s1", "first summary")
+    ts.end_session_with_gist("s1", "should be ignored")
+    row = ts._conn.execute("SELECT final_gist FROM SESSIONS WHERE session_id='s1'").fetchone()
+    assert row[0] == "first summary"
+
+
+def test_transcript_store_insert_embedding_with_source_fields():
+    ts = TranscriptStore()
+    ts.insert_embedding("s1", "alice", "summary text", [0.1], source_type="gist", source_id="s1")
+    row = ts._conn.execute(
+        "SELECT source_type, source_id FROM EMBEDDINGS WHERE session_id='s1'"
+    ).fetchone()
+    assert row[0] == "gist"
+    assert row[1] == "s1"
+
+
+def test_transcript_store_insert_embedding_default_source_type():
+    ts = TranscriptStore()
+    ts.insert_embedding("s1", "alice", "a turn", None)
+    row = ts._conn.execute("SELECT source_type FROM EMBEDDINGS WHERE session_id='s1'").fetchone()
+    assert row[0] == "turn"
+
+
+# ---------------------------------------------------------------------------
+# Note
+# ---------------------------------------------------------------------------
+
+
+def test_note_dataclass_defaults():
+    n = Note(id=0, text="hello")
+    assert n.open is True
+
+
+def test_memory_manager_add_note_returns_incrementing_ids():
+    mm = MemoryManager(TranscriptStore())
+    id0 = mm.add_note("first note")
+    id1 = mm.add_note("second note")
+    assert id0 == 0
+    assert id1 == 1
+
+
+def test_memory_manager_call_start_resets_notes():
+    mm = MemoryManager(TranscriptStore())
+    mm.add_note("pre-call note")
+    mm.call_start("s1", "alice")
+    assert mm._notes == []
+
+
+# ---------------------------------------------------------------------------
+# MemoryManager.call_end
+# ---------------------------------------------------------------------------
+
+
+def _make_mm_with_mocked_qwen(engine=None):
+    """Return a MemoryManager whose _qwen_summarise is patched to avoid network."""
+    ts = TranscriptStore()
+    ts.start_session("s1", "alice")
+    mm = MemoryManager(ts, engine=engine)
+    mm._qwen_summarise = MagicMock(return_value="Final summary of the call.")
+    return mm, ts
+
+
+def test_call_end_returns_immediately():
+    mm, ts = _make_mm_with_mocked_qwen()
+    mm.call_start("s1", "alice")
+    start = time.monotonic()
+    mm.call_end("s1")
+    elapsed = time.monotonic() - start
+    assert elapsed < 0.05, f"call_end blocked for {elapsed:.3f}s — must return ≤1ms"
+    time.sleep(0.1)  # let archive thread finish
+
+
+def test_call_end_writes_final_gist_to_sessions():
+    mm, ts = _make_mm_with_mocked_qwen()
+    mm._qwen_summarise.return_value = "Discussed project X."
+    mm.call_start("s1", "alice")
+    mm.call_end("s1")
+    time.sleep(0.1)
+    assert ts.is_session_ended("s1")
+    row = ts._conn.execute("SELECT final_gist FROM SESSIONS WHERE session_id='s1'").fetchone()
+    assert row[0] == "Discussed project X."
+
+
+def test_call_end_idempotent_second_call_is_noop():
+    mm, ts = _make_mm_with_mocked_qwen()
+    mm.call_start("s1", "alice")
+    mm.call_end("s1")
+    time.sleep(0.1)
+    first_ended = ts._conn.execute("SELECT ended_at FROM SESSIONS WHERE session_id='s1'").fetchone()[0]
+    mm._qwen_summarise.reset_mock()
+    mm.call_end("s1")
+    time.sleep(0.1)
+    second_ended = ts._conn.execute("SELECT ended_at FROM SESSIONS WHERE session_id='s1'").fetchone()[0]
+    assert first_ended == second_ended
+    mm._qwen_summarise.assert_not_called()
+
+
+def test_call_end_embeds_gist_when_engine_available():
+    engine = MagicMock()
+    engine.embed.return_value = [0.5, 0.5]
+    mm, ts = _make_mm_with_mocked_qwen(engine=engine)
+    mm.call_start("s1", "alice")
+    mm.call_end("s1")
+    time.sleep(0.1)
+    rows = ts.fetch_embeddings_for_contact("alice")
+    gist_rows = [r for r in rows if r[0].startswith("Final summary") or r[2] is not None]
+    assert len(gist_rows) >= 1
+
+
+def test_call_end_embeds_open_notes():
+    engine = MagicMock()
+    engine.embed.return_value = [0.1, 0.9]
+    mm, ts = _make_mm_with_mocked_qwen(engine=engine)
+    mm.call_start("s1", "alice")
+    mm.add_note("Check back on invoice #42")
+    mm.call_end("s1")
+    time.sleep(0.1)
+    rows = ts.fetch_embeddings_for_contact("alice")
+    note_rows = [r for r in rows if "invoice" in r[0].lower()]
+    assert len(note_rows) == 1
+
+
+def test_call_end_skips_closed_notes():
+    engine = MagicMock()
+    engine.embed.return_value = [0.1, 0.9]
+    mm, ts = _make_mm_with_mocked_qwen(engine=engine)
+    mm.call_start("s1", "alice")
+    mm.add_note("closed note")
+    mm._notes[0].open = False
+    mm.call_end("s1")
+    time.sleep(0.1)
+    rows = ts.fetch_embeddings_for_contact("alice")
+    note_rows = [r for r in rows if "closed note" in r[0]]
+    assert len(note_rows) == 0
+
+
+def test_call_end_does_not_raise_on_engine_failure():
+    engine = MagicMock()
+    engine.embed.side_effect = RuntimeError("no server")
+    mm, ts = _make_mm_with_mocked_qwen(engine=engine)
+    mm.call_start("s1", "alice")
+    mm.call_end("s1")
+    time.sleep(0.1)
+    # Session should still be ended even if embedding failed
+    assert ts.is_session_ended("s1")
+
+
+def test_call_end_shuts_down_gist_worker():
+    gs = GistStore()
+    gw = GistWorker(gs, "http://localhost:8080")
+    gw.start()
+    mm, ts = _make_mm_with_mocked_qwen()
+    mm.call_start("s1", "alice", gist_worker=gw, gist_store=gs)
+    mm.call_end("s1")
+    time.sleep(0.2)
+    assert not gw.is_alive()

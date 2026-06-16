@@ -53,28 +53,33 @@ CREATE TABLE IF NOT EXISTS SESSIONS (
     session_id TEXT NOT NULL,
     contact_id TEXT NOT NULL,
     started_at INTEGER NOT NULL,
-    ended_at   INTEGER
+    ended_at   INTEGER,
+    final_gist TEXT
 )
 """
 
 _EMBEDDINGS_DDL_VEC = """
 CREATE VIRTUAL TABLE IF NOT EXISTS EMBEDDINGS USING vec0(
-    session_id TEXT NOT NULL,
-    contact_id TEXT NOT NULL,
-    text       TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    embedding  float[{dim}]
+    session_id  TEXT NOT NULL,
+    contact_id  TEXT NOT NULL,
+    text        TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    source_id   TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    embedding   float[{dim}]
 )
 """
 
 _EMBEDDINGS_DDL_PLAIN = """
 CREATE TABLE IF NOT EXISTS EMBEDDINGS (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
-    contact_id TEXT NOT NULL,
-    text       TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    embedding  BLOB
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT NOT NULL,
+    contact_id  TEXT NOT NULL,
+    text        TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT 'turn',
+    source_id   TEXT NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL,
+    embedding   BLOB
 )
 """
 
@@ -140,6 +145,8 @@ class TranscriptStore:
         contact_id: str,
         text: str,
         embedding: list[float] | None,
+        source_type: str = "turn",
+        source_id: str = "",
     ) -> None:
         if not contact_id:
             raise ValueError("contact_id must not be empty")
@@ -147,11 +154,39 @@ class TranscriptStore:
         with self._lock:
             assert self._conn is not None
             self._conn.execute(
-                "INSERT INTO EMBEDDINGS (session_id, contact_id, text, created_at, embedding)"
-                " VALUES (?,?,?,?,?)",
-                (session_id, contact_id, text, int(time.time()), blob),
+                "INSERT INTO EMBEDDINGS"
+                " (session_id, contact_id, text, source_type, source_id, created_at, embedding)"
+                " VALUES (?,?,?,?,?,?,?)",
+                (session_id, contact_id, text, source_type, source_id, int(time.time()), blob),
             )
             self._conn.commit()
+
+    def end_session_with_gist(self, session_id: str, final_gist: str) -> None:
+        """Set ended_at and store final_gist in one write (gist persists even if embed fails)."""
+        with self._lock:
+            assert self._conn is not None
+            self._conn.execute(
+                "UPDATE SESSIONS SET ended_at=?, final_gist=?"
+                " WHERE session_id=? AND ended_at IS NULL",
+                (int(time.time()), final_gist, session_id),
+            )
+            self._conn.commit()
+
+    def is_session_ended(self, session_id: str) -> bool:
+        with self._lock:
+            assert self._conn is not None
+            row = self._conn.execute(
+                "SELECT ended_at FROM SESSIONS WHERE session_id=?", (session_id,)
+            ).fetchone()
+        return row is not None and row[0] is not None
+
+    def get_session_contact_id(self, session_id: str) -> str | None:
+        with self._lock:
+            assert self._conn is not None
+            row = self._conn.execute(
+                "SELECT contact_id FROM SESSIONS WHERE session_id=?", (session_id,)
+            ).fetchone()
+        return row[0] if row else None
 
     def fetch_embeddings_for_contact(
         self, contact_id: str
@@ -421,6 +456,22 @@ def _format_hint(rows: list[tuple[str, int]]) -> str:
     return "\n".join(parts)
 
 
+@dataclass
+class Note:
+    id: int
+    text: str
+    open: bool = True
+
+
+_FINAL_GIST_PROMPT = (
+    "Write final summary of this call in ≤4 sentences. Include main topics, "
+    "decisions, open action items. This is the permanent record.\n\n"
+    "Running summary: {gist}\nRecent turns: {last_10}"
+)
+
+_ARCHIVE_JOIN_TIMEOUT_S = 2.0
+
+
 class MemoryManager:
     """Drives L3 retrieval at call_start and archival at call_end."""
 
@@ -428,18 +479,50 @@ class MemoryManager:
         self,
         transcript_store: TranscriptStore,
         engine: EmbeddingEngine | None = None,
+        qwen_base_url: str = "http://127.0.0.1:8080",
         top_k: int = 5,
     ) -> None:
         self._store = transcript_store
         self._engine = engine
+        self._qwen_base_url = qwen_base_url
         self._top_k = top_k
+        self._notes: list[Note] = []
+        self._next_note_id = 0
+        # Call context — set during call_start, used by call_end.
+        self._active_session_id: str = ""
+        self._active_contact_id: str = ""
+        self._active_gist_worker: GistWorker | None = None
+        self._active_gist_store: GistStore | None = None
+        self._active_window: RollingWindow | None = None
 
-    def call_start(self, session_id: str, contact_id: str) -> str:
+    def add_note(self, text: str) -> int:
+        """Record an operator note for the current call. Returns the note id."""
+        note = Note(id=self._next_note_id, text=text)
+        self._next_note_id += 1
+        self._notes.append(note)
+        return note.id
+
+    def call_start(
+        self,
+        session_id: str,
+        contact_id: str,
+        gist_worker: GistWorker | None = None,
+        gist_store: GistStore | None = None,
+        window: RollingWindow | None = None,
+    ) -> str:
         """Embed a contact query, ANN-search, rerank by recency, return ≤100 token hint.
 
+        Stores L1/L2 context (gist_worker, gist_store, window) for use by call_end.
         Returns '' if contact_id is empty, embedding unavailable, or 0 results.
         Any failure → ''.
         """
+        self._active_session_id = session_id
+        self._active_contact_id = contact_id
+        self._active_gist_worker = gist_worker
+        self._active_gist_store = gist_store
+        self._active_window = window
+        self._notes = []
+        self._next_note_id = 0
         try:
             if not contact_id:
                 return ""
@@ -463,4 +546,91 @@ class MemoryManager:
                 return ""
             return _format_hint(top)
         except Exception:  # noqa: BLE001 — never block a call
+            return ""
+
+    def call_end(self, session_id: str) -> None:
+        """Fire background archival and return immediately (≤1ms)."""
+        threading.Thread(
+            daemon=True, target=self._archive, args=(session_id,), name="mm-archive"
+        ).start()
+
+    def _archive(self, session_id: str) -> None:
+        try:
+            # Idempotency: skip if session already ended.
+            if self._store.is_session_ended(session_id):
+                return
+            contact_id = self._store.get_session_contact_id(session_id)
+            if not contact_id:
+                return
+
+            # Step 1: shut down GistWorker and drain.
+            gist_worker = self._active_gist_worker
+            if gist_worker is not None:
+                gist_worker.shutdown()
+                gist_worker.join(timeout=_ARCHIVE_JOIN_TIMEOUT_S)
+
+            # Step 2: compose final gist via Qwen.
+            gist = self._active_gist_store.get() if self._active_gist_store else ""
+            window = self._active_window
+            last_turns = window.get()[-10:] if window else []
+            last_10 = "\n".join(last_turns)
+            final_gist = self._qwen_summarise(gist, last_10)
+
+            # Step 3: write final gist + ended_at BEFORE embedding (survives embed failure).
+            self._store.end_session_with_gist(session_id, final_gist)
+
+            # Step 4: embed final gist.
+            if self._engine and final_gist:
+                try:
+                    gist_vec = self._engine.embed(final_gist[:200])
+                except Exception:  # noqa: BLE001
+                    gist_vec = None
+                self._store.insert_embedding(
+                    session_id,
+                    contact_id,
+                    final_gist[:200],
+                    gist_vec,
+                    source_type="gist",
+                    source_id=session_id,
+                )
+
+            # Step 5: embed open notes.
+            if self._engine:
+                for note in self._notes:
+                    if not note.open:
+                        continue
+                    try:
+                        note_vec = self._engine.embed(note.text)
+                    except Exception:  # noqa: BLE001
+                        note_vec = None
+                    self._store.insert_embedding(
+                        session_id,
+                        contact_id,
+                        note.text,
+                        note_vec,
+                        source_type="note",
+                        source_id=str(note.id),
+                    )
+        except Exception:  # noqa: BLE001 — never re-raise; log and discard
+            log.exception("call_end archive failed for session %s", session_id)
+
+    def _qwen_summarise(self, gist: str, last_10: str) -> str:
+        """Call Qwen for the final call summary. Returns '' on any failure."""
+        try:
+            prompt_text = _FINAL_GIST_PROMPT.format(gist=gist, last_10=last_10)
+            prompt = (
+                "<|im_start|>system\nYou are a concise summariser.<|im_end|>\n"
+                f"<|im_start|>user\n{prompt_text}<|im_end|>\n<|im_start|>assistant\n"
+            )
+            body = json.dumps(
+                {"prompt": prompt, "n_predict": 80, "stream": False, "cache_prompt": False}
+            ).encode()
+            req = urllib.request.Request(
+                self._qwen_base_url + "/completion",
+                body,
+                {"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=30.0) as resp:
+                return json.loads(resp.read()).get("content", "").strip()
+        except Exception:  # noqa: BLE001
             return ""
