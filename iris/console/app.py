@@ -55,14 +55,6 @@ _STOP = re.compile(
     re.IGNORECASE,
 )
 
-# Grant far party full access — operator mic only; cannot be spoofed from downlink.
-# Requires "full access" as an adjacent phrase to avoid false positives on common
-# operator speech like "give him directions" or "allow her to speak".
-_GRANT = re.compile(
-    r"^\s*(?:grant|give|allow|trust)\b.*\bfull\s+access\b",
-    re.IGNORECASE,
-)
-
 # Strip Rich markup ([red], [/], [bold cyan]…) so the session logfile is plain text.
 _MARKUP = re.compile(r"\[/?[^\]]*\]")
 
@@ -447,10 +439,6 @@ class IrisConsole(App):
         elif _STOP.match(cmd):
             self.conductor.interrupt()  # cut her off now; no spoken reply
             self._w("[yellow](stopped)[/]")
-            self._refresh_status()
-        elif _GRANT.match(cmd) and speaker == "operator":
-            self.conductor.grant_far()
-            self._w("[green]far party granted FULL access for this call[/]")
             self._refresh_status()
         elif not self._dispatch(cmd, speaker):
             self._w("[dim](busy — one sec)[/]")

@@ -1,11 +1,18 @@
-"""Call-level trust model — DEMO vs FULL mode for the far party.
+"""Call-level trust model — three-step arm/grant flow.
 
-The far party (call downlink) is DEMO by default: they get Tier0 deterministic
-commands and Tier1 local-LLM knowledge, but cloud escalation (Tier2) is blocked
-and future auth'd skill integrations (calendar, email) must gate on trust mode.
-The operator is always FULL. The operator can grant FULL to the far party for the
-current call via a voice command on the operator mic; this flag auto-resets on
-hangup so the default is restored per call.
+Levels (ascending privilege):
+  NONE  — unarmed; far party restricted to Tier0+Tier1; cloud and auth'd skills blocked.
+  LOCAL — armed; operator elevated (FULL), far party still DEMO.
+  BOTH  — armed + granted; operator and far party both FULL.
+
+Transition:
+  arm()    → NONE (armed-flag set; trust level unchanged)
+  grant()  → cycles NONE→LOCAL→BOTH→NONE (only when armed)
+  disarm() → clears armed flag AND reverts to NONE
+
+Backward-compat aliases (removed when call sites catch up — ti-qt1i.1.5):
+  DEMO == NONE  (far-only name; kept so old ``is TrustMode.DEMO`` checks still pass)
+  FULL == BOTH  (old "grant" name; kept so old ``is TrustMode.FULL`` checks still pass)
 """
 from __future__ import annotations
 
@@ -13,5 +20,9 @@ from enum import Enum
 
 
 class TrustMode(str, Enum):
-    DEMO = "demo"   # Tier0 + Tier1 local knowledge; cloud and auth'd skills blocked
-    FULL = "full"   # all tiers, all skills; operator default
+    NONE  = "none"   # unarmed — no elevation; cloud and auth'd skills blocked for far party
+    LOCAL = "local"  # armed — operator FULL, far party DEMO
+    BOTH  = "both"   # armed + granted — operator FULL, far party FULL
+    # Backward-compat aliases — DEMO is NONE, FULL is BOTH
+    DEMO  = "none"
+    FULL  = "both"

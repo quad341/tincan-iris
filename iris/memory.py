@@ -13,6 +13,7 @@ import collections
 import json
 import logging
 import queue
+import struct
 import threading
 import time
 import urllib.request
@@ -150,7 +151,12 @@ class TranscriptStore:
     ) -> None:
         if not contact_id:
             raise ValueError("contact_id must not be empty")
-        blob = json.dumps(embedding).encode() if embedding else None
+        if embedding and self._vec_loaded:
+            blob: bytes | None = struct.pack(f"{len(embedding)}f", *embedding)
+        elif embedding:
+            blob = json.dumps(embedding).encode()
+        else:
+            blob = None
         with self._lock:
             assert self._conn is not None
             self._conn.execute(
@@ -201,7 +207,13 @@ class TranscriptStore:
             ).fetchall()
         result = []
         for text, created_at, blob in rows:
-            emb = json.loads(blob) if blob else None
+            if blob and self._vec_loaded:
+                n = len(blob) // 4
+                emb: list[float] | None = list(struct.unpack(f"{n}f", blob))
+            elif blob:
+                emb = json.loads(blob)
+            else:
+                emb = None
             result.append((text, created_at, emb))
         return result
 
