@@ -1,23 +1,32 @@
-"""Screen call flow — ti-pwms.
+"""Screen call flow and screen-to-take_message pivot — ti-pwms / ti-eki3.
 
-Handles inbound calls with handling_rule='screen' (and unknown callers as
-fallback).  Runs on a blocking thread and communicates with the console via
-emit().
+ScreenCallFlow
+    Handles inbound calls with handling_rule='screen' (and unknown callers).
+    Runs on a blocking thread and communicates with the console via emit().
 
-Flow:
-  1. Play disclosure WAV (pre-rendered by disclosure.py)
-  2. "Can I ask who's calling and what this is about?"  →  capture (10 s)
-  3. Silence: re-ask once (5 s window); if still silent → farewell + hang up
-  4. Relay caller intro (≤20 words) to the operator via relay_fn
-  5. Wait relay_timeout_s for operator decision via get_decision():
-       "put_through"  → connect call, emit ("screen_put_through", caller_name)
-       "take_message" → emit ("screen_take_message", caller_name, caller_number)
-       "decline"      → speak goodbye to caller, hang up
-       ""  (timeout)  → auto-pivot: emit ("screen_take_message", caller_name, ...)
+    Flow:
+      1. Play disclosure WAV (pre-rendered by disclosure.py)
+      2. "Can I ask who's calling and what this is about?"  →  capture (10 s)
+      3. Silence: re-ask once (5 s window); if still silent → farewell + hang up
+      4. Relay caller intro (≤20 words) to the operator via relay_fn
+      5. Wait relay_timeout_s for operator decision via get_decision():
+           "put_through"  → connect call, emit ("screen_put_through", caller_name)
+           "take_message" → emit ("screen_take_message", caller_name, caller_number)
+           "decline"      → speak goodbye to caller, hang up
+           ""  (timeout)  → auto-pivot: emit ("screen_take_message", caller_name, ...)
 
-Two separate audio paths:
-  play_fn / capture_fn  — goes in/out through the active call (caller hears/speaks)
-  relay_fn              — goes to the operator's local speaker/headset
+    Two separate audio paths:
+      play_fn / capture_fn  — call audio (caller hears/speaks)
+      relay_fn              — operator's local speaker/headset
+
+ScreenPivotFlow
+    Abbreviated take-message used when ScreenCallFlow pivots to message-taking.
+    The caller already heard the disclosure; their name is already known.
+
+    Pivot script (ti-eki3):
+      "I'll pass that along. Is there anything you'd like to add, or a good
+       number to reach you?" → capture → confirm → goodbye → hang up
+      → emit ("take_message_done", ...) same as TakeMessageFlow
 
 The caller injects all dependencies so tests run without audio hardware.
 """
@@ -193,3 +202,107 @@ class ScreenCallFlow:
 
         # "take_message" or timeout ("") → pivot to take_message
         self.emit(("screen_take_message", intro, self.caller_number))
+
+
+# ---------------------------------------------------------------------------
+# ScreenPivotFlow — abbreviated take-message after a screen pivot (ti-eki3)
+# ---------------------------------------------------------------------------
+
+# Pivot capture window — same as the take_message addition window by default.
+_PIVOT_WINDOW_S: float = float(os.environ.get("IRIS_SC_PIVOT_S", "30"))
+
+
+class ScreenPivotFlow:
+    """Abbreviated take-message dialogue used after a ScreenCallFlow pivot.
+
+    The caller already heard the disclosure WAV during screening, and their
+    name is known from the intro they gave.  This flow skips both the
+    disclosure and the name-ask steps.
+
+    Pivot script:
+      1. "I'll pass that along. Is there anything you'd like to add, or a
+         good number to reach you?"  →  capture (_PIVOT_WINDOW_S)
+      2. "Got it — I'll make sure [contact] gets this.  Thanks for calling.
+         Goodbye."
+      3. Hang up → emit ("take_message_done", caller_name, addition, ...)
+
+    Emits the same ("take_message_done", ...) tuple as TakeMessageFlow so
+    the console can handle both with the same handler.
+
+    Parameters
+    ----------
+    tts            : TTS protocol — synth(text) → wav_path
+    stt            : STT protocol — transcribe(wav_path) → text
+    play_fn        : callable(wav_path) → None — plays into the call
+    capture_fn     : callable(seconds) → wav_path — records caller audio
+    hang_up_fn     : callable() → None
+    emit           : callable(event: tuple) → None — thread-safe event sink
+    caller_name    : name the caller gave during screening (may be "")
+    caller_number  : E.164 number (may be "")
+    contact_name   : roster display name of the called party (may be "")
+    """
+
+    def __init__(
+        self,
+        *,
+        tts: _TTS,
+        stt: _STT,
+        play_fn: Callable[[str], None],
+        capture_fn: Callable[[float], str],
+        hang_up_fn: Callable[[], None],
+        emit: Callable[[tuple], None],
+        caller_name: str = "",
+        caller_number: str = "",
+        contact_name: str = "",
+    ) -> None:
+        self.tts = tts
+        self.stt = stt
+        self.play_fn = play_fn
+        self.capture_fn = capture_fn
+        self.hang_up_fn = hang_up_fn
+        self.emit = emit
+        self.caller_name = caller_name.strip() or "the caller"
+        self.caller_number = caller_number.strip()
+        self.contact_name = contact_name.strip()
+
+    def _speak(self, text: str) -> None:
+        logger.debug("screen_pivot: speak: %s", text[:80])
+        wav = self.tts.synth(text)
+        self.play_fn(wav)
+
+    def _listen(self, window_s: float) -> str:
+        wav = self.capture_fn(window_s)
+        text = self.stt.transcribe(wav).strip()
+        logger.debug("screen_pivot: heard: %s", text[:80] if text else "(silence)")
+        return text
+
+    def run(self) -> None:
+        """Execute the pivot dialogue.  Blocking — call from a thread."""
+        try:
+            self._run()
+        except Exception:
+            logger.exception("screen_pivot flow crashed")
+            try:
+                self.hang_up_fn()
+            except Exception:
+                logger.exception("screen_pivot hang_up also failed")
+
+    def _run(self) -> None:
+        name = self.contact_name or "the person you're calling"
+
+        # Pivot greeting (disclosure already played; caller name already known)
+        self._speak(
+            "I'll pass that along. Is there anything you'd like to add, "
+            "or a good number to reach you?"
+        )
+        addition = self._listen(_PIVOT_WINDOW_S)
+
+        # Sign off
+        close_text = f"Got it — I'll make sure {name} gets this. Thanks for calling. Goodbye."
+        self._speak(close_text)
+
+        self.emit(
+            ("take_message_done", self.caller_name, addition,
+             self.contact_name, self.caller_number)
+        )
+        self.hang_up_fn()

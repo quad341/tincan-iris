@@ -1,4 +1,4 @@
-"""Tests for ScreenCallFlow — scripted screen-call dialogue (ti-pwms).
+"""Tests for ScreenCallFlow and ScreenPivotFlow (ti-pwms / ti-eki3).
 
 Uses stubs for TTS, STT, capture, play, relay, get_decision, put_through,
 and hang_up — no audio hardware or real processes needed.
@@ -10,7 +10,7 @@ import tempfile
 
 import pytest
 
-from iris.screen_call import ScreenCallFlow
+from iris.screen_call import ScreenCallFlow, ScreenPivotFlow
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +403,157 @@ def test_hang_up_called_on_crash():
         hang_up_fn=lambda: hung_up.append(True),
         emit=lambda _: None,
         contact_name="Alice",
+    )
+    flow.run()
+    assert len(hung_up) == 1
+
+
+# ===========================================================================
+# ScreenPivotFlow — abbreviated take-message after screen pivot (ti-eki3)
+# ===========================================================================
+
+def _pivot(
+    *,
+    stt_answers: list[str],
+    caller_name: str = "Bob Smith",
+    caller_number: str = "+15555550202",
+    contact_name: str = "Alice",
+) -> tuple[ScreenPivotFlow, _FakeTTS, list[tuple], list[bool]]:
+    """Build a ScreenPivotFlow with stubs; returns (flow, tts, events, hung_up)."""
+    tts = _FakeTTS()
+    stt = _FakeSTT(stt_answers)
+    events: list[tuple] = []
+    hung_up: list[bool] = []
+
+    flow = ScreenPivotFlow(
+        tts=tts,
+        stt=stt,
+        play_fn=lambda _: None,
+        capture_fn=lambda _s: "/tmp/cap.wav",
+        hang_up_fn=lambda: hung_up.append(True),
+        emit=events.append,
+        caller_name=caller_name,
+        caller_number=caller_number,
+        contact_name=contact_name,
+    )
+    return flow, tts, events, hung_up
+
+
+def test_pivot_emits_take_message_done():
+    """Pivot emits take_message_done event (same as TakeMessageFlow)."""
+    flow, tts, events, hung_up = _pivot(stt_answers=["My number is 555-1234."])
+    flow.run()
+    ev = next((e for e in events if e[0] == "take_message_done"), None)
+    assert ev is not None
+
+
+def test_pivot_event_contains_caller_name():
+    """take_message_done carries the caller_name from screening."""
+    flow, tts, events, hung_up = _pivot(
+        stt_answers=["Just call me back."],
+        caller_name="Janet Doe",
+    )
+    flow.run()
+    ev = next(e for e in events if e[0] == "take_message_done")
+    assert ev[1] == "Janet Doe"
+
+
+def test_pivot_event_contains_addition():
+    """take_message_done carries the caller's addition as the transcript."""
+    flow, tts, events, hung_up = _pivot(
+        stt_answers=["Reach me at 555-9999 after 3pm."],
+    )
+    flow.run()
+    ev = next(e for e in events if e[0] == "take_message_done")
+    assert "555-9999" in ev[2]
+
+
+def test_pivot_event_contains_contact_name():
+    """take_message_done carries the contact_name from the roster."""
+    flow, tts, events, hung_up = _pivot(
+        stt_answers=["Thanks."],
+        contact_name="Grace",
+    )
+    flow.run()
+    ev = next(e for e in events if e[0] == "take_message_done")
+    assert ev[3] == "Grace"
+
+
+def test_pivot_event_contains_caller_number():
+    flow, tts, events, hung_up = _pivot(
+        stt_answers=["Done."],
+        caller_number="+19995550101",
+    )
+    flow.run()
+    ev = next(e for e in events if e[0] == "take_message_done")
+    assert ev[4] == "+19995550101"
+
+
+def test_pivot_hangs_up():
+    flow, tts, events, hung_up = _pivot(stt_answers=["That's all."])
+    flow.run()
+    assert len(hung_up) == 1
+
+
+def test_pivot_says_goodbye():
+    flow, tts, events, hung_up = _pivot(stt_answers=["No, that's it."])
+    flow.run()
+    assert any("Goodbye" in t for t in tts.spoken)
+
+
+def test_pivot_says_pass_along():
+    """The pivot greeting starts with 'I'll pass that along'."""
+    flow, tts, events, hung_up = _pivot(stt_answers=[""])
+    flow.run()
+    assert any("pass that along" in t.lower() for t in tts.spoken)
+
+
+def test_pivot_only_one_capture():
+    """Pivot captures exactly once (no name-ask, no message-ask)."""
+    captured: list[float] = []
+    tts = _FakeTTS()
+    stt = _FakeSTT(["My number is 555-0000."])
+
+    flow = ScreenPivotFlow(
+        tts=tts,
+        stt=stt,
+        play_fn=lambda _: None,
+        capture_fn=lambda s: (captured.append(s), "/tmp/cap.wav")[1],
+        hang_up_fn=lambda: None,
+        emit=lambda _: None,
+        caller_name="Sam",
+        contact_name="Carol",
+    )
+    flow.run()
+    assert len(captured) == 1
+
+
+def test_pivot_empty_addition_still_emits():
+    """Silent caller → take_message_done still emitted with empty transcript."""
+    flow, tts, events, hung_up = _pivot(stt_answers=[""])
+    flow.run()
+    ev = next((e for e in events if e[0] == "take_message_done"), None)
+    assert ev is not None
+    assert ev[2] == ""
+
+
+def test_pivot_crash_safe():
+    """hang_up_fn is called even when TTS crashes."""
+    hung_up: list[bool] = []
+
+    class CrashingTTS:
+        def synth(self, text: str) -> str:
+            raise RuntimeError("TTS offline")
+
+    flow = ScreenPivotFlow(
+        tts=CrashingTTS(),
+        stt=_FakeSTT([]),
+        play_fn=lambda _: None,
+        capture_fn=lambda _s: "/tmp/cap.wav",
+        hang_up_fn=lambda: hung_up.append(True),
+        emit=lambda _: None,
+        caller_name="Sam",
+        contact_name="Carol",
     )
     flow.run()
     assert len(hung_up) == 1
