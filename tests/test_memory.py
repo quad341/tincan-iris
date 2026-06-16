@@ -48,7 +48,26 @@ def test_try_load_vec_returns_false_on_import_error():
     assert result is False
 
 
-def test_try_load_vec_returns_false_on_load_extension_error():
+def test_try_load_vec_returns_false_on_not_authorized():
+    """enable_load_extension(True) itself raises OperationalError on restricted builds."""
+    import sqlite3
+
+    class NoExtConn:
+        def enable_load_extension(self, flag: bool) -> None:
+            if flag:
+                raise sqlite3.OperationalError("not authorized")
+
+        def load_extension(self, path: str) -> None:
+            pass  # never reached
+
+    fake_mod = MagicMock()
+    fake_mod.loadable_path.return_value = "/some/path.so"
+    with patch.dict("sys.modules", {"sqlite_vec": fake_mod}):
+        result = _try_load_vec(NoExtConn())  # type: ignore[arg-type]
+    assert result is False
+
+
+def test_try_load_vec_returns_false_on_bad_path():
     import sqlite3
 
     conn = sqlite3.connect(":memory:")
@@ -58,6 +77,30 @@ def test_try_load_vec_returns_false_on_load_extension_error():
         result = _try_load_vec(conn)
     conn.close()
     assert result is False
+
+
+def test_try_load_vec_disables_extension_loading_after_failure():
+    """enable_load_extension(False) is called in finally even when load_extension fails."""
+    import sqlite3
+
+    class TrackingConn:
+        def __init__(self) -> None:
+            self.calls: list[bool] = []
+
+        def enable_load_extension(self, flag: bool) -> None:
+            self.calls.append(flag)
+
+        def load_extension(self, path: str) -> None:
+            raise sqlite3.OperationalError("no such file")
+
+    conn = TrackingConn()
+    fake_mod = MagicMock()
+    fake_mod.loadable_path.return_value = "/nonexistent.so"
+    with patch.dict("sys.modules", {"sqlite_vec": fake_mod}):
+        _try_load_vec(conn)  # type: ignore[arg-type]
+
+    assert True in conn.calls, "enable_load_extension(True) must be called"
+    assert False in conn.calls, "enable_load_extension(False) must be called in finally"
 
 
 # ---------------------------------------------------------------------------

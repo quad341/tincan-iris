@@ -34,8 +34,12 @@ def _try_load_vec(conn: sqlite3.Connection) -> bool:
     try:
         import sqlite_vec  # type: ignore[import]
 
-        conn.load_extension(sqlite_vec.loadable_path())
-        return True
+        conn.enable_load_extension(True)
+        try:
+            conn.load_extension(sqlite_vec.loadable_path())
+            return True
+        finally:
+            conn.enable_load_extension(False)
     except Exception:  # noqa: BLE001
         return False
 
