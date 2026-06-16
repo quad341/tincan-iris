@@ -177,7 +177,7 @@ class IrisConsole(App):
         Binding("l", "listen", "hear you"),
         Binding("L", "list_panel", "list"),
         Binding("f", "far", "hear them"),
-        Binding("a", "approve", "approve them"),
+        Binding("a", "approve", "grant full"),
         Binding("i", "interrupt", "interrupt", priority=True),
         Binding("m", "mute", "mute"),
         Binding("n", "notification", "next notif", show=False),
@@ -199,7 +199,6 @@ class IrisConsole(App):
         self._note = ""
         self._stream: StreamingTranscriber | None = None      # you (operator mic)
         self._far_stream: StreamingTranscriber | None = None  # the respondent
-        self._approved = False                                # act on their commands?
         self._log: RichLog | None = None                      # cached in on_mount
         self._logf, self._logpath = _open_log()               # plain-text session log
         self._proactive_badge: str = ""
@@ -358,7 +357,14 @@ class IrisConsole(App):
             self._w("[dim](busy — one sec)[/]")
 
     def _on_heard_far_main(self, text: str, speaker: str = "") -> None:
-        """A streamed utterance from the RESPONDENT: act only if approved."""
+        """A streamed utterance from the RESPONDENT: respond by default.
+
+        Far-party commands always reach the brain, which gates *capability* by
+        ``far_trust``: DEMO (the default) allows conversation only — Tier 0 +
+        local knowledge, no skills, data, or cloud — while the operator grants
+        FULL via [a] or the spoken "grant full access". The far party can never
+        self-escalate (this path has no grant branch). See ADR-0002.
+        """
         cmd = address(text)
         if cmd is None:
             self._w(f"[dim]them: {text}[/]")  # respondent, not addressing Iris
@@ -366,9 +372,7 @@ class IrisConsole(App):
         self._w(f"[magenta]them[/] → iris: {text}")
         if not cmd:
             return
-        if not self._approved:
-            self._w("[dim](respondent's command — not approved; press 'a' to allow)[/]")
-        elif not self._dispatch(cmd, speaker):
+        if not self._dispatch(cmd, speaker):
             self._w("[dim](busy — one sec)[/]")
 
     def _refresh_status(self) -> None:
@@ -380,9 +384,7 @@ class IrisConsole(App):
             parts.append("[b]HEAR-YOU[/]")
         if self._far_stream is not None:
             parts.append("[b]HEAR-THEM[/]")
-        if self._approved:
-            parts.append("[b green]THEM-APPROVED[/]")
-        if self._far_stream is not None and c.far_trust is TrustMode.FULL:
+        if c.far_trust is TrustMode.FULL:
             parts.append("[b green]FAR-FULL[/]")
         if self._proactive_badge:
             if self._proactive_queue_count > 1:
@@ -466,11 +468,16 @@ class IrisConsole(App):
             log.write("[dim]⟨list panel hidden⟩[/]")
 
     def action_approve(self) -> None:
-        self._approved = not self._approved
-        if self._approved:
-            self._w("[green]respondent's commands APPROVED — Iris will act on their \"Iris, …\"[/]")
+        """Operator grants/revokes the far party FULL access (skills + data) for
+        this call. Keyboard-only — like the spoken "grant full access", it can't
+        be triggered from the far party's channel. DEMO (chat only) is the default."""
+        c = self.conductor
+        if c.far_trust is TrustMode.FULL:
+            c.reset_far_trust()
+            self._w("[yellow]far party back to DEMO — conversation only, no tools or data[/]")
         else:
-            self._w("[yellow]respondent's commands blocked[/]")
+            c.grant_far()
+            self._w("[green]far party granted FULL access for this call — tools & data unlocked[/]")
         self._refresh_status()
 
     def _on_heard(self, text: str, label: str) -> None:
