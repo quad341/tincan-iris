@@ -51,7 +51,7 @@ def _try_load_vec(conn: sqlite3.Connection) -> bool:
 
 _SESSIONS_DDL = """
 CREATE TABLE IF NOT EXISTS SESSIONS (
-    session_id TEXT NOT NULL,
+    session_id TEXT NOT NULL PRIMARY KEY,
     contact_id TEXT NOT NULL,
     started_at INTEGER NOT NULL,
     ended_at   INTEGER,

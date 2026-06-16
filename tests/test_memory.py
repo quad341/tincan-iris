@@ -206,6 +206,33 @@ def test_transcript_store_close():
     assert ts._conn is None
 
 
+def test_sessions_primary_key_rejects_duplicate_session_id():
+    """SESSIONS.session_id PRIMARY KEY must reject duplicate inserts (ti-59wi)."""
+    import sqlite3
+    ts = TranscriptStore()
+    ts.start_session("dup-session", "alice")
+    with pytest.raises(sqlite3.IntegrityError):
+        ts._conn.execute(
+            "INSERT INTO SESSIONS (session_id, contact_id, started_at) VALUES (?,?,?)",
+            ("dup-session", "alice", 0),
+        )
+
+
+def test_vec_ddl_uses_float_column_not_blob():
+    """EMBEDDINGS vec0 table must use float[N] (ANN-indexed) not BLOB (ti-k15u).
+
+    When sqlite-vec is absent, the plain BLOB fallback table is created instead.
+    We verify that the _EMBEDDINGS_DDL_VEC constant contains 'float[' so a
+    DDL regression is caught at import time, and we verify the plain-table
+    fallback uses BLOB (so the two paths are clearly distinct).
+    """
+    from iris.memory import _EMBEDDINGS_DDL_VEC, _EMBEDDINGS_DDL_PLAIN
+    vec_ddl = _EMBEDDINGS_DDL_VEC.format(dim=768)
+    assert "float[768]" in vec_ddl, "vec0 DDL must use float[N] not BLOB"
+    assert "BLOB" not in vec_ddl.upper(), "vec0 DDL must not use BLOB column type"
+    assert "BLOB" in _EMBEDDINGS_DDL_PLAIN.upper(), "plain fallback DDL should use BLOB"
+
+
 # ---------------------------------------------------------------------------
 # GistStore
 # ---------------------------------------------------------------------------
