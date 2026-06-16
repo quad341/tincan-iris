@@ -8,6 +8,8 @@ and a command dump — over the local voice loop. Ways to talk:
   - approve [a]: allow the respondent's "Iris, …" commands to act (default OFF —
     their requests are shown but ignored until you approve).
   - list panel [L] (capital): toggle the right-side live list panel.
+  - ARM TRUST button: shown during calls with trust_tier=full contacts; grants full
+    access; replaced by amber TRUST ARMED badge after arming.
 
 Drives the UI-agnostic Conductor; the blocking pipeline runs in a Textual thread-
 worker so the UI stays responsive (and the interrupt key always lands).
@@ -30,9 +32,11 @@ from datetime import datetime
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
-from textual.widgets import Footer, Header, RichLog, Static
+from textual.widget import Widget
+from textual.widgets import Button, Footer, Header, RichLog, Static
 
 from ..addressing import address
+from ..prefs import PreferencesStore
 from .list_view import PostCallListView
 from ..audio.endpoint import default_endpoint
 from ..audio.streaming import StreamingTranscriber
@@ -78,6 +82,68 @@ def _open_log():
         return open(path, "w", buffering=1), path
     except OSError:
         return None, None
+
+
+class ActiveCallCard(Widget, can_focus=False):
+    """Card shown during active calls with trust_tier=full contacts.
+
+    Pre-arm: shows ARM TRUST button (Tab-reachable, Enter/Space activates).
+    Post-arm: replaces button with amber TRUST ARMED badge.
+    Visibility is controlled by show_card() / hide_card() on the IrisConsole.
+    """
+
+    DEFAULT_CSS = """
+    ActiveCallCard {
+        display: none;
+        height: 3;
+        background: #1a1a3a;
+        border: round #4040aa;
+        padding: 0 2;
+        layout: horizontal;
+        align: left middle;
+    }
+    ActiveCallCard.visible {
+        display: block;
+    }
+    ActiveCallCard #arm-trust-btn {
+        min-width: 14;
+        margin: 0 1;
+    }
+    ActiveCallCard #trust-armed-badge {
+        color: yellow;
+        text-style: bold;
+        margin: 0 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Button("ARM TRUST", id="arm-trust-btn", variant="default")
+        yield Static("", id="trust-armed-badge")
+
+    def show_card(self, contact_name: str) -> None:
+        """Enter pre-arm state: show button, clear badge."""
+        btn = self.query_one("#arm-trust-btn", Button)
+        btn.tooltip = f"Arm trust for {contact_name}"
+        btn.display = True
+        self.query_one("#trust-armed-badge", Static).update("")
+        self.add_class("visible")
+
+    def hide_card(self) -> None:
+        """Hide the card entirely (call ended)."""
+        self.remove_class("visible")
+
+    def mark_armed(self, contact_name: str) -> None:
+        """Switch to post-arm state: hide button, show amber badge."""
+        self.query_one("#arm-trust-btn", Button).display = False
+        self.query_one("#trust-armed-badge", Static).update(
+            f"[b yellow]■ TRUST ARMED[/]"
+        )
+
+    def mark_unarmed(self, contact_name: str) -> None:
+        """Revert to pre-arm state (trust was revoked)."""
+        btn = self.query_one("#arm-trust-btn", Button)
+        btn.display = True
+        self.query_one("#trust-armed-badge", Static).update("")
 
 
 class ListPanel(Static):
@@ -206,9 +272,14 @@ class IrisConsole(App):
         self._current_notification_id: int | None = None
         self._silence_tracker = SilenceTracker()
         self._proactive_store = ProactiveStore()
+        self._prefs = PreferencesStore()
+        self._call_contact_name: str = ""
+        self._call_trust_eligible: bool = False
+        self._in_call: bool = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
+        yield ActiveCallCard(id="active-call-card")
         with Horizontal(id="main-row"):
             yield RichLog(id="log", markup=True, wrap=True)
             yield ListPanel()
@@ -276,7 +347,35 @@ class IrisConsole(App):
                     self._w(f"[red]✗ {ev[1]}[/]")
                 elif kind == "list":
                     self._on_list_event(ev)
+                elif kind == "incoming_call":
+                    caller_name = ev[1] if len(ev) > 1 else ""
+                    caller_number = ev[2] if len(ev) > 2 else ""
+                    self._call_contact_name = caller_name or caller_number or ""
+                    key = (
+                        f"contact:{caller_number}" if caller_number
+                        else f"contact:{caller_name}"
+                    )
+                    self._call_trust_eligible = (
+                        self._prefs.get(key, "trust_tier", "") == "full"
+                    )
+                elif kind == "call_connected":
+                    self._in_call = True
+                    if self._call_trust_eligible and self._call_contact_name:
+                        self.query_one(ActiveCallCard).show_card(
+                            self._call_contact_name
+                        )
+                elif kind == "far_trust":
+                    card = self.query_one(ActiveCallCard)
+                    if "visible" in card.classes:
+                        if ev[1] is TrustMode.FULL:
+                            card.mark_armed(self._call_contact_name)
+                        else:
+                            card.mark_unarmed(self._call_contact_name)
                 elif kind == "call_ended":
+                    self._in_call = False
+                    self._call_trust_eligible = False
+                    self._call_contact_name = ""
+                    self.query_one(ActiveCallCard).hide_card()
                     session_id = ev[1] if len(ev) > 1 else ""
                     self._maybe_show_post_call_list(str(session_id))
                 elif kind == "proactive_badge":
@@ -479,6 +578,19 @@ class IrisConsole(App):
             c.grant_far()
             self._w("[green]far party granted FULL access for this call — tools & data unlocked[/]")
         self._refresh_status()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "arm-trust-btn":
+            self._do_arm_trust()
+
+    def _do_arm_trust(self) -> None:
+        """Grant full trust to far party; update card; announce to operator."""
+        self.conductor.grant_far()
+        name = self._call_contact_name or "contact"
+        self._w(f"[b green]ARM TRUST — {name} granted full access[/]")
+        self.notify(f"Trust armed for {name}")
+        self._refresh_status()
+        # Card update happens via ("far_trust", TrustMode.FULL) in _drain()
 
     def _on_heard(self, text: str, label: str) -> None:
         if self.conductor.speaking:

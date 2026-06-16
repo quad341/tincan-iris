@@ -44,6 +44,8 @@ class Brain:
         self.cfg = cfg
         self.prefs = prefs or PreferencesStore()
         self.call_context: str = ""   # set to a contact ID before each call
+        self.memory_hint: str = ""    # L3 vector recall hint from MemoryManager.call_start()
+        self.context_hint: str = ""   # supplementary context hint (caller-level notes etc.)
         if skills is None:
             self.skills = default_registry()
             for s in notes_skills(notes_store or NotesStore()):

@@ -47,6 +47,15 @@ class Config:
         "warm, spoken sentence (under ~30 words). No markdown, no lists, no preamble."
     )
 
+    # --- Memory / embedding (ADR-0003). embedding_model is the GGUF model name for
+    # the llama.cpp slot; embedding_dim must match its output dimension.
+    # sqlite_vec_path="" means use the system default. db_path="" defaults to
+    # ~/.local/share/iris/iris.db at runtime.
+    embedding_model: str = "nomic-embed-text"
+    embedding_dim: int = 768
+    sqlite_vec_path: str = ""
+    db_path: str = ""
+
     # --- [proactive] — v1 ships disabled; schema is here so operators can see what
     # will be available and enable it in a future release.
     #
