@@ -157,7 +157,7 @@ class TranscriptStore:
             assert self._conn is not None
             rows = self._conn.execute(
                 "SELECT text, created_at, embedding FROM EMBEDDINGS"
-                " WHERE contact_id=? ORDER BY created_at DESC",
+                " WHERE contact_id=? ORDER BY created_at DESC, rowid DESC",
                 (contact_id,),
             ).fetchall()
         result = []
