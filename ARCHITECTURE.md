@@ -4,9 +4,11 @@ Iris is a voice agent you can phone: a Claude-powered conversational AI that rid
 [tincan](https://github.com/quad341/tincan)'s Bluetooth phone bridge to hold spoken
 phone conversations. This document is how we see the secretary working.
 
-> **Status: design + early build.** The phone-audio foundation is validated on real
-> hardware (2026-06-11); the agent itself is being built. Anything marked _(planned)_
-> is intent, not yet implemented.
+> **Status: v1 built and running.** The conversation loop, dispatch, the trust/capability
+> model, the operator console, the skills (calendar / web / notes), and the SCO call-audio
+> tap have shipped (341 tests, CI-green), and Iris has held real, disclosed calls. This
+> document describes the design; a few items remain marked _(planned)_ where noted (e.g.
+> daemon-exposed audio, the semantic-memory layer).
 
 ## 1. Design principles
 
@@ -79,10 +81,11 @@ Not every utterance needs a frontier model. Iris routes each turn:
 A lightweight **router / intent-classifier** (rules or a small local model — itself pluggable)
 decides the path. **Skills are plugins:** a new one registers an *intent* + its *handler*
 (an MCP tool call and/or an OAuth-scoped API). This keeps the common cases instant and reserves
-the expensive model for reasoning that actually needs it. _(planned — formalize the skill/router
-contract early; see beads.)_
+the expensive model for reasoning that actually needs it. _(Shipped: the tiered router
+(`Tier0Rules → Tier1Qwen → Tier2RawHaiku`) and the skill registry — see `iris/brain.py`,
+`iris/lanes.py`, `iris/skills.py`.)_
 
-## 4b. Capabilities, trust & context — the v1 plan
+## 4b. Capabilities, trust & context — the v1 model
 
 > Decided 2026-06-15; the safety model is **[ADR-0002](docs/adr/0002-capability-gating-by-speaker-channel.md)**.
 
@@ -140,7 +143,7 @@ Each slot has a local-first default and swaps via config:
 
 | Slot | Default (local / free) | Swap-in (hosted / paid) |
 |---|---|---|
-| **STT** | whisper.cpp | OpenAI Whisper · Deepgram |
+| **STT** | **Whisper** (`faster-whisper`, `small.en`) | OpenAI Whisper · Deepgram |
 | **TTS** | **Kokoro** (`kokoro-82M`) | ElevenLabs · OpenAI · Cartesia |
 | **Brain (LLM fallback)** | local (e.g. Qwen via llama.cpp) | **Claude Haiku** _(recommended)_ · OpenAI |
 | **Router** | rules / small local classifier | small LLM |
@@ -177,6 +180,13 @@ tincan side, so Iris won't have to know the Bluetooth MAC or do its own PipeWire
 
 ## 7. Memory
 
+> **Status (v1):** the structured store and an in-call context layer have shipped — a local
+> **SQLite** transcript + notes/lists store (`iris/transcript.py`, `iris/list_store.py`) and a
+> two-tier in-call **context** (`iris/context.py`: rolling window + a Qwen-compressed gist).
+> The **semantic-recall / vector** layer below is an **open design question** — whether it
+> replaces, complements, or layers onto the context tiers is for the architect to decide
+> ([issue #8](https://github.com/quad341/tincan-iris/issues/8)).
+
 A secretary has to remember people and past calls — plain markdown / task-trackers are the
 wrong shape. Two local layers:
 1. **Structured store (SQLite):** call log, transcripts, contacts, durable facts
@@ -201,13 +211,19 @@ Call audio rides HFP/SCO over a Bluetooth adapter. Validated 2026-06-11:
 
 ## 9. Roadmap / open questions
 
-- **Formalize the skill/router contract** (intent registry + handler interface) — the fast path
-- Turn-taking & barge-in — the latency budget for natural back-and-forth
-- Streaming STT + incremental LLM for low latency
-- OAuth/token management for skills (calendar, etc.)
-- The audio tap: direct PipeWire (now) → daemon-exposed (later)
+**Shipped since this doc's first draft:**
+- ✅ The skill/router contract (intent registry + tiered handler) — the fast path
+- ✅ Turn-taking & barge-in (interrupt / stop mid-reply)
+- ✅ Streaming STT for low latency
+- ✅ OAuth/token management for the calendar skill
+- ✅ **The demo** — Iris has held short, *disclosed* phone conversations with real callers
+
+**Still open:**
+- Echo-cancelled **Discord / virtual-audio** calling (beyond SCO) — endpoint + speaking gate
+- **Proactive** speech: built but shipped *disabled* — needs the "never talk over either party / genuine-pause" design before it's enabled
+- **Semantic memory** — the vector-recall layer (§7) is an open design question ([#8](https://github.com/quad341/tincan-iris/issues/8))
+- The audio tap: direct PipeWire (now) → daemon-exposed `im.tincan.Audio` (later, tincan side)
 - Multi-call / hold (tincan Phase 2)
-- **The demo:** Iris holds a short, *disclosed* phone conversation with a real caller
 
 ## Credits
 
