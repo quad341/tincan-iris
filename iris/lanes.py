@@ -166,7 +166,7 @@ class Tier1Qwen:
         )
 
     def _chat_prompt(self, text: str, context_hint: str = "") -> str:
-        pref_line = f" Caller prefs — {context_hint}." if context_hint else ""
+        pref_line = f" {context_hint}" if context_hint else ""
         return (
             f"<|im_start|>system\nYou are Iris, a warm, concise voice assistant.{pref_line} "
             "Reply in one or two short sentences.<|im_end|>\n"

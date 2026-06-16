@@ -53,6 +53,9 @@ class Brain:
         self.tier0 = Tier0Rules(self.skills)
         self.tier1 = Tier1Qwen(cfg, skills=self.skills)
         self.tier2 = Tier2RawHaiku(cfg)
+        # Set once at call_start, immutable for call duration (ADR-0002: never logged).
+        self.memory_hint: str = ""
+        self.context_hint: str = ""
 
     def _masked(
         self,
@@ -110,10 +113,13 @@ class Brain:
             return Reply(r0.text, r0.lane, tl, r0.skill, speaker=speaker)
 
         # Tier 1 — local Qwen (warm). Masked + deadline-bounded for the busy box.
-        hint = self.prefs.hint(self.call_context) if self.call_context else ""
+        # Context order: memory_hint → context_hint (Brain attrs) → prefs hint.
+        prefs_hint = self.prefs.hint(self.call_context) if self.call_context else ""
+        context_parts = [p for p in (self.memory_hint, self.context_hint, prefs_hint) if p]
+        context_hint = "\n".join(context_parts)
         try:
             r1 = self._masked(
-                lambda: self.tier1.handle(text, allow_skills=not demo_mode, context_hint=hint),
+                lambda: self.tier1.handle(text, allow_skills=not demo_mode, context_hint=context_hint),
                 "tier1-qwen", on_filler,
             )
             tl.mark("tier1-qwen")

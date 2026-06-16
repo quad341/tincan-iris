@@ -36,6 +36,9 @@ class Config:
     qwen_timeout_s: float = 30.0
     qwen_max_tokens: int = 96
 
+    # --- Embedding model (llama.cpp /embedding endpoint).
+    embedding_model: str = "nomic-embed-text"
+
     # --- Tier 2: cloud raw-text tier. Driven ONLY through the vendor TUI
     # (Claude Code), lean + text-only, NEVER tools/MCP. See docs/adr/0001.
     haiku_enabled: bool = True
