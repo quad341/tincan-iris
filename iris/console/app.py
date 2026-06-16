@@ -413,7 +413,11 @@ class IrisConsole(App):
             self._w("[yellow]no longer hearing you[/]")
             self._refresh_status()
             return
-        stream = StreamingTranscriber(self._on_heard, label="operator")
+        stream = StreamingTranscriber(
+            self._on_heard,
+            source=self.mic.capture_target,  # None = default mic; AEC source when IRIS_VA_AEC=1
+            label="operator",
+        )
         if not stream.available():
             self._w("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
             return
@@ -477,6 +481,8 @@ class IrisConsole(App):
         self._refresh_status()
 
     def _on_heard(self, text: str, label: str) -> None:
+        if self.conductor.speaking:
+            return  # speaking gate: Iris is talking, suppress mic to avoid self-echo
         self.events.put(("heard", text, label))  # reader thread -> main thread via the queue
 
     def _on_heard_far(self, text: str, label: str) -> None:

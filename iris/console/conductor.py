@@ -44,6 +44,14 @@ class Conductor:
         self._play = None
         self._cancel = threading.Event()
 
+    @property
+    def speaking(self) -> bool:
+        """True while Iris is generating or playing output (THINKING or SPEAKING).
+
+        Used as a speaking gate: while True, the operator mic stream is suppressed so
+        Iris does not transcribe her own voice coming out of the speakers."""
+        return self.state in (State.THINKING, State.SPEAKING)
+
     def _set_state(self, s: State) -> None:
         self.state = s
         self.emit(("state", s))

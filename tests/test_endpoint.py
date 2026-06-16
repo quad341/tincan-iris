@@ -196,3 +196,25 @@ def test_default_endpoint_sco_raises_when_no_call(monkeypatch):
     with patch("iris.audio.endpoint.discover_sco_nodes", return_value=(None, None)):
         with pytest.raises(RuntimeError, match="no HFP/SCO sink"):
             default_endpoint()
+
+
+# --- IRIS_VA_AEC branching (ti-lfp) ------------------------------------------
+
+def test_default_endpoint_va_aec_sets_iris_va_aec_src(monkeypatch):
+    monkeypatch.delenv("IRIS_AUDIO", raising=False)
+    monkeypatch.setenv("IRIS_PLAYBACK_TARGET", "iris_mic")
+    monkeypatch.setenv("IRIS_VA_AEC", "1")
+    monkeypatch.delenv("IRIS_CAPTURE_TARGET", raising=False)
+    ep = default_endpoint()
+    assert isinstance(ep, VirtualDeviceAudio)
+    assert ep.capture_target == "iris_va_aec_src"
+
+
+def test_default_endpoint_iris_capture_target_wins_over_va_aec(monkeypatch):
+    monkeypatch.delenv("IRIS_AUDIO", raising=False)
+    monkeypatch.setenv("IRIS_PLAYBACK_TARGET", "iris_mic")
+    monkeypatch.setenv("IRIS_VA_AEC", "1")
+    monkeypatch.setenv("IRIS_CAPTURE_TARGET", "my_explicit_src")
+    ep = default_endpoint()
+    assert isinstance(ep, VirtualDeviceAudio)
+    assert ep.capture_target == "my_explicit_src"

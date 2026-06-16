@@ -187,3 +187,35 @@ def test_far_demo_trust_threaded_to_brain():
     c.respond_to("tell me something", speaker="far")
     _, kwargs = c.brain.respond.call_args
     assert kwargs.get("far_trust") is TrustMode.DEMO
+
+
+# --- speaking property (ti-lfp) -----------------------------------------------
+
+def test_speaking_true_in_thinking():
+    c, _events, _mic, _play = _make()
+    c.state = State.THINKING
+    assert c.speaking is True
+
+
+def test_speaking_true_in_speaking():
+    c, _events, _mic, _play = _make()
+    c.state = State.SPEAKING
+    assert c.speaking is True
+
+
+def test_speaking_false_in_idle():
+    c, _events, _mic, _play = _make()
+    assert c.state is State.IDLE
+    assert c.speaking is False
+
+
+def test_speaking_false_in_recording():
+    c, _events, _mic, _play = _make()
+    c.state = State.RECORDING
+    assert c.speaking is False
+
+
+def test_speaking_false_in_transcribing():
+    c, _events, _mic, _play = _make()
+    c.state = State.TRANSCRIBING
+    assert c.speaking is False

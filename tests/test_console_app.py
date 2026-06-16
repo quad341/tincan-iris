@@ -31,6 +31,49 @@ def test_console_mounts_and_mute_key_toggles():
     asyncio.run(scenario())
 
 
+# --- _on_heard speaking gate (ti-lfp) -----------------------------------------
+
+def test_on_heard_gate_suppresses_when_speaking():
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            # Drain any startup events posted before we start checking.
+            while not app.events.empty():
+                app.events.get_nowait()
+
+            app.conductor.state = State.SPEAKING
+            assert app.conductor.speaking is True
+            app._on_heard("hello", "operator")
+            # No await between call and assertion — no timer ticks in between.
+            assert app.events.empty()
+
+            app.conductor.state = State.IDLE
+            assert app.conductor.speaking is False
+            app._on_heard("hello", "operator")
+            assert app.events.get_nowait() == ("heard", "hello", "operator")
+
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_on_heard_gate_suppresses_when_thinking():
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            while not app.events.empty():
+                app.events.get_nowait()
+
+            app.conductor.state = State.THINKING
+            assert app.conductor.speaking is True
+            app._on_heard("what time is it", "operator")
+            assert app.events.empty()
+
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
 # --- _GRANT regex and trust spoof-block (ti-hr2) ------------------------------
 
 
