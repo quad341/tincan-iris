@@ -3,10 +3,11 @@
 Live transcription, per-turn tier + latency, a hard interrupt (barge-in), mute,
 and a command dump — over the local voice loop. Ways to talk:
   - push-to-talk: [space] to start/stop a turn;
-  - listen [l]: continuous — just talk, Iris acts only when addressed ("Iris, …");
+  - listen [L]: continuous — just talk, Iris acts only when addressed ("Iris, …");
   - respondent [f]: also hear the far-end party (the other side of a call);
   - approve [a]: allow the respondent's "Iris, …" commands to act (default OFF —
     their requests are shown but ignored until you approve).
+  - list panel [L] (capital): toggle the right-side live list panel.
 
 Drives the UI-agnostic Conductor; the blocking pipeline runs in a Textual thread-
 worker so the UI stays responsive (and the interrupt key always lands).
@@ -17,7 +18,7 @@ Every line shown is also appended (plain text) to a session logfile —
 ~/.local/state/iris/console.log by default, or $IRIS_LOG_FILE — so a session can
 be read back or shared without copying out of the TUI.
 
-Keys: [space] talk · [l] hear you · [f] hear them · [a] approve them · [i] interrupt · [m] mute · [c] commands · [q] quit
+Keys: [space] talk · [l] hear you · [L] list panel · [f] hear them · [a] approve them · [i] interrupt · [m] mute · [c] commands · [q] quit
 """
 from __future__ import annotations
 
@@ -28,15 +29,19 @@ from datetime import datetime
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.containers import Horizontal
 from textual.widgets import Footer, Header, RichLog, Static
 
 from ..addressing import address
+from .list_view import PostCallListView
 from ..audio.endpoint import default_endpoint
 from ..audio.streaming import StreamingTranscriber
 from ..audio.stt import default_stt
 from ..audio.tts import default_tts
 from ..brain import Brain
 from ..fillers import filler_picker
+from ..proactive_delivery import ProactiveDelivery, SilenceTracker
+from ..proactive_store import ProactiveStore
 from ..trust import TrustMode
 from .conductor import Conductor, State
 
@@ -47,8 +52,10 @@ _STOP = re.compile(
 )
 
 # Grant far party full access — operator mic only; cannot be spoofed from downlink.
+# Requires "full access" as an adjacent phrase to avoid false positives on common
+# operator speech like "give him directions" or "allow her to speak".
 _GRANT = re.compile(
-    r"^\s*(?:grant|give|allow|trust)\b.*\b(?:full|access|them|her|him)\b",
+    r"^\s*(?:grant|give|allow|trust)\b.*\bfull\s+access\b",
     re.IGNORECASE,
 )
 
@@ -73,10 +80,94 @@ def _open_log():
         return None, None
 
 
+class ListPanel(Static):
+    """Right-side panel showing the active call list with live lookup states.
+
+    Design spec (ti-ccc.16.3):
+      bg #1c2333 · text #cce0ff · fixed 30 cols wide · [L] toggles visibility.
+    Items use Unicode state indicators:
+      ○ normal   ⏳ pending lookup   ✓ enriched (lookup done)   ⚠ failed   ☑ checked
+    """
+
+    DEFAULT_CSS = """
+    ListPanel {
+        width: 30;
+        height: 1fr;
+        background: #1c2333;
+        color: #cce0ff;
+        border: round #3a5080;
+        padding: 0 1;
+        display: none;
+    }
+    ListPanel.visible-panel {
+        display: block;
+    }
+    """
+
+    def __init__(self) -> None:
+        super().__init__("", id="list-panel")
+        self._items: list[tuple[str, str, str]] = []  # (text, state, lookup_text)
+        self._session: str = ""
+
+    def update_items(self, items: list) -> None:
+        """Refresh displayed items from a list of ListItem dataclass instances."""
+        self._items = []
+        for it in items:
+            state = it.lookup_status  # "none", "pending", "done", "failed"
+            self._items.append((it.text, state, ""))
+        self._render()
+
+    def on_lookup_done(self, item_id: int, result: str) -> None:
+        self._render()
+
+    def on_lookup_failed(self, item_id: int, msg: str) -> None:
+        self._render()
+
+    def add_item(self, text: str) -> None:
+        self._items.append((text, "none", ""))
+        self._render()
+
+    def _icon(self, state: str, checked: bool) -> str:
+        if checked:
+            return "☑"
+        return {"none": "○", "pending": "⏳", "done": "✓", "failed": "⚠"}.get(state, "○")
+
+    def _render(self) -> None:
+        if not self._items:
+            lines = ["[dim]— empty —[/dim]"]
+        else:
+            lines = []
+            for i, (text, state, lookup_text) in enumerate(self._items, 1):
+                icon = self._icon(state, False)
+                line = f"{i}. {icon} {text}"
+                if state == "done" and lookup_text:
+                    line += f"\n   [dim]{lookup_text[:40]}[/dim]"
+                elif state == "failed":
+                    line += " [red]⚠[/red]"
+                lines.append(line)
+        self.update("\n".join(lines))
+
+    def toggle_visible(self) -> bool:
+        """Toggle panel visibility. Returns new visible state."""
+        if "visible-panel" in self.classes:
+            self.remove_class("visible-panel")
+            return False
+        self.add_class("visible-panel")
+        return True
+
+    def on_key(self, event) -> None:
+        if event.key == "v":
+            self.app.action_open_list_view()
+        elif event.key == "escape":
+            self.toggle_visible()
+            self.app.query_one("#log", RichLog).focus()
+
+
 class IrisConsole(App):
     TITLE = "Iris console"
 
     CSS = """
+    #main-row { height: 1fr; }
     #log { height: 1fr; border: round $accent; padding: 0 1; }
     #status { height: 1; background: $boost; color: $text; padding: 0 1; }
     """
@@ -84,10 +175,12 @@ class IrisConsole(App):
     BINDINGS = [
         Binding("space", "talk", "talk/stop", priority=True),
         Binding("l", "listen", "hear you"),
+        Binding("L", "list_panel", "list"),
         Binding("f", "far", "hear them"),
         Binding("a", "approve", "approve them"),
         Binding("i", "interrupt", "interrupt", priority=True),
         Binding("m", "mute", "mute"),
+        Binding("n", "notification", "next notif", show=False),
         Binding("c", "commands", "commands"),
         Binding("q", "quit", "quit", priority=True),
     ]
@@ -109,10 +202,17 @@ class IrisConsole(App):
         self._approved = False                                # act on their commands?
         self._log: RichLog | None = None                      # cached in on_mount
         self._logf, self._logpath = _open_log()               # plain-text session log
+        self._proactive_badge: str = ""
+        self._proactive_queue_count: int = 0
+        self._current_notification_id: int | None = None
+        self._silence_tracker = SilenceTracker()
+        self._proactive_store = ProactiveStore()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        yield RichLog(id="log", markup=True, wrap=True)
+        with Horizontal(id="main-row"):
+            yield RichLog(id="log", markup=True, wrap=True)
+            yield ListPanel()
         yield Static(id="status")
         yield Footer()
 
@@ -132,6 +232,26 @@ class IrisConsole(App):
         if not self.stt.available():
             self._w("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
         self.set_interval(0.05, self._drain)
+
+        def _current_mode() -> str:
+            if self._far_stream is not None:
+                return "far"
+            if self._stream is not None:
+                return "listen"
+            return "idle"
+
+        self._proactive_delivery = ProactiveDelivery(
+            store=self._proactive_store,
+            cfg=self.brain.cfg,
+            mode_fn=_current_mode,
+            silence_tracker=self._silence_tracker,
+            tts_fn=lambda msg: self.run_worker(
+                lambda m=msg: self.mic.start_playback(self.conductor.tts.synth(m)),
+                thread=True,
+            ),
+            emit=self.events.put,
+        )
+        self.set_interval(0.5, self._proactive_delivery.tick)
         self._refresh_status()
 
     def _drain(self) -> None:
@@ -155,6 +275,20 @@ class IrisConsole(App):
                     self._on_heard_far_main(ev[1], ev[2] if len(ev) > 2 else "")
                 elif kind == "error":
                     self._w(f"[red]✗ {ev[1]}[/]")
+                elif kind == "list":
+                    self._on_list_event(ev)
+                elif kind == "call_ended":
+                    session_id = ev[1] if len(ev) > 1 else ""
+                    self._maybe_show_post_call_list(str(session_id))
+                elif kind == "proactive_badge":
+                    self._proactive_badge = ev[1][:40] if ev[1] else ""
+                    self._proactive_queue_count = ev[2] if len(ev) > 2 else 0
+                    self._refresh_status()
+                    self._toggle_notification_binding()
+                elif kind == "proactive_tts":
+                    self._w(
+                        f"[b yellow]🔔[/] {ev[1] if len(ev) > 1 else ''}  [dim](proactive)[/]"
+                    )
                 elif kind == "filler":
                     self._note = f"… {ev[1]}"
                     self._refresh_status()
@@ -165,6 +299,31 @@ class IrisConsole(App):
                 elif kind == "mute":
                     self._refresh_status()
         except queue.Empty:
+            pass
+
+    def _on_list_event(self, ev: tuple) -> None:
+        """Handle list-related events from ListSkill background threads."""
+        panel = self.query_one(ListPanel)
+        log = self.query_one("#log", RichLog)
+        kind = ev[1] if len(ev) > 1 else ""
+        if kind == "lookup_done" and len(ev) >= 4:
+            item_id, result = ev[2], ev[3]
+            log.write(f"[dim cyan]⟨list: lookup done — {result[:60]}⟩[/]")
+            panel.on_lookup_done(item_id, result)
+        elif kind == "lookup_failed" and len(ev) >= 4:
+            item_id, msg = ev[2], ev[3]
+            log.write(f"[dim red]⟨list: lookup failed — {msg}⟩[/]")
+            panel.on_lookup_failed(item_id, msg)
+
+    def _maybe_show_post_call_list(self, session_id: str) -> None:
+        """Auto-display PostCallListView when a call ends if an active list exists."""
+        try:
+            from ..list_store import CallListStore
+            store = CallListStore()
+            active = store.active_list(session_id)
+            if active is not None and store.get_items(active.id):
+                self.push_screen(PostCallListView(store, active))
+        except Exception:  # noqa: BLE001
             pass
 
     def _dispatch(self, cmd: str, speaker: str = "") -> bool:
@@ -179,6 +338,7 @@ class IrisConsole(App):
 
     def _on_heard_main(self, text: str, speaker: str = "") -> None:
         """A streamed utterance from YOU (main thread): act only if addressed."""
+        self._silence_tracker.touch()
         cmd = address(text)
         if cmd is None:
             self._w(f"[dim]· {text}[/]")  # overheard, not for Iris
@@ -224,6 +384,13 @@ class IrisConsole(App):
             parts.append("[b green]THEM-APPROVED[/]")
         if self._far_stream is not None and c.far_trust is TrustMode.FULL:
             parts.append("[b green]FAR-FULL[/]")
+        if self._proactive_badge:
+            if self._proactive_queue_count > 1:
+                parts.append(
+                    f"[b yellow]🔔 {self._proactive_queue_count} pending  ·  press [n] to cycle[/]"
+                )
+            else:
+                parts.append(f"[b yellow]🔔 {self._proactive_badge}[/]")
         if self._note:
             parts.append(self._note)
         self.query_one("#status", Static).update(" " + "  ·  ".join(parts))
@@ -279,6 +446,25 @@ class IrisConsole(App):
             self._w("[dim]set the app's OUTPUT to Iris_Ear[/]")
         self._refresh_status()
 
+    def action_open_list_view(self) -> None:
+        """Open PostCallListView for the most recent active list."""
+        self._maybe_show_post_call_list(
+            getattr(self.conductor, "session_id", "") or ""
+        )
+
+    def action_list_panel(self) -> None:
+        """Toggle the right-side list panel (WCAG 2.1 AA: [L] moves focus in, [Esc] returns)."""
+        panel = self.query_one(ListPanel)
+        visible = panel.toggle_visible()
+        log = self.query_one("#log", RichLog)
+        if visible:
+            panel.focus()
+            log.write("[dim]⟨list panel on — [Esc] or [L] to hide⟩[/]")
+            self.notify("List panel opened", severity="information")
+        else:
+            self.query_one("#log", RichLog).focus()
+            log.write("[dim]⟨list panel hidden⟩[/]")
+
     def action_approve(self) -> None:
         self._approved = not self._approved
         if self._approved:
@@ -316,6 +502,30 @@ class IrisConsole(App):
             for s in skills:
                 self._w(f"  [cyan]{s.name:<12}[/] [dim]{s.description}[/]")
         self._w('[dim]Anything else → local model · "ask Haiku about …" → cloud[/]')
+
+    def action_notification(self) -> None:
+        """Cycle to the next pending proactive notification ([n] key)."""
+        item = self._proactive_store.cycle_next(after_id=self._current_notification_id)
+        if item is None:
+            self._proactive_badge = ""
+            self._proactive_queue_count = 0
+            self._current_notification_id = None
+        else:
+            self._proactive_badge = item.message[:40]
+            self._proactive_queue_count = self._proactive_store.pending_count()
+            self._current_notification_id = item.id
+        self._proactive_delivery.reset_shown()
+        self._refresh_status()
+        self._toggle_notification_binding()
+
+    def _toggle_notification_binding(self) -> None:
+        """Show [n] in the footer only when a badge is active."""
+        self.refresh_bindings()
+
+    def check_action(self, action: str, parameters: tuple) -> bool:
+        if action == "notification":
+            return bool(self._proactive_badge)
+        return True
 
     def on_unmount(self) -> None:
         for stream in (self._stream, self._far_stream):
