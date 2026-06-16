@@ -39,10 +39,16 @@ class Conductor:
         self.pick = pick or (lambda: "one sec")
         self.state = State.IDLE
         self.muted = False
-        self.far_trust: TrustMode = TrustMode.DEMO  # far party DEMO by default; grant elevates
+        self._trust: TrustMode = TrustMode.NONE  # current trust level (NONE/LOCAL/BOTH)
+        self._armed: bool = False               # True once arm() is called
         self._rec = None
         self._play = None
         self._cancel = threading.Event()
+
+    @property
+    def far_trust(self) -> TrustMode:
+        """Far-party trust derived from current level (BOTH → FULL; anything else → NONE)."""
+        return TrustMode.BOTH if self._trust is TrustMode.BOTH else TrustMode.NONE
 
     @property
     def speaking(self) -> bool:
@@ -89,14 +95,44 @@ class Conductor:
             return
         self.respond_to(text)
 
+    # --- trust arm/grant cycle (ti-qt1i.1.2) ---
+
+    def arm(self) -> None:
+        """Enable the grant cycle.  Does not elevate far party."""
+        if not self._armed:
+            self._armed = True
+            self.emit(("armed", True))
+
+    def disarm(self) -> None:
+        """Disable grant cycle and revoke any far-party elevation."""
+        self._armed = False
+        self._trust = TrustMode.NONE
+        self.emit(("armed", False))
+        self.emit(("far_trust", self.far_trust))
+
+    _GRANT_CYCLE = {
+        TrustMode.NONE: TrustMode.LOCAL,
+        TrustMode.LOCAL: TrustMode.BOTH,
+        TrustMode.BOTH: TrustMode.NONE,
+    }
+
+    def grant(self) -> None:
+        """Cycle trust NONE→LOCAL→BOTH→NONE.  No-op when not armed."""
+        if not self._armed:
+            return
+        self._trust = self._GRANT_CYCLE[self._trust]
+        self.emit(("far_trust", self.far_trust))
+
     def grant_far(self) -> None:
-        """Elevate the far party to FULL trust for the current call."""
-        self.far_trust = TrustMode.FULL
+        """Elevate the far party to BOTH/FULL immediately.  Backward-compat helper."""
+        self._armed = True
+        self._trust = TrustMode.BOTH
         self.emit(("far_trust", self.far_trust))
 
     def reset_far_trust(self) -> None:
-        """Reset far-party trust to DEMO (called on CallEnded / call teardown)."""
-        self.far_trust = TrustMode.DEMO
+        """Revert trust to minimum (called on CallEnded / call teardown)."""
+        self._armed = False
+        self._trust = TrustMode.NONE
         self.emit(("far_trust", self.far_trust))
 
     def respond_to(self, text: str, *, speaker: str = "") -> None:
