@@ -17,6 +17,8 @@ iris-chat = "iris.cli:main"
 iris-speak = "iris.voice:main"
 iris-listen = "iris.listen:main"
 iris-console = "iris.console.app:main"
+iris-arm = "iris.console.arm:arm_main"
+iris-disarm = "iris.console.arm:disarm_main"
 
 [build-system]
 requires = ["setuptools>=68"]

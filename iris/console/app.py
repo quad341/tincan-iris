@@ -235,7 +235,8 @@ class IrisConsole(App):
         Binding("l", "listen", "hear you"),
         Binding("L", "list_panel", "list"),
         Binding("f", "far", "hear them"),
-        Binding("a", "approve", "grant full"),
+        Binding("g", "grant", "grant", priority=True),
+        Binding("a", "approve", "approve"),
         Binding("i", "interrupt", "interrupt", priority=True),
         Binding("m", "mute", "mute"),
         Binding("n", "notification", "next notif", show=False),
@@ -356,13 +357,16 @@ class IrisConsole(App):
                         self.query_one(ActiveCallCard).show_card(
                             self._call_contact_name
                         )
-                elif kind == "far_trust":
+                elif kind in ("far_trust", "trust"):
                     card = self.query_one(ActiveCallCard)
                     if "visible" in card.classes:
-                        if ev[1] is TrustMode.FULL:
+                        if self.conductor.far_trust is TrustMode.BOTH:
                             card.mark_armed(self._call_contact_name)
                         else:
                             card.mark_unarmed(self._call_contact_name)
+                    self._refresh_status()
+                elif kind == "armed":
+                    self._refresh_status()
                 elif kind == "call_ended":
                     self._in_call = False
                     self._call_trust_eligible = False
@@ -463,16 +467,32 @@ class IrisConsole(App):
             self._w("[dim](busy — one sec)[/]")
 
     def _refresh_status(self) -> None:
+        import os as _os  # noqa: PLC0415
         c = self.conductor
         parts = [c.state.value.upper()]
         if c.muted:
             parts.append("[b]MUTED[/]")
+        # Audio mode label (startup-time env var)
+        if _os.environ.get("IRIS_VA_AEC"):
+            parts.append("[dim]AEC[/]")
+        elif _os.environ.get("IRIS_AEC"):
+            parts.append("[dim]HEADSET[/]")
+        else:
+            parts.append("[dim]SPEAKERS[/]")
         if self._stream is not None:
             parts.append("[b]HEAR-YOU[/]")
         if self._far_stream is not None:
             parts.append("[b]HEAR-THEM[/]")
-        if c.far_trust is TrustMode.FULL:
-            parts.append("[b green]FAR-FULL[/]")
+        # Trust state label
+        trust = c.trust_state
+        if trust is TrustMode.BOTH:
+            parts.append("[b #79c0ff]LOCAL+FAR-REMOTE[/]")
+        elif trust is TrustMode.LOCAL:
+            parts.append("[b #56d364]LOCAL[/]")
+        elif c._armed:
+            parts.append("[dim white]ARMED[/]")
+        else:
+            parts.append("[yellow #d29922]UNARMED[/]")
         if self._proactive_badge:
             if self._proactive_queue_count > 1:
                 parts.append(
@@ -555,16 +575,29 @@ class IrisConsole(App):
             log.write("[dim]⟨list panel hidden⟩[/]")
 
     def action_approve(self) -> None:
-        """Operator grants/revokes the far party FULL access (skills + data) for
-        this call. Keyboard-only — like the spoken "grant full access", it can't
-        be triggered from the far party's channel. DEMO (chat only) is the default."""
+        """Placeholder for future approve workflow (e.g. send a drafted reply)."""
+        self._w("[dim]approve not yet wired[/]")
+
+    def action_grant(self) -> None:
+        """Cycle trust NONE→LOCAL→BOTH→NONE. No-op when not armed."""
         c = self.conductor
-        if c.far_trust is TrustMode.FULL:
-            c.reset_far_trust()
-            self._w("[yellow]far party back to DEMO — conversation only, no tools or data[/]")
+        if not c._armed:
+            self._w("[red]cannot grant — not armed / run: iris-arm[/]")
+            self.notify("Cannot grant: not armed. Run: iris-arm", severity="warning")
+            return
+        c.grant()
+        trust = c.trust_state
+        if trust is TrustMode.LOCAL:
+            msg = "[b #56d364]local-admin granted — you have full access[/]"
+            note = "local-admin granted"
+        elif trust is TrustMode.BOTH:
+            msg = "[b #79c0ff]remote-admin granted — far party elevated (limited)[/]"
+            note = "remote-admin granted: far party elevated"
         else:
-            c.grant_far()
-            self._w("[green]far party granted FULL access for this call — tools & data unlocked[/]")
+            msg = "[yellow]all trust revoked[/]"
+            note = "all trust revoked"
+        self._w(msg)
+        self.notify(note)
         self._refresh_status()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -572,13 +605,13 @@ class IrisConsole(App):
             self._do_arm_trust()
 
     def _do_arm_trust(self) -> None:
-        """Grant full trust to far party; update card; announce to operator."""
-        self.conductor.grant_far()
+        """Arm the trust session; operator can then use [g] to grant the far party."""
+        self.conductor.arm()
         name = self._call_contact_name or "contact"
-        self._w(f"[b green]ARM TRUST — {name} granted full access[/]")
-        self.notify(f"Trust armed for {name}")
+        self._w(f"[b yellow]ARM TRUST — {name} armed; press [g] to grant far access[/]")
+        self.notify(f"Trust armed for {name}; press [g] to grant")
         self._refresh_status()
-        # Card update happens via ("far_trust", TrustMode.FULL) in _drain()
+        # Card update happens via ("armed", True) in _drain()
 
     def _on_heard(self, text: str, label: str) -> None:
         if self.conductor.speaking:

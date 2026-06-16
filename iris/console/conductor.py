@@ -46,8 +46,18 @@ class Conductor:
         self._cancel = threading.Event()
 
     @property
+    def trust_state(self) -> TrustMode:
+        """Current trust level: NONE / LOCAL / BOTH."""
+        return self._trust
+
+    @property
+    def op_trust(self) -> TrustMode:
+        """Operator trust: FULL when armed (LOCAL or BOTH), DEMO otherwise."""
+        return TrustMode.FULL if self._trust in (TrustMode.LOCAL, TrustMode.BOTH) else TrustMode.DEMO
+
+    @property
     def far_trust(self) -> TrustMode:
-        """Far-party trust derived from current level (BOTH → FULL; anything else → NONE)."""
+        """Far-party trust derived from current level (BOTH → FULL; anything else → NONE/DEMO)."""
         return TrustMode.BOTH if self._trust is TrustMode.BOTH else TrustMode.NONE
 
     @property
@@ -117,11 +127,12 @@ class Conductor:
     }
 
     def grant(self) -> None:
-        """Cycle trust NONE→LOCAL→BOTH→NONE.  No-op when not armed."""
+        """Cycle trust NONE→LOCAL→BOTH→NONE.  Emits error when not armed."""
         if not self._armed:
+            self.emit(("error", "grant is no-op: not armed"))
             return
         self._trust = self._GRANT_CYCLE[self._trust]
-        self.emit(("far_trust", self.far_trust))
+        self.emit(("trust", self._trust))
 
     def grant_far(self) -> None:
         """Elevate the far party to BOTH/FULL immediately.  Backward-compat helper."""
@@ -130,9 +141,9 @@ class Conductor:
         self.emit(("far_trust", self.far_trust))
 
     def reset_far_trust(self) -> None:
-        """Revert trust to minimum (called on CallEnded / call teardown)."""
-        self._armed = False
-        self._trust = TrustMode.NONE
+        """Revert far-party grant only (BOTH→LOCAL); op_trust stays unchanged."""
+        if self._trust is TrustMode.BOTH:
+            self._trust = TrustMode.LOCAL
         self.emit(("far_trust", self.far_trust))
 
     def respond_to(self, text: str, *, speaker: str = "") -> None:
@@ -145,6 +156,7 @@ class Conductor:
         try:
             reply = self.brain.respond(
                 text, speaker=speaker, far_trust=self.far_trust,
+                op_trust=self.op_trust,
                 on_filler=lambda i: self.emit(("filler", self.pick())),
             )
         except Exception as exc:  # noqa: BLE001

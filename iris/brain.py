@@ -82,6 +82,7 @@ class Brain:
         *,
         speaker: str = "",
         far_trust: TrustMode = TrustMode.FULL,
+        op_trust: TrustMode = TrustMode.FULL,
         on_filler: Callable[[int], None] | None = None,
     ) -> Reply:
         tl = Timeline()
