@@ -56,11 +56,15 @@ class TincanCallControl:
 
     # --- signal handlers (public — called directly in tests) ---
 
-    def _on_incoming(self, call_id: str = "", *args: Any) -> None:
-        """``IncomingCall(call_id)`` — answer if policy says yes."""
-        self.emit(("incoming_call", str(call_id)))
+    def _on_incoming(self, caller_name: str = "", caller_number: str = "", *args: Any) -> None:
+        """``IncomingCall(caller_name, caller_number)`` — answer if policy says yes.
+
+        tincan emits the caller's name + number (no call id); the number drives
+        the per-contact roster lookup (ADR-0004/0005). ``Answer("")`` answers the
+        single ringing call (tincan semantics)."""
+        self.emit(("incoming_call", str(caller_name), str(caller_number)))
         if self.auto_answer:
-            self._answer(str(call_id))
+            self._answer("")
 
     def _on_connected(self, call_id: str = "", *args: Any) -> None:
         """``CallConnected`` — rediscover SCO nodes and bind the new endpoint."""
