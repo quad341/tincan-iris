@@ -10,7 +10,9 @@ import pytest
 
 pytest.importorskip("textual")
 
-from iris.console.app import IrisConsole, _GRANT  # noqa: E402
+from textual.widgets import Button  # noqa: E402
+
+from iris.console.app import ActiveCallCard, IrisConsole, _GRANT  # noqa: E402
 from iris.console.conductor import State  # noqa: E402
 from iris.trust import TrustMode  # noqa: E402
 
@@ -22,8 +24,9 @@ def test_console_mounts_and_mute_key_toggles():
             assert app.conductor.muted is False
             await pilot.press("m")          # mute key -> conductor.toggle_mute
             assert app.conductor.muted is True
-            await pilot.press("a")          # operator grants far party FULL access
-            assert app.conductor.far_trust is TrustMode.FULL
+            # [a] is now an approve placeholder — does not grant trust
+            await pilot.press("a")
+            assert app.conductor.far_trust is TrustMode.DEMO
             await pilot.press("f")          # hear respondent (no STT in CI: safe no-op)
             await pilot.press("c")          # dump commands (must not error)
             await pilot.press("q")          # quit
@@ -94,13 +97,15 @@ def test_grant_regex_rejects_false_positives():
     assert not _GRANT.match("grant her full")
 
 
-def test_operator_grant_elevates_far_trust():
+def test_operator_spoken_grant_no_longer_elevates_far_trust():
+    """Spoken 'grant full access' must NOT elevate far trust (removed for security, ti-qt1i.1.1).
+    Trust elevation now requires the physical ARM TRUST button or [g] key."""
     async def scenario():
         app = IrisConsole()
         async with app.run_test() as pilot:
             assert app.conductor.far_trust is TrustMode.DEMO
             app._on_heard_main("Iris, grant full access", "operator")
-            assert app.conductor.far_trust is TrustMode.FULL
+            assert app.conductor.far_trust is TrustMode.DEMO  # spoken grant no longer works
             await pilot.press("q")
 
     asyncio.run(scenario())
@@ -176,17 +181,104 @@ def test_far_party_demo_dispatched_without_grant():
     asyncio.run(scenario())
 
 
-def test_approve_key_toggles_far_trust():
-    """[a] is the operator's keyboard grant — the collapsed gate. It toggles the
-    far party between FULL and DEMO, and can't be reached from the far channel."""
+def test_approve_key_is_placeholder_no_trust_change():
+    """[a] is now a placeholder for a future approve workflow, not a grant key.
+    Trust stays DEMO after pressing [a]; grant is [g] after physical ARM TRUST."""
     async def scenario():
         app = IrisConsole()
         async with app.run_test() as pilot:
             assert app.conductor.far_trust is TrustMode.DEMO
             await pilot.press("a")
-            assert app.conductor.far_trust is TrustMode.FULL
-            await pilot.press("a")
-            assert app.conductor.far_trust is TrustMode.DEMO
+            assert app.conductor.far_trust is TrustMode.DEMO  # [a] is a no-op for trust
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+# --- ARM TRUST card flow (ti-3qgj) -------------------------------------------
+
+
+def test_active_call_card_shows_on_call_connected():
+    """ARM TRUST card becomes visible after call_connected when contact is trust-eligible."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._call_contact_name = "Alice"
+            app._call_trust_eligible = True
+
+            app.events.put(("call_connected",))
+            app._drain()
+
+            card = app.query_one(ActiveCallCard)
+            assert "visible" in card.classes
+
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_arm_trust_button_arms_conductor():
+    """Pressing the ARM TRUST button (or calling _do_arm_trust) calls conductor.arm()."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._call_contact_name = "Bob"
+            app._call_trust_eligible = True
+            app.events.put(("call_connected",))
+            app._drain()
+
+            assert not app.conductor._armed
+            app._do_arm_trust()
+            assert app.conductor._armed
+
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_far_trust_event_shows_armed_badge():
+    """Receiving far_trust=BOTH while card is visible hides the button and shows badge."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._call_contact_name = "Bob"
+            app._call_trust_eligible = True
+            app.events.put(("call_connected",))
+            app._drain()
+
+            app.conductor.grant_far()  # _trust=BOTH so far_trust=BOTH/FULL
+            app.events.put(("far_trust", app.conductor.far_trust))
+            app._drain()
+
+            card = app.query_one(ActiveCallCard)
+            btn = card.query_one("#arm-trust-btn", Button)
+            assert btn.display is False  # button hidden after arming
+
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_call_ended_hides_active_call_card():
+    """call_ended event hides the ARM TRUST card and clears call state."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._call_contact_name = "Carol"
+            app._call_trust_eligible = True
+            app.events.put(("call_connected",))
+            app._drain()
+
+            card = app.query_one(ActiveCallCard)
+            assert "visible" in card.classes
+
+            app.events.put(("call_ended", "session-abc"))
+            app._drain()
+
+            assert "visible" not in card.classes
+            assert not app._in_call
+            assert app._call_contact_name == ""
+
             await pilot.press("q")
 
     asyncio.run(scenario())

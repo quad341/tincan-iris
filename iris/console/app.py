@@ -55,6 +55,14 @@ _STOP = re.compile(
     re.IGNORECASE,
 )
 
+# Trust-escalation phrase pattern — kept as a tested constant so regressions are caught.
+# The spoken-grant path that acted on this was removed (ti-qt1i.1.1); trust elevation
+# now requires a physical operator action (ARM TRUST button or [g] key).
+_GRANT = re.compile(
+    r"^\s*(?:grant|give|allow|trust)(?:\s+(?:them|him|her|it))?\s+full\s+access\b",
+    re.IGNORECASE,
+)
+
 # Strip Rich markup ([red], [/], [bold cyan]…) so the session logfile is plain text.
 _MARKUP = re.compile(r"\[/?[^\]]*\]")
 
@@ -124,14 +132,14 @@ class ActiveCallCard(Widget, can_focus=False):
         """Hide the card entirely (call ended)."""
         self.remove_class("visible")
 
-    def mark_armed(self, contact_name: str) -> None:
+    def mark_armed(self) -> None:
         """Switch to post-arm state: hide button, show amber badge."""
         self.query_one("#arm-trust-btn", Button).display = False
         self.query_one("#trust-armed-badge", Static).update(
-            f"[b yellow]■ TRUST ARMED[/]"
+            "[b yellow]■ TRUST ARMED[/]"
         )
 
-    def mark_unarmed(self, contact_name: str) -> None:
+    def mark_unarmed(self) -> None:
         """Revert to pre-arm state (trust was revoked)."""
         btn = self.query_one("#arm-trust-btn", Button)
         btn.display = True
@@ -361,9 +369,9 @@ class IrisConsole(App):
                     card = self.query_one(ActiveCallCard)
                     if "visible" in card.classes:
                         if self.conductor.far_trust is TrustMode.BOTH:
-                            card.mark_armed(self._call_contact_name)
+                            card.mark_armed()
                         else:
-                            card.mark_unarmed(self._call_contact_name)
+                            card.mark_unarmed()
                     self._refresh_status()
                 elif kind == "armed":
                     self._refresh_status()
