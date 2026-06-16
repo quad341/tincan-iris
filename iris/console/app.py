@@ -36,6 +36,7 @@ from textual.widget import Widget
 from textual.widgets import Button, Footer, Header, RichLog, Static
 
 from ..addressing import address
+from ..message_store import MessageStore, VoiceMessage
 from ..prefs import PreferencesStore
 from .list_view import PostCallListView
 from ..audio.endpoint import default_endpoint
@@ -275,8 +276,10 @@ class IrisConsole(App):
         self._proactive_store = ProactiveStore()
         self._prefs = PreferencesStore()
         self._call_contact_name: str = ""
+        self._call_contact_number: str = ""
         self._call_trust_eligible: bool = False
         self._in_call: bool = False
+        self._messages = MessageStore()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -352,6 +355,7 @@ class IrisConsole(App):
                     caller_name = ev[1] if len(ev) > 1 else ""
                     caller_number = ev[2] if len(ev) > 2 else ""
                     self._call_contact_name = caller_name or caller_number or ""
+                    self._call_contact_number = caller_number
                     key = (
                         f"contact:{caller_number}" if caller_number
                         else f"contact:{caller_name}"
@@ -379,9 +383,27 @@ class IrisConsole(App):
                     self._in_call = False
                     self._call_trust_eligible = False
                     self._call_contact_name = ""
+                    self._call_contact_number = ""
                     self.query_one(ActiveCallCard).hide_card()
                     session_id = ev[1] if len(ev) > 1 else ""
                     self._maybe_show_post_call_list(str(session_id))
+                elif kind == "take_message_done":
+                    caller_name = ev[1] if len(ev) > 1 else "the caller"
+                    transcript = ev[2] if len(ev) > 2 else ""
+                    contact_name = ev[3] if len(ev) > 3 else ""
+                    caller_number = ev[4] if len(ev) > 4 else ""
+                    msg = self._messages.add(
+                        caller_name,
+                        transcript,
+                        caller_number=caller_number,
+                        contact_name=contact_name,
+                    )
+                    self._w(
+                        f"[b]📩 Message from {caller_name}[/]"
+                        + (f" ({caller_number})" if caller_number else "")
+                    )
+                    self._w(f"   [dim]{transcript[:120]}{'…' if len(transcript) > 120 else ''}[/]")
+                    self._w(f"   [dim]msg-id:{msg.id}  ·  say 'mark read {msg.id}' or 'call back {msg.id}'[/]")
                 elif kind == "proactive_badge":
                     self._proactive_badge = ev[1][:40] if ev[1] else ""
                     self._proactive_queue_count = ev[2] if len(ev) > 2 else 0

@@ -85,7 +85,7 @@ def test_full_flow_emits_done_event_and_hangs_up():
 
     ev = next((e for e in events if e[0] == "take_message_done"), None)
     assert ev is not None
-    kind, caller_name, full_message, contact = ev
+    kind, caller_name, full_message, contact, *_rest = ev
     assert caller_name == "Bob Smith"
     assert "555-1234" in full_message
     assert "That's all" in full_message  # addition appended

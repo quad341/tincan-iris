@@ -67,6 +67,7 @@ class TakeMessageFlow:
         hang_up_fn: Callable[[], None],
         emit: Callable[[tuple], None],
         contact_name: str = "",
+        caller_number: str = "",
         disclosure_wav: str | Path | None = None,
     ) -> None:
         self.tts = tts
@@ -76,6 +77,7 @@ class TakeMessageFlow:
         self.hang_up_fn = hang_up_fn
         self.emit = emit
         self.contact_name = contact_name.strip()
+        self.caller_number = caller_number.strip()
         self.disclosure_wav = str(disclosure_wav) if disclosure_wav else None
 
     # --- internal helpers ---
@@ -147,6 +149,7 @@ class TakeMessageFlow:
         self._speak("Thanks for calling. Goodbye.")
 
         self.emit(
-            ("take_message_done", caller_name, full_message, self.contact_name)
+            ("take_message_done", caller_name, full_message, self.contact_name,
+             self.caller_number)
         )
         self.hang_up_fn()
