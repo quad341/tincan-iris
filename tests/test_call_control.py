@@ -20,20 +20,27 @@ def _ctrl(*, auto_answer=False) -> tuple[TincanCallControl, list]:
 
 def test_incoming_call_emits_event():
     c, events = _ctrl()
-    c._on_incoming("call-1")
-    assert ("incoming_call", "call-1") in events
+    c._on_incoming("Alice", "+15555550123")
+    assert ("incoming_call", "Alice", "+15555550123") in events
+
+
+def test_incoming_call_tolerates_extra_signal_args():
+    # forward-compat: extra positional args from the bus are ignored
+    c, events = _ctrl()
+    c._on_incoming("Alice", "+15555550123", "unexpected")
+    assert ("incoming_call", "Alice", "+15555550123") in events
 
 
 def test_incoming_call_no_auto_answer_skips_answer():
     c, events = _ctrl(auto_answer=False)
-    c._on_incoming("call-1")
+    c._on_incoming("Alice", "+15555550123")
     proxy = c._bus.get_object.return_value
     proxy.get_dbus_method.assert_not_called()
 
 
 def test_incoming_call_auto_answer_calls_answer():
     c, events = _ctrl(auto_answer=True)
-    c._on_incoming("call-1")
+    c._on_incoming("Alice", "+15555550123")
     proxy = c._bus.get_object.return_value
     proxy.get_dbus_method.assert_called_once_with("Answer", "im.tincan.Calls")
 
