@@ -10,6 +10,21 @@ phone conversations. This document is how we see the secretary working.
 > document describes the design; a few items remain marked _(planned)_ where noted (e.g.
 > daemon-exposed audio, the semantic-memory layer).
 
+## Product thesis & scope
+
+Iris is **an always-around, local-first communications secretary** — she owns the operator's
+**contacts, communication, and scheduling**: calls, messages, the people they talk to, the
+commitments they make. She is deliberately **not a general assistant**. The differentiation —
+and the reason to build her at all — is depth in the comms domain, where the incumbents are
+shallow, cloud-bound, and don't act inside live conversations. Iris does: she joins the call,
+speaks, takes the note, and gates what she'll do by *who's asking* (ADR-0002).
+
+**Scope discipline:** every feature must deepen comms / scheduling / contacts. Resist
+general-chatbot sprawl — the focus *is* the moat. The organizing entity is **Iris's own
+contact roster** (her list, not a mirror of the phone's), around which calls, messaging,
+memory, and scheduling cohere (see [ADR-0004](docs/adr/0004-inbound-events-and-interrupt-handling.md) §4,
+and the forthcoming roster ADR-0005). *(Direction set with the operator 2026-06-16.)*
+
 ## 1. Design principles
 
 1. **Deployable platform, not a hardcoded app.** Every external capability — speech-to-text,
