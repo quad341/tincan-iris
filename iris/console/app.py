@@ -483,8 +483,9 @@ class IrisConsole(App):
         Far-party commands always reach the brain, which gates *capability* by
         ``far_trust``: DEMO (the default) allows conversation only — Tier 0 +
         local knowledge, no skills, data, or cloud — while the operator grants
-        FULL via [a] or the spoken "grant full access". The far party can never
-        self-escalate (this path has no grant branch). See ADR-0002.
+        FULL out-of-band via the [g] grant cycle, the ARM TRUST button, or the
+        iris-arm CLI (the spoken-grant path was removed — ti-qt1i.1.1). The far
+        party can never self-escalate (this path has no grant branch). See ADR-0002.
         """
         cmd = address(text)
         if cmd is None:
