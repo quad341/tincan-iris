@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from iris.tincan_messages import TincanMessages
 
 
@@ -213,15 +215,17 @@ def test_check_capability_returns_false_when_messages_absent():
 
 
 def test_start_emits_messages_unavailable_when_not_capable():
+    # start() touches the real dbus module (patched below), so this test needs
+    # python-dbus installed. Skip cleanly where it isn't (e.g. CI), matching the
+    # lazy `import dbus` in iris.tincan_messages.start().
+    pytest.importorskip("dbus")
+
     events: list = []
     mock_bus = MagicMock()
     # Daemon GetStatus returns no messages capability
     mock_bus.get_object.return_value.get_dbus_method.return_value.return_value = {
         "capabilities": {}
     }
-
-    import dbus as _dbus_real
-    import dbus.mainloop.glib as _dbus_ml
 
     with (
         patch("iris.tincan_messages.TincanMessages._check_capability", return_value=False),

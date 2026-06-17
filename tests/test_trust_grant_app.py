@@ -19,7 +19,8 @@ from iris.trust import TrustMode  # noqa: E402
 
 
 def _status_text(app: IrisConsole) -> str:
-    return str(app.query_one("#status", Static).renderable)
+    # Textual 8 dropped Static.renderable; the content accessor is `.content`.
+    return str(app.query_one("#status", Static).content)
 
 
 # ---------------------------------------------------------------------------
