@@ -14,6 +14,8 @@ from __future__ import annotations
 import time
 from typing import Callable
 
+from .mode import IrisMode
+from .notify_sink import DesktopNotifySink
 from .proactive_store import ProactiveStore
 
 _SILENCE_GAP_S = 3.0
@@ -88,6 +90,8 @@ class ProactiveDelivery:
         tts_fn: Callable[[str], None],
         emit: Callable[[tuple], None],
         mode_fn: Callable[[], str] | None = None,
+        iris_mode_fn: Callable[[], IrisMode] | None = None,
+        notify_sink: DesktopNotifySink | None = None,
         last_delivered: float = 0.0,
     ) -> None:
         self._store = store
@@ -96,6 +100,8 @@ class ProactiveDelivery:
         self._tts_fn = tts_fn
         self._emit = emit
         self._mode_fn = mode_fn
+        self._iris_mode_fn = iris_mode_fn
+        self._notify_sink = notify_sink
         self.last_delivered = last_delivered
         self._last_prune: float = 0.0
         self._mode: str = "idle"
@@ -130,7 +136,13 @@ class ProactiveDelivery:
         if item is None:
             return
 
-        if now - self.last_delivered < self._cfg.proactive_cooldown_s:
+        if item.priority > 0 and now - self.last_delivered < self._cfg.proactive_cooldown_s:
+            return
+
+        iris_mode = self._iris_mode_fn() if self._iris_mode_fn is not None else IrisMode.IN_CALL
+
+        if iris_mode is IrisMode.OUT_OF_CALL:
+            self._deliver_out_of_call(item, now)
             return
 
         mode = self._mode_fn() if self._mode_fn is not None else self._mode
@@ -155,3 +167,20 @@ class ProactiveDelivery:
                 self._shown_at = now
             else:
                 self._emit(("proactive_badge", item.message, self._store.pending_count()))
+
+    def _deliver_out_of_call(self, item, now: float) -> None:
+        body = item.message[:80]
+        if item.priority <= 0:
+            # P0 bypasses cooldown
+            if self._notify_sink:
+                self._notify_sink.notify("Iris", body, urgency="critical")
+            self._store.mark_delivered(item.id)
+            self.last_delivered = now
+        elif item.priority == 1:
+            if self._notify_sink:
+                self._notify_sink.notify("Iris", body, urgency="normal")
+            self._store.mark_delivered(item.id)
+            self.last_delivered = now
+        else:
+            # P2+ — badge only, no desktop notify
+            self._emit(("proactive_badge", body, self._store.pending_count()))

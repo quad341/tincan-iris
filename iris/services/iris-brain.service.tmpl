@@ -1,0 +1,26 @@
+[Unit]
+Description=Iris brain daemon
+# After= means brain starts after engines; BindsTo= is intentionally NOT used.
+# BindsTo= would stop brain if any engine restarts — the opposite of the
+# warm-cache invariant (engine restarts are transparent; brain reconnects on
+# the next request).
+After=iris-llama.service iris-whisper.service iris-kokoro.service
+
+[Service]
+Type=simple
+WorkingDirectory={REPO_PATH}
+ExecStart={REPO_PATH}/.venv/bin/python -m iris.voice
+Restart=on-failure
+RestartSec=5
+
+# iris-brain intentionally has NO IPAddressDeny — it needs outbound for:
+#   - optional cloud Tier 2 (Haiku) calls
+#   - D-Bus (local but not loopback)
+#   - calendar and web-search APIs
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=iris-brain
+
+[Install]
+WantedBy=default.target
