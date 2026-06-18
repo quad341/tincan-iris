@@ -63,6 +63,17 @@ class Config:
     sqlite_vec_path: str = ""
     db_path: str = ""
 
+    # --- Email lane. Disabled when email_imap_host == "" (default).
+    # Credentials (IRIS_EMAIL_PASSWORD) load from the environment only — never
+    # committed here. Recommended auth: Gmail App Password (Google Account →
+    # Security → App passwords). See docs/adr/0001 (no-cloud-PII constraint).
+    email_imap_host: str = ""        # e.g. "imap.gmail.com"; empty = disabled
+    email_imap_port: int = 993       # SSL port (IMAP4_SSL)
+    email_smtp_host: str = ""        # e.g. "smtp.gmail.com"
+    email_smtp_port: int = 587       # STARTTLS port
+    email_user: str = ""             # e.g. "user@gmail.com"
+    email_archive_folder: str = "Archive"  # Gmail: "[Gmail]/All Mail"
+
     # --- [proactive] — v1 ships disabled; schema is here so operators can see what
     # will be available and enable it in a future release.
     #
