@@ -324,7 +324,8 @@ class RosterStore:
         """Full-text search across display_name and all address values.
 
         Returns ContactWithAddresses list, each contact appearing once with all
-        its addresses grouped. Uses a single LEFT JOIN — no N+1 queries.
+        its addresses grouped. Single ID-lookup JOIN; per-contact hydration is
+        N+1 but acceptable for small rosters.
         """
         needle = f"%{query.strip()}%"
         with self._connect() as conn:
