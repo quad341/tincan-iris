@@ -1,0 +1,22 @@
+[Unit]
+Description=Iris faster-whisper STT server
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={REPO_PATH}
+ExecStart={PYTHON_WHISPER} {REPO_PATH}/iris/_whisper_server.py \
+    --model {REPO_PATH}/models/whisper/small.en
+Restart=on-failure
+RestartSec=5
+
+# Network-isolate the engine — faster-whisper runs fully offline.
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=iris-whisper
+
+[Install]
+WantedBy=default.target

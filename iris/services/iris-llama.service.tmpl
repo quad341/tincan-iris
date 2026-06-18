@@ -1,0 +1,22 @@
+[Unit]
+Description=Iris llama.cpp language model server
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={REPO_PATH}
+ExecStart={REPO_PATH}/scripts/start_llama.sh
+Restart=on-failure
+RestartSec=5
+
+# Network-isolate the engine — it is a local inference server only.
+# iris-brain intentionally does NOT get IPAddressDeny (needs outbound for Haiku + D-Bus).
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=iris-llama
+
+[Install]
+WantedBy=default.target

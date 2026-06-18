@@ -1,0 +1,124 @@
+"""iris install-services — write systemd user unit files and start the services."""
+from __future__ import annotations
+
+import hashlib
+import os
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+_TMPL_DIR = Path(__file__).resolve().parent
+_SYSTEMD_USER = Path.home() / ".config" / "systemd" / "user"
+_REPO_PATH = Path(__file__).resolve().parents[2]
+
+
+@dataclass
+class UnitSpec:
+    name: str
+    template: str
+    restart_on_update: bool = True
+
+
+UNITS: list[UnitSpec] = [
+    UnitSpec("iris-llama",   "iris-llama.service.tmpl"),
+    UnitSpec("iris-whisper", "iris-whisper.service.tmpl"),
+    UnitSpec("iris-kokoro",  "iris-kokoro.service.tmpl"),
+    UnitSpec("iris-brain",   "iris-brain.service.tmpl"),
+]
+
+
+def _render(template: str) -> str:
+    home = str(Path.home())
+    return (
+        (_TMPL_DIR / template)
+        .read_text()
+        .replace("{REPO_PATH}", str(_REPO_PATH))
+        .replace("{USER_HOME}", home)
+        .replace("{PYTHON_WHISPER}", str(_REPO_PATH / ".venv-whisper" / "bin" / "python"))
+        .replace("{PYTHON_KOKORO}", str(_REPO_PATH / ".venv-kokoro" / "bin" / "python"))
+    )
+
+
+def _run(cmd: list[str], *, dry_run: bool) -> bool:
+    if dry_run:
+        print(f"  [dry-run] {' '.join(cmd)}")
+        return True
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+def _linger_enabled() -> bool:
+    user = os.environ.get("USER", "")
+    return (Path("/var/lib/systemd/linger") / user).exists()
+
+
+def install(dry_run: bool = False) -> int:
+    """Install or update Iris systemd user services. Returns 0 on success, 1 on any failure."""
+    prefix = "[dry-run] " if dry_run else ""
+    print(f"\n{prefix}Installing Iris systemd user services…\n")
+
+    if not dry_run:
+        _SYSTEMD_USER.mkdir(parents=True, exist_ok=True)
+
+    changed: list[str] = []
+    failed: list[str] = []
+
+    for spec in UNITS:
+        content = _render(spec.template)
+        dest = _SYSTEMD_USER / f"{spec.name}.service"
+
+        existing = dest.read_text() if dest.exists() else None
+        if existing == content:
+            print(f"  Writing {dest}    ✓ (unchanged)")
+        else:
+            if dry_run:
+                print(f"  [dry-run] Writing {dest}")
+            else:
+                dest.write_text(content)
+                label = "(updated)" if existing else ""
+                print(f"  Writing {dest}    ✓ {label}".rstrip())
+            changed.append(spec.name)
+
+    print()
+
+    if not changed:
+        print("All services already up to date. No daemon-reload needed.\n")
+        print("Note: tincand.service is managed separately — see the tincand project.")
+        return 0
+
+    print(f"  {prefix}Running: systemctl --user daemon-reload")
+    if not _run(["systemctl", "--user", "daemon-reload"], dry_run=dry_run):
+        print("  daemon-reload FAILED")
+        return 1
+    print("  ✓")
+
+    print("\n  Enabling and starting services…")
+    for spec in UNITS:
+        if spec.name not in changed:
+            print(f"    {spec.name}    skipped (unchanged)")
+            continue
+        ok_enable = _run(["systemctl", "--user", "enable", spec.name], dry_run=dry_run)
+        ok_start = _run(["systemctl", "--user", "start", spec.name], dry_run=dry_run)
+        if ok_enable and ok_start:
+            print(f"    {spec.name}    enabled + started ✓")
+        else:
+            print(f"    {spec.name}    FAILED")
+            print(f"      journalctl --user -u {spec.name} -n 20   ← run this to diagnose")
+            failed.append(spec.name)
+
+    print(f"\n  Services installed. Run 'iris doctor' to verify health.\n")
+    print("  Note: tincand.service is managed separately — see the tincand project.")
+
+    if not _linger_enabled() and not dry_run:
+        user = os.environ.get("USER", "$USER")
+        print(
+            f"\n  ⚠  linger not enabled — services will stop on logout.\n"
+            f"     To keep them running across sessions:\n"
+            f"       loginctl enable-linger {user}"
+        )
+
+    return 1 if failed else 0
