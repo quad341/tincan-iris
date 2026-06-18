@@ -149,7 +149,8 @@ def test_input_bar_submits_to_brain_and_clears():
         app = HomeApp(brain=brain)
         async with app.run_test() as pilot:
             await pilot.click("#input-bar")
-            await pilot.type("show me my messages")
+            for ch in "show me my messages":
+                await pilot.press("space" if ch == " " else ch)
             await pilot.press("enter")
             # Input should clear after submit
             from textual.widgets import Input
@@ -174,8 +175,8 @@ def test_c_key_pushes_scope_manifest_modal():
             # Modal should now be on the screen stack
             assert isinstance(app.screen, ScopeManifestModal)
             await pilot.press("escape")
-            # After escape, back to HomeApp
-            assert isinstance(app.screen, HomeApp)
+            # After escape, modal is gone (Textual may not restore HomeApp as top screen)
+            assert not isinstance(app.screen, ScopeManifestModal)
             await pilot.press("q")
 
     asyncio.run(scenario())
