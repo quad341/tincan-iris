@@ -39,6 +39,10 @@ class Config:
     # --- Operator identity (used in disclosure script and ring announcements).
     operator_name: str = ""  # e.g. "Jim" — first name only; blank disables personalisation
 
+    # --- Screening (handling_rule='screen'). relay_timeout_secs: how long Iris
+    # waits for the operator to decide before auto-pivoting to take_message.
+    screening_relay_timeout_secs: float = 20.0
+
     # --- Tier 2: cloud raw-text tier. Driven ONLY through the vendor TUI
     # (Claude Code), lean + text-only, NEVER tools/MCP. See docs/adr/0001.
     haiku_enabled: bool = True
