@@ -6,10 +6,13 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
+
+from .config import DEFAULT
 
 
 class DoctorStatus(Enum):
@@ -45,6 +48,7 @@ class ServiceCheckResult:
     status: DoctorStatus
     required: bool
     note: str = ""
+    round_trip_ms: float | None = None
 
 
 EXPECTED_SERVICES: list[ServiceDescriptor] = [
@@ -60,6 +64,7 @@ def check_services(
     services: list[ServiceDescriptor],
     *,
     timeout_s: float = 2.0,
+    deep: bool = False,
 ) -> list[ServiceCheckResult]:
     results: list[ServiceCheckResult] = []
     for svc in services:
@@ -86,15 +91,19 @@ def check_services(
             results.append(ServiceCheckResult(svc.name, svc.unit, DoctorStatus.OK, svc.required))
             continue
 
+        rtt_ms: float | None = None
         try:
             req = urllib.request.Request(svc.health_url)
+            t0 = time.monotonic()
             with urllib.request.urlopen(req, timeout=timeout_s) as resp:
                 data = json.loads(resp.read())
+                if deep:
+                    rtt_ms = (time.monotonic() - t0) * 1000
                 status = DoctorStatus.OK if data.get("ready") else DoctorStatus.DEGRADED
         except (urllib.error.URLError, OSError):
             status = DoctorStatus.DEGRADED
 
-        results.append(ServiceCheckResult(svc.name, svc.unit, status, svc.required))
+        results.append(ServiceCheckResult(svc.name, svc.unit, status, svc.required, round_trip_ms=rtt_ms))
 
     return results
 
@@ -123,14 +132,15 @@ def doctor_main(args: list[str] | None = None) -> int:
     if ns.check:
         services = [s for s in services if s.name == ns.check]
 
-    timeout_s = 5.0 if ns.deep else 2.0
-    results = check_services(services, timeout_s=timeout_s)
+    timeout_s = DEFAULT.doctor_deep_timeout_s if ns.deep else DEFAULT.doctor_timeout_s
+    results = check_services(services, timeout_s=timeout_s, deep=ns.deep)
     exit_code = _exit_code(results)
 
     if ns.json:
         print(json.dumps({
             "services": [
-                {"name": r.name, "status": r.status.value, "required": r.required}
+                {"name": r.name, "status": r.status.value, "required": r.required,
+                 "round_trip_ms": r.round_trip_ms}
                 for r in results
             ],
             "exit_code": exit_code,
@@ -138,9 +148,17 @@ def doctor_main(args: list[str] | None = None) -> int:
         return exit_code
 
     cols = shutil.get_terminal_size().columns
-    show_notes = cols >= 72
+    show_rtt = ns.deep
+    show_notes = cols >= (84 if show_rtt else 72)
 
-    if show_notes:
+    if show_rtt:
+        if show_notes:
+            print(f"{'Service':<22} {'Status':<12} {'Req':<5} {'Round-trip':<12} Notes")
+            print("-" * min(cols, 78))
+        else:
+            print(f"{'Service':<22} {'Status':<12} {'Req':<5} {'Round-trip':<12}")
+            print("-" * 51)
+    elif show_notes:
         print(f"{'Service':<22} {'Status':<12} {'Req':<5} Notes")
         print("-" * min(cols, 65))
     else:
@@ -151,7 +169,13 @@ def doctor_main(args: list[str] | None = None) -> int:
         sym = _SYMBOL[r.status]
         req_str = "yes" if r.required else "no"
         status_cell = f"{sym} {r.status.value}"
-        if show_notes:
+        if show_rtt:
+            rtt_cell = f"{r.round_trip_ms:.0f}ms" if r.round_trip_ms is not None else "—"
+            if show_notes:
+                print(f"{r.name:<22} {status_cell:<12} {req_str:<5} {rtt_cell:<12} {r.note}".rstrip())
+            else:
+                print(f"{r.name:<22} {status_cell:<12} {req_str:<5} {rtt_cell:<12}".rstrip())
+        elif show_notes:
             print(f"{r.name:<22} {status_cell:<12} {req_str:<5} {r.note}".rstrip())
         else:
             print(f"{r.name:<22} {status_cell:<12} {req_str:<5}".rstrip())

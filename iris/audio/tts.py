@@ -166,7 +166,7 @@ class KokoroServerTTS:
         )
         req.add_header("Content-Type", "application/json")
         try:
-            with urllib.request.urlopen(req) as resp:
+            with urllib.request.urlopen(req, timeout=30.0) as resp:
                 wav_bytes = resp.read()
         except Exception as exc:
             raise TTSError(f"synth failed: {exc}") from exc

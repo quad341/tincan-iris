@@ -1,6 +1,7 @@
 """ProactiveWatcher — calendar nudge poll + D-Bus event sourcing stub."""
 from __future__ import annotations
 
+import hashlib
 import logging
 import sqlite3
 import threading
@@ -12,7 +13,9 @@ _logger = logging.getLogger(__name__)
 _NUDGE_DDL = """
 CREATE TABLE IF NOT EXISTS NUDGE_CACHE (
     event_id TEXT PRIMARY KEY,
-    notified_at REAL NOT NULL
+    notified_at REAL NOT NULL,
+    title_hidden TEXT NOT NULL,
+    starts_at REAL NOT NULL
 );
 """
 _PRUNE_CUTOFF_S = 48 * 3600
@@ -71,8 +74,14 @@ class ProactiveWatcher:
             if starts_in_s < 0 or starts_in_s > nudge_window_s:
                 continue
 
+            title = getattr(ev, "title", "Meeting")
+            title_hidden = hashlib.sha256(title.encode()).hexdigest()[:16]
+            nudge_key = ev.event_id or hashlib.sha256(
+                f"{title}{ev.starts_at}".encode()
+            ).hexdigest()[:16]
+
             row = self._db.execute(
-                "SELECT 1 FROM NUDGE_CACHE WHERE event_id = ?", (ev.event_id,)
+                "SELECT 1 FROM NUDGE_CACHE WHERE event_id = ?", (nudge_key,)
             ).fetchone()
             if row:
                 continue
@@ -81,7 +90,6 @@ class ProactiveWatcher:
             rounded = self._round_down_5(minutes_until)
             if rounded == 0:
                 rounded = max(1, int(minutes_until))
-            title = getattr(ev, "title", "Meeting")
             msg = f"{title} starts in {rounded} min"
 
             self._store.enqueue(
@@ -93,8 +101,9 @@ class ProactiveWatcher:
             )
 
             self._db.execute(
-                "INSERT OR REPLACE INTO NUDGE_CACHE (event_id, notified_at) VALUES (?, ?)",
-                (ev.event_id, now),
+                "INSERT OR REPLACE INTO NUDGE_CACHE (event_id, notified_at, title_hidden, starts_at)"
+                " VALUES (?, ?, ?, ?)",
+                (nudge_key, now, title_hidden, ev.starts_at),
             )
             self._db.commit()
 

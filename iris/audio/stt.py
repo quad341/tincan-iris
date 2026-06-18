@@ -140,7 +140,7 @@ class FasterWhisperServerSTT:
         )
         req.add_header("Content-Type", "audio/wav")
         try:
-            with urllib.request.urlopen(req) as resp:
+            with urllib.request.urlopen(req, timeout=30.0) as resp:
                 data = json.loads(resp.read())
                 return data["text"]
         except Exception as exc:
