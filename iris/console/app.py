@@ -38,6 +38,7 @@ from textual.widgets import Button, Footer, Header, RichLog, Static
 from ..addressing import address
 from ..message_store import MessageStore, VoiceMessage
 from ..prefs import PreferencesStore
+from .contacts import ContactsScreen
 from .list_view import PostCallListView
 from ..audio.endpoint import default_endpoint
 from ..audio.streaming import StreamingTranscriber
@@ -47,6 +48,7 @@ from ..brain import Brain
 from ..fillers import filler_picker
 from ..proactive_delivery import ProactiveDelivery, SilenceTracker
 from ..proactive_store import ProactiveStore
+from ..roster import RosterStore
 from ..trust import TrustMode
 from .conductor import Conductor, State
 
@@ -250,6 +252,7 @@ class IrisConsole(App):
         Binding("m", "mute", "mute"),
         Binding("n", "notification", "next notif", show=False),
         Binding("c", "commands", "commands"),
+        Binding("K", "contacts", "contacts"),
         Binding("q", "quit", "quit", priority=True),
     ]
 
@@ -280,6 +283,7 @@ class IrisConsole(App):
         self._call_trust_eligible: bool = False
         self._in_call: bool = False
         self._messages = MessageStore()
+        self._roster = RosterStore()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -604,6 +608,10 @@ class IrisConsole(App):
         else:
             self.query_one("#log", RichLog).focus()
             log.write("[dim]⟨list panel hidden⟩[/]")
+
+    def action_contacts(self) -> None:
+        """Open the full-width Contacts management panel ([K])."""
+        self.push_screen(ContactsScreen(self._roster))
 
     def action_approve(self) -> None:
         """Placeholder for future approve workflow (e.g. send a drafted reply)."""
