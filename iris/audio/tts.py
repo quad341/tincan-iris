@@ -6,11 +6,22 @@ swap-in — its own PR (needs the model + a 3.12/3.13 venv on this 3.14 box).
 """
 from __future__ import annotations
 
+import json
 import os
+import socket
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Protocol
+
+
+class TTSError(Exception):
+    """Raised when a server-mode TTS call fails."""
+
+
+_DEFAULT_TTS_SERVER_URL = "http://127.0.0.1:8083"
 
 # Kokoro runs in a dedicated 3.12 venv (onnxruntime has no 3.14 wheels) and is
 # shelled out network-isolated. Paths resolve relative to the repo so the code
@@ -113,7 +124,61 @@ class KokoroTTS:
             os.unlink(txt.name)
 
 
+class KokoroServerTTS:
+    """TTS via iris-kokoro persistent HTTP server (port 8083).
+
+    Falls back gracefully when the server is not running.
+    """
+
+    name = "kokoro-server"
+
+    def __init__(
+        self,
+        server_url: str | None = None,
+        voice: str = "af_heart",
+        speed: float = 1.0,
+    ) -> None:
+        self._server_url = (
+            server_url or os.environ.get("IRIS_TTS_SERVER_URL", _DEFAULT_TTS_SERVER_URL)
+        ).rstrip("/")
+        self.voice = voice
+        self.speed = speed
+
+    def available(self) -> bool:
+        try:
+            req = urllib.request.Request(f"{self._server_url}/health")
+            with urllib.request.urlopen(req, timeout=1.0) as resp:
+                data = json.loads(resp.read())
+                return bool(data.get("ready"))
+        except (urllib.error.URLError, socket.timeout, json.JSONDecodeError, OSError):
+            return False
+
+    def synth(self, text: str, voice: str | None = None, speed: float | None = None) -> str:
+        body = json.dumps({
+            "text": text,
+            "voice": voice if voice is not None else self.voice,
+            "speed": speed if speed is not None else self.speed,
+        }).encode()
+        req = urllib.request.Request(
+            f"{self._server_url}/synth",
+            data=body,
+            method="POST",
+        )
+        req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=30.0) as resp:
+                wav_bytes = resp.read()
+        except Exception as exc:
+            raise TTSError(f"synth failed: {exc}") from exc
+        wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        wav.write(wav_bytes)
+        wav.close()
+        return wav.name
+
+
 def default_tts() -> TTS:
-    """Kokoro (natural) when its model + venv are present; else espeak placeholder."""
-    kokoro = KokoroTTS()
-    return kokoro if kokoro.available() else EspeakTTS()
+    """Prefer server TTS when running; fall back to subprocess KokoroTTS."""
+    server = KokoroServerTTS()
+    if server.available():
+        return server
+    return KokoroTTS()

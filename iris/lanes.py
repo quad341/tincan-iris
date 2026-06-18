@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from .config import Config
+from .scope import ScopeManifest
 from .skills import SkillRegistry
 
 
@@ -78,12 +79,11 @@ class Tier0Rules:
         return _dt.datetime.now().strftime("Today is %A, %B %-d.")
 
     def _help(self) -> str:
-        examples = "; ".join(f'"{ex}"' for _n, _p, _h, ex in self._commands if _n != "help")
-        return (
-            "You can say things like: " + examples
-            + ". Ask me anything else and I'll think it through, or say "
-            '"ask Haiku about" something to reach the cloud.'
-        )
+        domains = ScopeManifest.what_i_do()
+        lines = ["Here's what I can help with:"]
+        for domain, items in domains.items():
+            lines.append(f"  {domain}: {'; '.join(items)}")
+        return "\n".join(lines)
 
     def handle(self, text: str) -> LaneResult | None:
         for name, pattern, handler, _ex in self._commands:

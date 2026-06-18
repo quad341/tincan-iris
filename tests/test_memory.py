@@ -1178,3 +1178,108 @@ def test_full_call_lifecycle_35_turns_eviction_and_archival():
 
     rows = ts.fetch_embeddings_for_contact("charlie")
     assert len(rows) >= 1, "EMBEDDINGS must have at least one row for charlie after the call"
+
+
+# ---------------------------------------------------------------------------
+# F-COV-02: TranscriptStore.rebind_session UPSERT (ti-fzhp)
+# ---------------------------------------------------------------------------
+
+def test_rebind_session_updates_existing_row():
+    ts = TranscriptStore()
+    ts.start_session("s1", "alice")
+    ts.rebind_session("s1", "bob")
+    row = ts._conn.execute(
+        "SELECT contact_id FROM SESSIONS WHERE session_id='s1'"
+    ).fetchone()
+    assert row[0] == "bob"
+
+
+def test_rebind_session_inserts_when_no_existing_row():
+    ts = TranscriptStore()
+    ts.rebind_session("s_new", "charlie")
+    row = ts._conn.execute(
+        "SELECT contact_id FROM SESSIONS WHERE session_id='s_new'"
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "charlie"
+
+
+def test_memory_manager_rebind_session_delegates_to_store():
+    ts = TranscriptStore()
+    mm = MemoryManager(ts, engine=None)
+    mm.call_start("s1", "alice")
+    mm.rebind_session("s1", "bob")
+    row = ts._conn.execute(
+        "SELECT contact_id FROM SESSIONS WHERE session_id='s1'"
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "bob"
+
+
+def test_memory_manager_rebind_session_updates_active_contact_id():
+    ts = TranscriptStore()
+    mm = MemoryManager(ts, engine=None)
+    mm.call_start("s1", "alice")
+    mm.rebind_session("s1", "bob")
+    assert mm._active_contact_id == "bob"
+
+
+# ---------------------------------------------------------------------------
+# F-COV-03: _archive sentinel gating + call_start far_end kwarg (ti-fzhp)
+# ---------------------------------------------------------------------------
+
+def test_archive_skips_embedding_write_for_sentinel_contact_id():
+    from iris.far_end import SENTINEL_ID
+    ts = TranscriptStore()
+    ts.start_session("s1", str(SENTINEL_ID))
+    mm = MemoryManager(ts, engine=None)
+    mm._active_session_id = "s1"
+    mm._active_contact_id = str(SENTINEL_ID)
+    mm._archive("s1")
+    # Session should be ended (closed cleanly) but no embeddings written
+    assert ts.is_session_ended("s1")
+    rows = ts.fetch_embeddings_for_contact(str(SENTINEL_ID))
+    assert rows == []
+
+
+def test_archive_skips_embedding_write_for_empty_contact_id():
+    ts = TranscriptStore()
+    mm = MemoryManager(ts, engine=None)
+    mm._active_session_id = "s_none"
+    mm._active_contact_id = ""
+    # No SESSIONS row — get_session_contact_id returns None → skips archival
+    mm._archive("s_none")  # must not raise
+
+
+def test_call_start_with_far_end_identified_uses_archival_contact_id():
+    from iris.far_end import FarEndIdentity
+    engine = MagicMock()
+    engine.embed.return_value = [1.0, 0.0]
+    ts = TranscriptStore()
+    ts.insert_embedding("s0", "42", "Alice note", [1.0, 0.0])
+    mm = MemoryManager(ts, engine=engine)
+    fe = FarEndIdentity().bind(42, "Alice")
+    mm.call_start("s1", far_end=fe)
+    assert mm._active_contact_id == "42"
+
+
+def test_call_start_with_far_end_unidentified_skips_l3_retrieval():
+    from iris.far_end import FarEndIdentity
+    engine = MagicMock()
+    ts = TranscriptStore()
+    mm = MemoryManager(ts, engine=engine)
+    fe = FarEndIdentity()  # UNIDENTIFIED
+    result = mm.call_start("s1", far_end=fe)
+    assert result == ""
+    engine.embed.assert_not_called()
+
+
+def test_call_start_with_far_end_private_skips_l3_retrieval():
+    from iris.far_end import FarEndIdentity
+    engine = MagicMock()
+    ts = TranscriptStore()
+    mm = MemoryManager(ts, engine=engine)
+    fe = FarEndIdentity().make_private()
+    result = mm.call_start("s1", far_end=fe)
+    assert result == ""
+    engine.embed.assert_not_called()

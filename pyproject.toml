@@ -19,6 +19,10 @@ iris-listen = "iris.listen:main"
 iris-console = "iris.console.app:main"
 iris-arm = "iris.console.arm:arm_main"
 iris-disarm = "iris.console.arm:disarm_main"
+iris-email-check = "iris.email_check:main"
+iris-install-services = "iris.services._cli:main"
+iris-whisper-server = "iris._whisper_server:main"
+iris-kokoro-server = "iris._kokoro_server:main"
 
 [build-system]
 requires = ["setuptools>=68"]
