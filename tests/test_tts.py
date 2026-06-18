@@ -60,9 +60,11 @@ def test_kokoro_unavailable_when_paths_missing() -> None:
 
 # --- default_tts ---------------------------------------------------------------
 
-def test_default_tts_falls_back_to_espeak_without_kokoro() -> None:
-    with patch.object(KokoroTTS, "available", return_value=False):
-        assert isinstance(default_tts(), EspeakTTS)
+def test_default_tts_falls_back_to_kokoro_subprocess_when_server_unavailable() -> None:
+    import urllib.error
+    with patch("iris.audio.tts.urllib.request.urlopen",
+               side_effect=urllib.error.URLError("refused")):
+        assert isinstance(default_tts(), KokoroTTS)
 
 
 def test_default_tts_uses_kokoro_when_available() -> None:

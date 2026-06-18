@@ -10,10 +10,21 @@ text-in / voice-out.
 """
 from __future__ import annotations
 
+import json
 import os
+import socket
 import subprocess
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Protocol
+
+
+class STTError(Exception):
+    """Raised when a server-mode STT call fails."""
+
+
+_DEFAULT_STT_SERVER_URL = "http://127.0.0.1:8082"
 
 # Resolve paths relative to the repo so the code is portable; override with the
 # IRIS_WHISPER_* env vars. The transcribe script lives beside this module but
@@ -98,7 +109,47 @@ class WhisperCppSTT:
         )
 
 
+class FasterWhisperServerSTT:
+    """STT via iris-whisper persistent HTTP server (port 8082).
+
+    Falls back gracefully when the server is not running.
+    """
+
+    name = "faster-whisper-server"
+
+    def __init__(self, server_url: str | None = None) -> None:
+        self._server_url = (
+            server_url or os.environ.get("IRIS_STT_SERVER_URL", _DEFAULT_STT_SERVER_URL)
+        ).rstrip("/")
+
+    def available(self) -> bool:
+        try:
+            req = urllib.request.Request(f"{self._server_url}/health")
+            with urllib.request.urlopen(req, timeout=1.0) as resp:
+                data = json.loads(resp.read())
+                return bool(data.get("ready"))
+        except (urllib.error.URLError, socket.timeout, json.JSONDecodeError, OSError):
+            return False
+
+    def transcribe(self, wav_path: str) -> str:
+        wav_bytes = Path(wav_path).read_bytes()
+        req = urllib.request.Request(
+            f"{self._server_url}/transcribe",
+            data=wav_bytes,
+            method="POST",
+        )
+        req.add_header("Content-Type", "audio/wav")
+        try:
+            with urllib.request.urlopen(req) as resp:
+                data = json.loads(resp.read())
+                return data["text"]
+        except Exception as exc:
+            raise STTError(f"transcribe failed: {exc}") from exc
+
+
 def default_stt() -> STT:
-    """faster-whisper STT. Callers should check ``.available()`` first — there is
-    no zero-setup STT fallback (unlike espeak for TTS), so run setup_whisper.sh."""
+    """Prefer server STT when running; fall back to subprocess faster-whisper."""
+    server = FasterWhisperServerSTT()
+    if server.available():
+        return server
     return FasterWhisperSTT()

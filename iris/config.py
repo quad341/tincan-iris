@@ -91,6 +91,12 @@ class Config:
     proactive_cooldown_s: float = 60.0
     proactive_speak_during_listen: bool = True
 
+    calendar_nudge_min: int = 30
+    calendar_poll_interval_s: float = 300.0
+
+    doctor_timeout_s: float = 2.0
+    doctor_deep_timeout_s: float = 5.0
+
 
 DEFAULT = Config()
 
