@@ -277,10 +277,11 @@ def test_check_flag_filters_to_single_service(capsys):
 # ---------------------------------------------------------------------------
 
 def test_table_drops_notes_col_under_72_cols(capsys, monkeypatch):
-    from iris.doctor import doctor_main
+    import os
     import shutil
+    from iris.doctor import doctor_main
     services = _get_services()[:1]
-    monkeypatch.setattr(shutil, "get_terminal_size", lambda: MagicMock(columns=70))
+    monkeypatch.setattr(shutil, "get_terminal_size", lambda *a, **kw: os.terminal_size((70, 24)))
 
     with patch("iris.doctor.subprocess.run", return_value=_mock_active()), \
          patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
@@ -292,10 +293,11 @@ def test_table_drops_notes_col_under_72_cols(capsys, monkeypatch):
 
 
 def test_table_includes_notes_col_at_wide_terminal(capsys, monkeypatch):
-    from iris.doctor import doctor_main
+    import os
     import shutil
+    from iris.doctor import doctor_main
     services = _get_services()[:1]
-    monkeypatch.setattr(shutil, "get_terminal_size", lambda: MagicMock(columns=120))
+    monkeypatch.setattr(shutil, "get_terminal_size", lambda *a, **kw: os.terminal_size((120, 24)))
 
     with patch("iris.doctor.subprocess.run", return_value=_mock_active()), \
          patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
