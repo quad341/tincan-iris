@@ -100,9 +100,13 @@ def main() -> int:
     args = parser.parse_args()
 
     imap_host = os.environ.get("IRIS_EMAIL_IMAP_HOST", "").strip()
-    imap_port = int(os.environ.get("IRIS_EMAIL_IMAP_PORT", "993"))
+    try:
+        imap_port = int(os.environ.get("IRIS_EMAIL_IMAP_PORT", "993"))
+        smtp_port = int(os.environ.get("IRIS_EMAIL_SMTP_PORT", "587"))
+    except ValueError as exc:
+        print(f"iris-email-check: invalid port value — {exc}", file=sys.stderr)
+        sys.exit(1)
     smtp_host = os.environ.get("IRIS_EMAIL_SMTP_HOST", "").strip()
-    smtp_port = int(os.environ.get("IRIS_EMAIL_SMTP_PORT", "587"))
     user = os.environ.get("IRIS_EMAIL_USER", "").strip()
     password = os.environ.get("IRIS_EMAIL_PASSWORD", "").strip()
 

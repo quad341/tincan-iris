@@ -187,8 +187,6 @@ class ReadEmailSkill:
     def run(self, *, action: str = "list_unread", message_id: str = "", **_: object) -> str:
         if action == "list_unread":
             messages = self._provider.list_unread(limit=5)
-            if messages is None:
-                return "I couldn't reach your email right now."
             self._triage.inbox_ids = [m.id for m in messages]
             self._triage.inbox_pos = 0
             return _spoken_list(messages)
