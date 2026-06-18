@@ -19,9 +19,12 @@ import time
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import sqlite3
+
+if TYPE_CHECKING:
+    from iris.far_end import FarEndIdentity
 
 log = logging.getLogger(__name__)
 
@@ -193,6 +196,27 @@ class TranscriptStore:
                 "SELECT contact_id FROM SESSIONS WHERE session_id=?", (session_id,)
             ).fetchone()
         return row[0] if row else None
+
+    def rebind_session(self, session_id: str, contact_id: str) -> None:
+        """Update (or create) the session's contact_id for late binding.
+
+        When an operator binds an Unidentified far-end mid-call, no SESSIONS row
+        exists yet.  This upsert creates one so archival at call-end will write to
+        the correct contact.
+        """
+        with self._lock:
+            assert self._conn is not None
+            n = self._conn.execute(
+                "UPDATE SESSIONS SET contact_id=? WHERE session_id=?",
+                (contact_id, session_id),
+            ).rowcount
+            if n == 0:
+                self._conn.execute(
+                    "INSERT INTO SESSIONS (session_id, contact_id, started_at)"
+                    " VALUES (?,?,?)",
+                    (session_id, contact_id, int(time.time())),
+                )
+            self._conn.commit()
 
     def fetch_embeddings_for_contact(
         self, contact_id: str
@@ -517,17 +541,25 @@ class MemoryManager:
     def call_start(
         self,
         session_id: str,
-        contact_id: str,
+        contact_id: str = "",
         gist_worker: GistWorker | None = None,
         gist_store: GistStore | None = None,
         window: RollingWindow | None = None,
+        *,
+        far_end: "FarEndIdentity | None" = None,
     ) -> str:
         """Embed a contact query, ANN-search, rerank by recency, return ≤100 token hint.
 
         Stores L1/L2 context (gist_worker, gist_store, window) for use by call_end.
         Returns '' if contact_id is empty, embedding unavailable, or 0 results.
         Any failure → ''.
+
+        Pass far_end to derive contact_id from the identity state machine.
+        For Unidentified and Private far-ends, L3 retrieval is skipped entirely.
+        Backward-compat: positional contact_id still accepted when far_end is None.
         """
+        if far_end is not None:
+            contact_id = far_end.archival_contact_id or ""
         self._active_session_id = session_id
         self._active_contact_id = contact_id
         self._active_gist_worker = gist_worker
@@ -566,13 +598,26 @@ class MemoryManager:
             daemon=True, target=self._archive, args=(session_id,), name="mm-archive"
         ).start()
 
+    def rebind_session(self, session_id: str, contact_id: str) -> None:
+        """Update session contact_id when operator binds the far-end mid-call.
+
+        Delegates to TranscriptStore.rebind_session (UPSERT) and keeps the
+        active_contact_id cache in sync so call_end archives to the right contact.
+        """
+        self._store.rebind_session(session_id, contact_id)
+        self._active_contact_id = contact_id
+
     def _archive(self, session_id: str) -> None:
         try:
             # Idempotency: skip if session already ended.
             if self._store.is_session_ended(session_id):
                 return
             contact_id = self._store.get_session_contact_id(session_id)
-            if not contact_id:
+            # Unidentified (no session row → None) or Private (sentinel "0"):
+            # close the record cleanly but skip all embedding writes.
+            from iris.far_end import SENTINEL_ID  # local import avoids circular dep
+            if not contact_id or contact_id == str(SENTINEL_ID):
+                self._store.end_session(session_id)
                 return
 
             # Step 1: shut down GistWorker and drain.
