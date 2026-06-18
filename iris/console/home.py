@@ -95,6 +95,18 @@ class ResponsePanel(RichLog):
 
     DEFAULT_CSS = "ResponsePanel { height: 1fr; }"
 
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._text_buffer: str = ""
+
+    def write(self, content, width=None, expand=False, shrink=True, scroll_end=None, animate=False):  # type: ignore[override]
+        self._text_buffer += str(content) + "\n"
+        return super().write(content, width=width, expand=expand, shrink=shrink, scroll_end=scroll_end, animate=animate)
+
+    @property
+    def renderable(self) -> str:
+        return self._text_buffer
+
 
 class ScopeManifestModal(Screen):
     """Full-screen modal showing ScopeManifest.what_i_do()."""
