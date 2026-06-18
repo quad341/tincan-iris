@@ -1,4 +1,4 @@
-"""Email voice-command skills — ti-q8kh.2.
+"""Email voice-command skills — ti-q8kh.2 / ti-q8kh.4.
 
 All email-sending operations use a two-phase confirmation protocol:
 
@@ -6,13 +6,19 @@ All email-sending operations use a two-phase confirmation protocol:
              confirmation prompt.
   Phase 2 — ConfirmEmailSkill executes.  CancelEmailSkill clears it.
 
+SendEmailSkill accepts an optional RosterProvider (ti-q8kh.4).  When the 'to'
+field is a name (no "@") and the roster exposes .search(), it resolves the name
+to an email address via contact_addresses filtered to channel='email'.  Falls
+back to explicit address-only mode if the roster is absent or exposes no email
+for that contact.
+
 SECURITY: email bodies must NEVER appear in a cloud model prompt.
   These skills format spoken output locally; the brain routes to local TTS only.
 
 All skills are FULL-trust — never registered in demo mode.
 
 Factory function:
-    for skill in email_skills(provider):
+    for skill in email_skills(provider, roster=my_roster):
         brain.skills.register(skill)
 """
 from __future__ import annotations
@@ -20,9 +26,13 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .email_provider import EmailMessage, EmailProvider
 from .skills import SkillParam
+
+if TYPE_CHECKING:
+    from .roster import RosterProvider
 
 # ---------------------------------------------------------------------------
 # Spoken formatting helpers
@@ -204,14 +214,48 @@ class ReadEmailSkill:
         return f"Unknown action: {action}."
 
 
+def _resolve_email_via_roster(
+    to: str, roster: "RosterProvider | None"
+) -> tuple[str, str]:
+    """Try to resolve a name to an email address via the roster.
+
+    Returns (resolved_email, spoken_label) where spoken_label is a human-readable
+    description of who we're sending to (for the confirmation prompt).
+
+    If resolution fails or no email address is found, returns ("", to) so the
+    caller can ask for an explicit address.
+    """
+    if roster is None or not hasattr(roster, "search"):
+        return "", to
+    try:
+        results = roster.search(to)
+    except Exception:  # noqa: BLE001
+        return "", to
+    if not results:
+        return "", to
+    # Filter contacts that have an email address
+    for cwa in results:
+        email_addrs = [a.value for a in cwa.addresses if a.channel == "email"]
+        if email_addrs:
+            resolved = email_addrs[0]
+            label = f"{cwa.contact.display_name} ({_format_email_address(resolved)})"
+            return resolved, label
+    return "", to
+
+
 class SendEmailSkill:
     name = "send_email"
     description = (
         "Stage an outbound email for operator confirmation. Returns a spoken preview. "
-        "Requires ConfirmEmailSkill to actually send."
+        "Requires ConfirmEmailSkill to actually send. "
+        "The 'to' field may be a contact name (resolved via roster) or an email address."
     )
     params: list[SkillParam] = [
-        SkillParam(name="to", type="string", description="Recipient address or name."),
+        SkillParam(
+            name="to",
+            type="string",
+            description="Recipient: a contact name from the roster, or an explicit email address.",
+        ),
         SkillParam(name="subject", type="string", description="Email subject line."),
         SkillParam(
             name="body",
@@ -220,14 +264,35 @@ class SendEmailSkill:
         ),
     ]
 
-    def __init__(self, provider: EmailProvider, pending: _EmailPendingState) -> None:
+    def __init__(
+        self,
+        provider: EmailProvider,
+        pending: _EmailPendingState,
+        roster: "RosterProvider | None" = None,
+    ) -> None:
         self._provider = provider
         self._pending = pending
+        self._roster = roster
 
     def run(self, *, to: str = "", subject: str = "", body: str = "", **_: object) -> str:
         if not to or not subject or not body:
             return "I need a recipient, subject, and body to send an email."
+
+        # Resolve name → email when 'to' looks like a name, not an address.
+        resolved_addr = to
         to_spoken = _format_email_address(to) if "@" in to else to
+
+        if "@" not in to:
+            addr, label = _resolve_email_via_roster(to, self._roster)
+            if addr:
+                resolved_addr = addr
+                to_spoken = label
+            else:
+                return (
+                    f"I couldn't find an email address for {to} in your contacts. "
+                    "Please provide the full email address."
+                )
+
         body_preview = " ".join(body.split()[:30])
         if len(body.split()) > 30:
             body_preview += "…"
@@ -235,7 +300,10 @@ class SendEmailSkill:
             f'Sending to {to_spoken}, subject: "{_format_subject(subject)}", '
             f'body: "{body_preview}". Is that right?'
         )
-        return self._pending.stage(prompt, lambda: self._provider.send(to, subject, body))
+        return self._pending.stage(
+            prompt,
+            lambda: self._provider.send(resolved_addr, subject, body),
+        )
 
 
 class ConfirmEmailSkill:
@@ -310,13 +378,20 @@ class TriageEmailSkill:
 # Factory
 # ---------------------------------------------------------------------------
 
-def email_skills(provider: EmailProvider) -> list[object]:
-    """Return all email skill instances sharing state.  Register in brain.skills."""
+def email_skills(
+    provider: EmailProvider,
+    roster: "RosterProvider | None" = None,
+) -> list[object]:
+    """Return all email skill instances sharing state.  Register in brain.skills.
+
+    Pass ``roster`` to enable contact-name resolution in SendEmailSkill (ti-q8kh.4).
+    Without it, SendEmailSkill only accepts explicit email addresses.
+    """
     pending = _EmailPendingState()
     triage = _TriageState()
     return [
         ReadEmailSkill(provider, triage),
-        SendEmailSkill(provider, pending),
+        SendEmailSkill(provider, pending, roster=roster),
         ConfirmEmailSkill(pending),
         CancelEmailSkill(pending),
         TriageEmailSkill(provider, triage),

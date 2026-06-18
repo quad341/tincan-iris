@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -77,6 +77,29 @@ class Contact:
 
 
 @dataclass
+class ContactAddress:
+    id: int
+    contact_id: int
+    channel: str   # 'phone' | 'discord' | 'signal' | 'zoom' | 'email' | …
+    value: str
+    label: str
+    created_at: float
+
+
+@dataclass
+class ContactWithAddresses:
+    contact: Contact
+    addresses: list[ContactAddress]
+
+    def primary_display(self) -> str:
+        """Return 'Name (channel:value, …)' for disambiguation."""
+        if not self.addresses:
+            return self.contact.display_name
+        addr_str = ", ".join(f"{a.channel}:{a.value}" for a in self.addresses[:2])
+        return f"{self.contact.display_name} ({addr_str})"
+
+
+@dataclass
 class ImportResult:
     added: int
     skipped: int
@@ -85,17 +108,28 @@ class ImportResult:
 
 @runtime_checkable
 class RosterProvider(Protocol):
+    def get_by_address(self, channel: str, value: str) -> Contact | None: ...
     def get_by_phone(self, phone: str) -> Contact | None: ...
     def get(self, contact_id: int) -> Contact | None: ...
     def all(self) -> list[Contact]: ...
+    def search(self, query: str) -> list[ContactWithAddresses]: ...
     def add(
         self,
         display_name: str,
-        phone_e164: str,
+        phone_e164: str = "",
         handling_rule: str = "normal",
         trust_tier: str = "demo",
         relationship_notes: str = "",
+        addresses: list[tuple[str, str]] | None = None,
     ) -> Contact: ...
+    def add_address(
+        self,
+        contact_id: int,
+        channel: str,
+        value: str,
+        label: str = "",
+    ) -> ContactAddress: ...
+    def remove_address(self, address_id: int) -> bool: ...
     def update(
         self,
         contact_id: int,
@@ -234,12 +268,40 @@ class RosterStore:
             updated_at=row["updated_at"],
         )
 
-    def get_by_phone(self, phone: str) -> Contact | None:
+    @staticmethod
+    def _row_to_address(row: sqlite3.Row) -> ContactAddress:
+        return ContactAddress(
+            id=row["id"],
+            contact_id=row["contact_id"],
+            channel=row["channel"],
+            value=row["value"],
+            label=row["label"],
+            created_at=row["created_at"],
+        )
+
+    def _addresses_for_contact(
+        self, conn: sqlite3.Connection, contact_id: int
+    ) -> list[ContactAddress]:
+        rows = conn.execute(
+            "SELECT * FROM contact_addresses WHERE contact_id=? ORDER BY created_at",
+            (contact_id,),
+        ).fetchall()
+        return [self._row_to_address(r) for r in rows]
+
+    def get_by_address(self, channel: str, value: str) -> Contact | None:
+        """Return the contact owning the given (channel, value) address, or None."""
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM contacts WHERE phone_e164=?", (phone,)
+                "SELECT c.* FROM contacts c"
+                " JOIN contact_addresses ca ON ca.contact_id = c.id"
+                " WHERE ca.channel=? AND ca.value=?",
+                (channel, value),
             ).fetchone()
         return self._row_to_contact(row) if row else None
+
+    def get_by_phone(self, phone: str) -> Contact | None:
+        """Backward-compat wrapper: delegate to get_by_address('phone', phone)."""
+        return self.get_by_address("phone", phone)
 
     def get(self, contact_id: int) -> Contact | None:
         with self._connect() as conn:
@@ -258,37 +320,108 @@ class RosterStore:
             ).fetchall()
         return [self._row_to_contact(r) for r in rows]
 
+    def search(self, query: str) -> list[ContactWithAddresses]:
+        """Full-text search across display_name and all address values.
+
+        Returns ContactWithAddresses list, each contact appearing once with all
+        its addresses grouped. Uses a single LEFT JOIN — no N+1 queries.
+        """
+        needle = f"%{query.strip()}%"
+        with self._connect() as conn:
+            # Fetch matching contact ids (de-duped) via the JOIN.
+            id_rows = conn.execute(
+                "SELECT DISTINCT c.id FROM contacts c"
+                " LEFT JOIN contact_addresses ca ON ca.contact_id = c.id"
+                " WHERE c.id != ?"
+                "   AND (c.display_name LIKE ? COLLATE NOCASE"
+                "     OR ca.value LIKE ? COLLATE NOCASE)"
+                " ORDER BY c.display_name COLLATE NOCASE",
+                (SENTINEL_CONTACT_ID, needle, needle),
+            ).fetchall()
+            results: list[ContactWithAddresses] = []
+            for (cid,) in id_rows:
+                contact_row = conn.execute(
+                    "SELECT * FROM contacts WHERE id=?", (cid,)
+                ).fetchone()
+                if not contact_row:
+                    continue
+                contact = self._row_to_contact(contact_row)
+                addresses = self._addresses_for_contact(conn, cid)
+                results.append(ContactWithAddresses(contact=contact, addresses=addresses))
+        return results
+
     def add(
         self,
         display_name: str,
-        phone_e164: str,
+        phone_e164: str = "",
         handling_rule: str = "normal",
         trust_tier: str = "demo",
         relationship_notes: str = "",
+        addresses: list[tuple[str, str]] | None = None,
     ) -> Contact:
         now = time.time()
+        phone = phone_e164 or None
         with self._connect() as conn:
             cur = conn.execute(
                 "INSERT INTO contacts"
                 " (display_name, phone_e164, handling_rule, trust_tier,"
                 "  relationship_notes, created_at, updated_at)"
                 " VALUES (?,?,?,?,?,?,?)",
-                (display_name, phone_e164, handling_rule, trust_tier,
+                (display_name, phone, handling_rule, trust_tier,
                  relationship_notes, now, now),
             )
             contact_id = cur.lastrowid
-            if phone_e164:
+            if phone:
                 # Mirror phone into contact_addresses; UNIQUE(channel,value) enforces
                 # no two contacts share the same phone number.
                 conn.execute(
                     "INSERT INTO contact_addresses"
                     " (contact_id, channel, value, created_at) VALUES (?,?,?,?)",
-                    (contact_id, "phone", phone_e164, now),
+                    (contact_id, "phone", phone, now),
                 )
+            if addresses:
+                for ch, val in addresses:
+                    if ch == "phone" and phone and val == phone:
+                        continue  # already inserted above
+                    conn.execute(
+                        "INSERT OR IGNORE INTO contact_addresses"
+                        " (contact_id, channel, value, created_at) VALUES (?,?,?,?)",
+                        (contact_id, ch, val, now),
+                    )
             return Contact(
-                contact_id, display_name, phone_e164,
+                contact_id, display_name, phone_e164 or None,
                 handling_rule, trust_tier, relationship_notes, now, now,
             )
+
+    def add_address(
+        self,
+        contact_id: int,
+        channel: str,
+        value: str,
+        label: str = "",
+    ) -> ContactAddress:
+        now = time.time()
+        with self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO contact_addresses"
+                " (contact_id, channel, value, label, created_at) VALUES (?,?,?,?,?)",
+                (contact_id, channel, value, label, now),
+            )
+            return ContactAddress(
+                id=cur.lastrowid,
+                contact_id=contact_id,
+                channel=channel,
+                value=value,
+                label=label,
+                created_at=now,
+            )
+
+    def remove_address(self, address_id: int) -> bool:
+        with self._connect() as conn:
+            n = conn.execute(
+                "DELETE FROM contact_addresses WHERE id=?", (address_id,)
+            ).rowcount
+        return n > 0
 
     def update(
         self,
