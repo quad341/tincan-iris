@@ -12,7 +12,8 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.widgets import DataTable  # noqa: E402
+from textual.app import App  # noqa: E402
+from textual.widgets import Button, DataTable  # noqa: E402
 
 from iris.console.contacts import ContactEditor, ContactsScreen  # noqa: E402
 from iris.roster import Contact, ImportResult  # noqa: E402
@@ -93,6 +94,21 @@ def _make_roster() -> _StubRoster:
     return r
 
 
+class _ContactsHostApp(App):
+    """Minimal host App so ContactsScreen (a Screen) can be driven by Pilot.
+
+    ``run_test()`` lives on ``App``, not ``Screen``; in the real console the
+    panel is pushed via [K], so the tests host it the same way.
+    """
+
+    def __init__(self, roster: _StubRoster) -> None:
+        super().__init__()
+        self._roster = roster
+
+    def get_default_screen(self) -> ContactsScreen:
+        return ContactsScreen(self._roster)
+
+
 # ---------------------------------------------------------------------------
 # Pilot tests
 # ---------------------------------------------------------------------------
@@ -101,8 +117,8 @@ def test_contacts_screen_mounts():
     """ContactsScreen mounts without error."""
     async def scenario():
         r = _make_roster()
-        app = ContactsScreen(r)
-        async with app.run_test() as pilot:
+        app = _ContactsHostApp(r)
+        async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
         return True
 
@@ -113,8 +129,8 @@ def test_contacts_table_row_count():
     """Table has one row per contact plus the unknown-caller static row."""
     async def scenario():
         r = _make_roster()
-        app = ContactsScreen(r)
-        async with app.run_test() as pilot:
+        app = _ContactsHostApp(r)
+        async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             table = app.query_one("#contacts-table", DataTable)
             return table.row_count
@@ -127,8 +143,8 @@ def test_editor_hidden_initially():
     """ContactEditor starts hidden."""
     async def scenario():
         r = _make_roster()
-        app = ContactsScreen(r)
-        async with app.run_test() as pilot:
+        app = _ContactsHostApp(r)
+        async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             editor = app.query_one(ContactEditor)
             return "visible" in editor.classes
@@ -140,10 +156,10 @@ def test_add_button_shows_editor():
     """Clicking Add Contact makes the editor visible."""
     async def scenario():
         r = _make_roster()
-        app = ContactsScreen(r)
-        async with app.run_test() as pilot:
+        app = _ContactsHostApp(r)
+        async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            await pilot.click("#add-btn")
+            app.query_one("#add-btn", Button).press()
             await pilot.pause()
             editor = app.query_one(ContactEditor)
             return "visible" in editor.classes
@@ -155,12 +171,12 @@ def test_cancel_button_hides_editor():
     """Cancel button hides the open editor."""
     async def scenario():
         r = _make_roster()
-        app = ContactsScreen(r)
-        async with app.run_test() as pilot:
+        app = _ContactsHostApp(r)
+        async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            await pilot.click("#add-btn")
+            app.query_one("#add-btn", Button).press()
             await pilot.pause()
-            await pilot.click("#cancel-btn")
+            app.query_one("#cancel-btn", Button).press()
             await pilot.pause()
             editor = app.query_one(ContactEditor)
             return "visible" in editor.classes
@@ -172,11 +188,11 @@ def test_search_filters_table():
     """Search field filters the table to matching contacts."""
     async def scenario():
         r = _make_roster()
-        app = ContactsScreen(r)
-        async with app.run_test() as pilot:
+        app = _ContactsHostApp(r)
+        async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             await pilot.click("#contacts-search")
-            await pilot.type("Alice")
+            await pilot.press("a", "l", "i", "c", "e")
             await pilot.pause()
             table = app.query_one("#contacts-table", DataTable)
             return table.row_count
@@ -193,7 +209,7 @@ def test_q_closes_screen():
         roster = _make_roster()
         app = IrisConsole()
         app._roster = roster
-        async with app.run_test() as pilot:
+        async with app.run_test(size=(120, 40)) as pilot:
             await pilot.press("K")
             await pilot.pause()
             await pilot.press("q")
