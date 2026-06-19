@@ -33,17 +33,18 @@ The caller injects all dependencies so tests run without audio hardware.
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
+from . import settings
+
 logger = logging.getLogger(__name__)
 
 # Caller-side capture windows (seconds) — v1.
-_INTRO_WINDOW_S: float = float(os.environ.get("IRIS_SC_INTRO_S", "10"))
-_RETRY_WINDOW_S: float = float(os.environ.get("IRIS_SC_RETRY_S", "5"))
-_RELAY_TIMEOUT_S: float = float(os.environ.get("IRIS_SC_RELAY_TIMEOUT_S", "20"))
+_INTRO_WINDOW_S: float = settings.get_float("IRIS_SC_INTRO_S", 10.0)
+_RETRY_WINDOW_S: float = settings.get_float("IRIS_SC_RETRY_S", 5.0)
+_RELAY_TIMEOUT_S: float = settings.get_float("IRIS_SC_RELAY_TIMEOUT_S", 20.0)
 _RELAY_MAX_WORDS: int = 20
 
 
@@ -209,7 +210,7 @@ class ScreenCallFlow:
 # ---------------------------------------------------------------------------
 
 # Pivot capture window — same as the take_message addition window by default.
-_PIVOT_WINDOW_S: float = float(os.environ.get("IRIS_SC_PIVOT_S", "30"))
+_PIVOT_WINDOW_S: float = settings.get_float("IRIS_SC_PIVOT_S", 30.0)
 
 
 class ScreenPivotFlow:

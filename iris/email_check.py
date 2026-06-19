@@ -4,10 +4,11 @@ Usage:
     iris-email-check                   # check and print results
     iris-email-check --quiet           # exit 0 if OK, 1 if any check fails
 
-Reads config from environment variables:
+Reads config from the environment or $IRIS_HOME/config.toml ([email] section);
+an env var overrides the file. The PASSWORD is env-only — never in the file:
     IRIS_EMAIL_IMAP_HOST, IRIS_EMAIL_IMAP_PORT
     IRIS_EMAIL_SMTP_HOST, IRIS_EMAIL_SMTP_PORT
-    IRIS_EMAIL_USER, IRIS_EMAIL_PASSWORD
+    IRIS_EMAIL_USER       (IRIS_EMAIL_PASSWORD — environment only)
 
 Helpful for operators who want to verify their Gmail App Password setup before
 starting the full daemon.  Does NOT require the console or llama-server to be
@@ -19,6 +20,8 @@ import imaplib
 import os
 import smtplib
 import sys
+
+from . import settings
 
 _CONNECT_TIMEOUT = 10
 
@@ -99,16 +102,16 @@ def main() -> int:
     parser.add_argument("--quiet", action="store_true", help="Exit 0 if OK, 1 if any check fails; no output.")
     args = parser.parse_args()
 
-    imap_host = os.environ.get("IRIS_EMAIL_IMAP_HOST", "").strip()
+    imap_host = settings.get("IRIS_EMAIL_IMAP_HOST", "").strip()
     try:
-        imap_port = int(os.environ.get("IRIS_EMAIL_IMAP_PORT", "993"))
-        smtp_port = int(os.environ.get("IRIS_EMAIL_SMTP_PORT", "587"))
+        imap_port = int(settings.get("IRIS_EMAIL_IMAP_PORT", "993"))
+        smtp_port = int(settings.get("IRIS_EMAIL_SMTP_PORT", "587"))
     except ValueError as exc:
         print(f"iris-email-check: invalid port value — {exc}", file=sys.stderr)
         sys.exit(1)
-    smtp_host = os.environ.get("IRIS_EMAIL_SMTP_HOST", "").strip()
-    user = os.environ.get("IRIS_EMAIL_USER", "").strip()
-    password = os.environ.get("IRIS_EMAIL_PASSWORD", "").strip()
+    smtp_host = settings.get("IRIS_EMAIL_SMTP_HOST", "").strip()
+    user = settings.get("IRIS_EMAIL_USER", "").strip()
+    password = os.environ.get("IRIS_EMAIL_PASSWORD", "").strip()  # secret: env only
 
     if not imap_host:
         if not args.quiet:

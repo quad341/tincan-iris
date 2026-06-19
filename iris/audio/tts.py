@@ -16,6 +16,7 @@ import urllib.request
 from pathlib import Path
 from typing import Protocol
 
+from .. import settings
 from .assets import resolve_asset
 
 
@@ -81,7 +82,7 @@ class KokoroTTS:
         voices: str | None = None,
         isolate: bool = True,
     ) -> None:
-        self.voice = os.environ.get("IRIS_KOKORO_VOICE", voice)
+        self.voice = settings.get("IRIS_KOKORO_VOICE", voice)
         self.speed = speed
         self.python = python or resolve_asset(
             "IRIS_KOKORO_PYTHON", ".venv-kokoro/bin/python", _REPO_ROOT
@@ -140,7 +141,7 @@ class KokoroServerTTS:
         speed: float = 1.0,
     ) -> None:
         self._server_url = (
-            server_url or os.environ.get("IRIS_TTS_SERVER_URL", _DEFAULT_TTS_SERVER_URL)
+            server_url or settings.get("IRIS_TTS_SERVER_URL", _DEFAULT_TTS_SERVER_URL)
         ).rstrip("/")
         self.voice = voice
         self.speed = speed

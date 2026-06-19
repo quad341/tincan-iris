@@ -11,10 +11,10 @@ at a sibling clone's assets.
 To make any clone work without per-clone provisioning, asset paths resolve with
 this precedence (first hit wins):
 
-  1. explicit ``IRIS_*_PYTHON`` / ``IRIS_*_DIR`` env var (operator override)
+  1. explicit ``IRIS_*_PYTHON`` / ``IRIS_*_DIR`` (env var or config.toml)
   2. repo-local path, if it exists      (``<repo>/.venv-whisper`` …)
-  3. shared asset home, if it exists    (``$IRIS_ASSET_HOME`` or XDG
-     ``~/.local/share/iris``)
+  3. shared asset home, if it exists    (``IRIS_ASSET_HOME``, else the umbrella
+     ``IRIS_HOME`` — default ``~/.local/share/iris``)
   4. repo-local path (default)          — so a missing-asset error names the
      conventional location, and ``setup_*.sh`` without ``--shared`` still
      "just works"
@@ -25,37 +25,37 @@ installs keep working unchanged via step 2.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
+
+from .. import settings
 
 
 def asset_home() -> Path:
     """Shared, clone-independent root for Iris model assets.
 
-    ``IRIS_ASSET_HOME`` overrides everything; otherwise XDG
-    (``$XDG_DATA_HOME/iris``, default ``~/.local/share/iris``). The shared root
-    mirrors a clone's sub-layout (``.venv-whisper``, ``models/whisper/<size>``,
-    …) so resolution is a plain root swap.
+    ``IRIS_ASSET_HOME`` (env or config.toml) points the assets elsewhere; by
+    default they live under the umbrella :func:`iris.settings.iris_home`. The
+    shared root mirrors a clone's sub-layout (``.venv-whisper``,
+    ``models/whisper/<size>``, …) so resolution is a plain root swap.
     """
-    override = os.environ.get("IRIS_ASSET_HOME")
+    override = settings.get("IRIS_ASSET_HOME")
     if override:
         return Path(override).expanduser()
-    xdg = os.environ.get("XDG_DATA_HOME")
-    base = Path(xdg).expanduser() if xdg else Path.home() / ".local" / "share"
-    return base / "iris"
+    return settings.iris_home()
 
 
 def resolve_asset(env_var: str, rel_path: str, repo_root: Path) -> str:
-    """Resolve a model-asset path: env override → repo-local → shared → default.
+    """Resolve a model-asset path: override → repo-local → shared → default.
 
     ``rel_path`` is the asset's location relative to both ``repo_root`` and the
     shared :func:`asset_home` (they share the same sub-layout — e.g.
     ``.venv-whisper/bin/python`` or ``models/kokoro``). An explicit ``env_var``
-    value wins outright. Otherwise prefer a repo-local copy that exists, then a
-    shared copy that exists, then fall back to the repo-local path even if it is
-    missing so callers' error messages point at the conventional spot.
+    value (environment or config.toml) wins outright. Otherwise prefer a
+    repo-local copy that exists, then a shared copy that exists, then fall back
+    to the repo-local path even if it is missing so callers' error messages
+    point at the conventional spot.
     """
-    override = os.environ.get(env_var)
+    override = settings.get(env_var)
     if override:
         return override
     repo_local = repo_root / rel_path

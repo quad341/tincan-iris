@@ -11,7 +11,6 @@ text-in / voice-out.
 from __future__ import annotations
 
 import json
-import os
 import socket
 import subprocess
 import urllib.error
@@ -19,6 +18,7 @@ import urllib.request
 from pathlib import Path
 from typing import Protocol
 
+from .. import settings
 from .assets import resolve_asset
 
 
@@ -34,7 +34,7 @@ _DEFAULT_STT_SERVER_URL = "http://127.0.0.1:8082"
 # this module but runs under the 3.12 venv's interpreter, never imported here.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TRANSCRIBE_SCRIPT = Path(__file__).resolve().parent / "_whisper_transcribe.py"
-_DEFAULT_SIZE = os.environ.get("IRIS_WHISPER_MODEL_SIZE", "small.en")
+_DEFAULT_SIZE = settings.get("IRIS_WHISPER_MODEL_SIZE", "small.en")
 
 
 class STT(Protocol):
@@ -120,7 +120,7 @@ class FasterWhisperServerSTT:
 
     def __init__(self, server_url: str | None = None) -> None:
         self._server_url = (
-            server_url or os.environ.get("IRIS_STT_SERVER_URL", _DEFAULT_STT_SERVER_URL)
+            server_url or settings.get("IRIS_STT_SERVER_URL", _DEFAULT_STT_SERVER_URL)
         ).rstrip("/")
 
     def available(self) -> bool:

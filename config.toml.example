@@ -1,0 +1,75 @@
+# Iris config — copy to $IRIS_HOME/config.toml and edit.
+#
+#   IRIS_HOME defaults to ~/.local/share/iris (where the db/transcripts live).
+#   Set it once in your shell (export IRIS_HOME=...) or rely on the default;
+#   then `python -m iris.console` launches with no IRIS_* env soup.
+#
+# Precedence, highest first:  env var  >  this file  >  built-in default.
+# So an IRIS_* env var still overrides any value here for a one-off launch.
+# Every key is optional — omit a key to keep its built-in default.
+# Check what resolved with:  python -m iris.doctor
+#
+# Phase 1 wires the launch-time knobs below (audio, assets, voice). Email /
+# screening / server-url knobs still come from their IRIS_* env vars for now.
+
+[audio]
+# How Iris captures/plays call audio. "" = local mic+speakers (default).
+#   "tincan-sco" rides tincan's live HFP/SCO call audio (nodes exist only
+#   during an active call — launch the console after it connects).
+mode = ""                       # IRIS_AUDIO        ("" | "tincan-sco")
+aec = false                     # IRIS_AEC          echo-cancel the SCO uplink
+# Virtual-device routing (e.g. into Discord/Zoom via scripts/virtual_audio.sh):
+# playback_target = "iris_mic"  # IRIS_PLAYBACK_TARGET
+# capture_target  = ""          # IRIS_CAPTURE_TARGET
+# va_aec = false                # IRIS_VA_AEC       use the AEC capture source
+# Named local devices (USB headset, etc.) — see `python -m iris.audio.endpoint --list`:
+# playback_device = ""          # IRIS_PLAYBACK_DEVICE
+# capture_device  = ""          # IRIS_CAPTURE_DEVICE
+# Override SCO node discovery (rarely needed):
+# sco_sink   = ""               # IRIS_SCO_SINK
+# sco_source = ""               # IRIS_SCO_SOURCE
+
+[assets]
+# Where the STT/TTS venvs + models live. Default: under $IRIS_HOME. Provision
+# once with `scripts/setup_whisper.sh --shared` / `setup_kokoro.sh --shared`.
+# home = "~/.local/share/iris"  # IRIS_ASSET_HOME   shared root for all clones
+whisper_model_size = "small.en" # IRIS_WHISPER_MODEL_SIZE
+# Point at specific paths only if you're not using the shared/repo layout:
+# whisper_dir    = ""           # IRIS_WHISPER_DIR    (…/models/whisper/<size>)
+# whisper_python = ""           # IRIS_WHISPER_PYTHON (…/.venv-whisper/bin/python)
+# kokoro_dir     = ""           # IRIS_KOKORO_DIR     (…/models/kokoro)
+# kokoro_python  = ""           # IRIS_KOKORO_PYTHON  (…/.venv-kokoro/bin/python)
+
+[voice]
+kokoro_voice = "af_heart"       # IRIS_KOKORO_VOICE
+
+[email]
+# Email lane (disabled when imap_host is empty). The PASSWORD is deliberately
+# NOT a config key — it's a secret; set IRIS_EMAIL_PASSWORD in your environment
+# only (e.g. a Gmail App Password). Verify with `iris-email-check`.
+# imap_host = "imap.gmail.com"  # IRIS_EMAIL_IMAP_HOST
+# imap_port = 993               # IRIS_EMAIL_IMAP_PORT
+# smtp_host = "smtp.gmail.com"  # IRIS_EMAIL_SMTP_HOST
+# smtp_port = 587               # IRIS_EMAIL_SMTP_PORT
+# user      = "you@gmail.com"   # IRIS_EMAIL_USER
+
+[screening]
+# Caller-side capture windows for handling_rule='screen' (seconds).
+# intro_s         = 10          # IRIS_SC_INTRO_S
+# retry_s         = 5           # IRIS_SC_RETRY_S
+# relay_timeout_s = 20          # IRIS_SC_RELAY_TIMEOUT_S
+# pivot_s         = 30          # IRIS_SC_PIVOT_S
+
+[take_message]
+# Capture windows for handling_rule='take_message' (seconds).
+# name_s = 8                    # IRIS_TM_NAME_S
+# msg_s  = 30                   # IRIS_TM_MSG_S
+# add_s  = 10                   # IRIS_TM_ADD_S
+
+[servers]
+# Local model server URLs (only when STT/TTS run as HTTP servers).
+# stt_url = "http://127.0.0.1:8082"   # IRIS_STT_SERVER_URL
+# tts_url = "http://127.0.0.1:8083"   # IRIS_TTS_SERVER_URL
+
+[storage]
+# log_file = ""                 # IRIS_LOG_FILE (default ~/.local/state/iris/console.log)

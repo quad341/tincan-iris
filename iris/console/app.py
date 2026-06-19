@@ -35,6 +35,7 @@ from textual.containers import Horizontal
 from textual.widget import Widget
 from textual.widgets import Button, Footer, Header, RichLog, Static
 
+from .. import settings
 from ..addressing import address
 from ..message_store import MessageStore, VoiceMessage
 from ..prefs import PreferencesStore
@@ -73,7 +74,7 @@ _MARKUP = re.compile(r"\[/?[^\]]*\]")
 def _open_log():
     """Open the plain-text session logfile (fresh per run). $IRIS_LOG_FILE overrides
     the default ~/.local/state/iris/console.log. Returns (file, path) or (None, None)."""
-    path = os.environ.get("IRIS_LOG_FILE")
+    path = settings.get("IRIS_LOG_FILE")
     if not path:
         base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
         try:
