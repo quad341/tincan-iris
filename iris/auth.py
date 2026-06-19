@@ -177,6 +177,21 @@ def _exchange_gcal_code(code: str, client_id: str, client_secret: str, redirect_
         return json.loads(resp.read())
 
 
+def _gcal_howto() -> None:
+    """Print how to create the Google OAuth client this command needs."""
+    print(
+        "Google Calendar needs a Google OAuth *Desktop app* client (one-time, a few min):\n"
+        "  1. Pick/create a project:   https://console.cloud.google.com/projectcreate\n"
+        "  2. Enable the Calendar API: https://console.cloud.google.com/apis/library/calendar-json.googleapis.com\n"
+        "  3. OAuth consent screen — User type 'External', then add your Google address\n"
+        "     under 'Test users':       https://console.cloud.google.com/apis/credentials/consent\n"
+        "  4. Create credentials -> 'OAuth client ID' -> Application type 'Desktop app':\n"
+        "                              https://console.cloud.google.com/apis/credentials\n"
+        "  5. Download the client JSON (named client_secret_*.json), then run:\n"
+        "       iris-auth gcal /path/to/client_secret_*.json\n"
+    )
+
+
 def _gcal(args: argparse.Namespace) -> int:
     import http.server
     import secrets as _secrets
@@ -184,17 +199,14 @@ def _gcal(args: argparse.Namespace) -> int:
     import urllib.parse
     import webbrowser
 
+    if not args.credentials:
+        _gcal_howto()
     try:
         client_id, client_secret = _load_gcal_client(args.credentials)
     except (OSError, KeyError, ValueError) as exc:
-        print(f"iris-auth: couldn't read the OAuth client — {exc}", file=sys.stderr)
-        print(
-            "  Create an OAuth 'Desktop app' client in Google Cloud Console (enable the\n"
-            "  Google Calendar API), then pass its credentials.json:\n"
-            "      iris-auth gcal ~/Downloads/credentials.json\n"
-            "  …or run `iris-auth gcal` and paste the client_id / client_secret.",
-            file=sys.stderr,
-        )
+        print(f"iris-auth: couldn't read the OAuth client at {args.credentials!r} — {exc}\n",
+              file=sys.stderr)
+        _gcal_howto()
         return 1
     if not client_id or not client_secret:
         print("iris-auth: no client_id / client_secret given.", file=sys.stderr)
