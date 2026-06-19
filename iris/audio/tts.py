@@ -141,7 +141,7 @@ class KokoroServerTTS:
         speed: float = 1.0,
     ) -> None:
         self._server_url = (
-            server_url or os.environ.get("IRIS_TTS_SERVER_URL", _DEFAULT_TTS_SERVER_URL)
+            server_url or settings.get("IRIS_TTS_SERVER_URL", _DEFAULT_TTS_SERVER_URL)
         ).rstrip("/")
         self.voice = voice
         self.speed = speed

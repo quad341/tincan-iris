@@ -20,17 +20,18 @@ without touching the filesystem or audio hardware.
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
+from . import settings
+
 logger = logging.getLogger(__name__)
 
 # Fixed capture windows (seconds) — v1.
-_NAME_WINDOW_S: float = float(os.environ.get("IRIS_TM_NAME_S", "8"))
-_MSG_WINDOW_S: float = float(os.environ.get("IRIS_TM_MSG_S", "30"))
-_ADD_WINDOW_S: float = float(os.environ.get("IRIS_TM_ADD_S", "10"))
+_NAME_WINDOW_S: float = settings.get_float("IRIS_TM_NAME_S", 8.0)
+_MSG_WINDOW_S: float = settings.get_float("IRIS_TM_MSG_S", 30.0)
+_ADD_WINDOW_S: float = settings.get_float("IRIS_TM_ADD_S", 10.0)
 
 
 class _TTS(Protocol):

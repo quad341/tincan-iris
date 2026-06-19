@@ -49,9 +49,10 @@ def config_path() -> Path:
     return Path(override).expanduser() if override else iris_home() / "config.toml"
 
 
-# config.toml ``[section].key`` -> ``IRIS_*`` environment name. Phase 1 wires the
-# launch-time knobs (audio routing, model assets, voice); email / screening /
-# server-url knobs join here in a follow-up.
+# config.toml ``[section].key`` -> ``IRIS_*`` environment name. Add a row here to
+# make a knob file-configurable. Secrets (e.g. IRIS_EMAIL_PASSWORD) are
+# deliberately ABSENT — they stay environment-only and never live in this file
+# (see config.py).
 _KEYMAP: dict[tuple[str, str], str] = {
     ("audio", "mode"):             "IRIS_AUDIO",
     ("audio", "aec"):              "IRIS_AEC",
@@ -69,6 +70,24 @@ _KEYMAP: dict[tuple[str, str], str] = {
     ("assets", "kokoro_dir"):      "IRIS_KOKORO_DIR",
     ("assets", "kokoro_python"):   "IRIS_KOKORO_PYTHON",
     ("voice", "kokoro_voice"):     "IRIS_KOKORO_VOICE",
+    # Email lane (NEVER the password — secrets stay environment-only):
+    ("email", "imap_host"):        "IRIS_EMAIL_IMAP_HOST",
+    ("email", "imap_port"):        "IRIS_EMAIL_IMAP_PORT",
+    ("email", "smtp_host"):        "IRIS_EMAIL_SMTP_HOST",
+    ("email", "smtp_port"):        "IRIS_EMAIL_SMTP_PORT",
+    ("email", "user"):             "IRIS_EMAIL_USER",
+    # Screening / take-message capture windows (seconds):
+    ("screening", "intro_s"):          "IRIS_SC_INTRO_S",
+    ("screening", "retry_s"):          "IRIS_SC_RETRY_S",
+    ("screening", "relay_timeout_s"):  "IRIS_SC_RELAY_TIMEOUT_S",
+    ("screening", "pivot_s"):          "IRIS_SC_PIVOT_S",
+    ("take_message", "name_s"):        "IRIS_TM_NAME_S",
+    ("take_message", "msg_s"):         "IRIS_TM_MSG_S",
+    ("take_message", "add_s"):         "IRIS_TM_ADD_S",
+    # Local server URLs + console log:
+    ("servers", "stt_url"):        "IRIS_STT_SERVER_URL",
+    ("servers", "tts_url"):        "IRIS_TTS_SERVER_URL",
+    ("storage", "log_file"):       "IRIS_LOG_FILE",
 }
 
 
@@ -120,3 +139,25 @@ def get_bool(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in _TRUE
+
+
+def get_int(name: str, default: int) -> int:
+    """:func:`get` coerced to int; ``default`` on unset/empty/unparseable."""
+    raw = get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def get_float(name: str, default: float) -> float:
+    """:func:`get` coerced to float; ``default`` on unset/empty/unparseable."""
+    raw = get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default

@@ -42,3 +42,34 @@ whisper_model_size = "small.en" # IRIS_WHISPER_MODEL_SIZE
 
 [voice]
 kokoro_voice = "af_heart"       # IRIS_KOKORO_VOICE
+
+[email]
+# Email lane (disabled when imap_host is empty). The PASSWORD is deliberately
+# NOT a config key — it's a secret; set IRIS_EMAIL_PASSWORD in your environment
+# only (e.g. a Gmail App Password). Verify with `iris-email-check`.
+# imap_host = "imap.gmail.com"  # IRIS_EMAIL_IMAP_HOST
+# imap_port = 993               # IRIS_EMAIL_IMAP_PORT
+# smtp_host = "smtp.gmail.com"  # IRIS_EMAIL_SMTP_HOST
+# smtp_port = 587               # IRIS_EMAIL_SMTP_PORT
+# user      = "you@gmail.com"   # IRIS_EMAIL_USER
+
+[screening]
+# Caller-side capture windows for handling_rule='screen' (seconds).
+# intro_s         = 10          # IRIS_SC_INTRO_S
+# retry_s         = 5           # IRIS_SC_RETRY_S
+# relay_timeout_s = 20          # IRIS_SC_RELAY_TIMEOUT_S
+# pivot_s         = 30          # IRIS_SC_PIVOT_S
+
+[take_message]
+# Capture windows for handling_rule='take_message' (seconds).
+# name_s = 8                    # IRIS_TM_NAME_S
+# msg_s  = 30                   # IRIS_TM_MSG_S
+# add_s  = 10                   # IRIS_TM_ADD_S
+
+[servers]
+# Local model server URLs (only when STT/TTS run as HTTP servers).
+# stt_url = "http://127.0.0.1:8082"   # IRIS_STT_SERVER_URL
+# tts_url = "http://127.0.0.1:8083"   # IRIS_TTS_SERVER_URL
+
+[storage]
+# log_file = ""                 # IRIS_LOG_FILE (default ~/.local/state/iris/console.log)
