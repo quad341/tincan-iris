@@ -45,4 +45,8 @@ def optional_skills(notes_store=None, roster=None) -> list:
     from .email_skill import configured_email_skills
     skills += configured_email_skills(roster=roster)
 
+    # Calendar — only when a Google OAuth token exists (run `iris auth gcal`).
+    from .calendar import configured_calendar_skills
+    skills += configured_calendar_skills()
+
     return skills
