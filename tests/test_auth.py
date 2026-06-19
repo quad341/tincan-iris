@@ -120,3 +120,22 @@ def test_exchange_gcal_code_posts_and_parses():
         tok = auth._exchange_gcal_code("code123", "cid", "csec", "http://127.0.0.1:1/")
     assert tok["access_token"] == "AT"
     assert tok["refresh_token"] == "RT"
+
+
+def test_gcal_howto_on_bad_credentials_path(tmp_path, capsys):
+    rc = auth.main(["gcal", str(tmp_path / "nope.json")])
+    cap = capsys.readouterr()
+    text = cap.out + cap.err
+    assert rc == 1
+    # teaches how to make a client instead of a circular error
+    assert "console.cloud.google.com" in text
+    assert "Desktop app" in text
+    assert "client_secret" in text
+
+
+def test_gcal_howto_when_no_credentials(capsys):
+    with patch("builtins.input", return_value=""), \
+         patch("iris.auth.getpass.getpass", return_value=""):
+        rc = auth.main(["gcal"])
+    assert rc == 1
+    assert "console.cloud.google.com" in capsys.readouterr().out
