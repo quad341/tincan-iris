@@ -12,7 +12,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
-_IRIS_DB = Path.home() / ".local" / "share" / "iris" / "iris.db"
+from . import settings
+
+# Default persistent store location, under the IRIS_HOME umbrella
+# (default ~/.local/share/iris). Pass an explicit path to override.
+_IRIS_DB = settings.iris_home() / "iris.db"
 
 _DDL = """
 PRAGMA journal_mode=WAL;

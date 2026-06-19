@@ -11,7 +11,6 @@ text-in / voice-out.
 from __future__ import annotations
 
 import json
-import os
 import socket
 import subprocess
 import urllib.error
@@ -121,7 +120,7 @@ class FasterWhisperServerSTT:
 
     def __init__(self, server_url: str | None = None) -> None:
         self._server_url = (
-            server_url or os.environ.get("IRIS_STT_SERVER_URL", _DEFAULT_STT_SERVER_URL)
+            server_url or settings.get("IRIS_STT_SERVER_URL", _DEFAULT_STT_SERVER_URL)
         ).rstrip("/")
 
     def available(self) -> bool:

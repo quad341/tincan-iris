@@ -15,6 +15,8 @@ from iris import settings
 _ENV_VARS = (
     "IRIS_HOME", "IRIS_CONFIG", "XDG_DATA_HOME",
     "IRIS_AUDIO", "IRIS_AEC", "IRIS_KOKORO_VOICE", "IRIS_WHISPER_MODEL_SIZE",
+    "IRIS_EMAIL_IMAP_PORT", "IRIS_EMAIL_USER", "IRIS_SC_INTRO_S",
+    "IRIS_SC_RELAY_TIMEOUT_S", "IRIS_TM_MSG_S", "IRIS_STT_SERVER_URL", "IRIS_LOG_FILE",
 )
 
 
@@ -131,3 +133,48 @@ def test_malformed_file_is_silent(tmp_path, monkeypatch):
     monkeypatch.setenv("IRIS_CONFIG", str(p))
     settings.reload()
     assert settings.get("IRIS_AUDIO", "d") == "d"
+
+
+# --- int / float coercion ---------------------------------------------------
+
+def test_get_int_from_config(tmp_path, monkeypatch):
+    _write_config(tmp_path, "[email]\nimap_port = 1993\n", monkeypatch)
+    assert settings.get_int("IRIS_EMAIL_IMAP_PORT", 993) == 1993
+
+
+def test_get_int_default_and_bad_value(tmp_path, monkeypatch):
+    assert settings.get_int("IRIS_EMAIL_IMAP_PORT", 993) == 993
+    _write_config(tmp_path, '[email]\nimap_port = "notanint"\n', monkeypatch)
+    assert settings.get_int("IRIS_EMAIL_IMAP_PORT", 993) == 993
+
+
+def test_get_float_from_config(tmp_path, monkeypatch):
+    _write_config(tmp_path, "[screening]\nrelay_timeout_s = 12.5\n", monkeypatch)
+    assert settings.get_float("IRIS_SC_RELAY_TIMEOUT_S", 20.0) == 12.5
+
+
+def test_get_float_default_and_bad_value(tmp_path, monkeypatch):
+    assert settings.get_float("IRIS_SC_INTRO_S", 10.0) == 10.0
+    _write_config(tmp_path, '[screening]\nintro_s = "x"\n', monkeypatch)
+    assert settings.get_float("IRIS_SC_INTRO_S", 10.0) == 10.0
+
+
+# --- Phase 2 keymap groups + secret exclusion -------------------------------
+
+def test_password_is_never_file_configurable():
+    assert "IRIS_EMAIL_PASSWORD" not in settings._KEYMAP.values()
+
+
+def test_phase2_keymap_groups(tmp_path, monkeypatch):
+    _write_config(
+        tmp_path,
+        '[email]\nuser = "me@x.com"\n'
+        "[take_message]\nmsg_s = 45\n"
+        '[servers]\nstt_url = "http://h:1/"\n'
+        '[storage]\nlog_file = "/tmp/c.log"\n',
+        monkeypatch,
+    )
+    assert settings.get("IRIS_EMAIL_USER") == "me@x.com"
+    assert settings.get_float("IRIS_TM_MSG_S", 30.0) == 45.0
+    assert settings.get("IRIS_STT_SERVER_URL") == "http://h:1/"
+    assert settings.get("IRIS_LOG_FILE") == "/tmp/c.log"
