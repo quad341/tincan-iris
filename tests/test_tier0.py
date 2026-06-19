@@ -72,14 +72,17 @@ def _qwen(skills=None) -> Tier1Qwen:
     return Tier1Qwen(cfg, skills=skills)
 
 
-def test_tier1_dispatches_skill_and_runs_it():
+def test_tier1_proposes_skill_for_the_daemon_to_run():
+    # The lane proposes (ADR-0005 §4); the daemon authorizes + runs it. Execution
+    # and the permission gate are covered in test_permission_gate.py.
     reg = default_registry()
     t1 = _qwen(skills=reg)
     dispatch_resp = json.dumps({"skill": "echo", "args": {"text": "hello"}})
     with patch("urllib.request.urlopen", return_value=_fake_urlopen(dispatch_resp)):
         result = t1.handle("echo hello")
-    assert result.text == "hello"
-    assert result.skill == "echo"
+    assert result.proposal is not None
+    assert result.proposal.skill == "echo"
+    assert result.proposal.args == {"text": "hello"}
     assert result.lane == "tier1-qwen"
 
 

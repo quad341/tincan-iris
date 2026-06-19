@@ -21,11 +21,23 @@ from .skills import SkillRegistry
 
 
 @dataclass
+class SkillProposal:
+    """A skill the model proposed (name + filtered args), NOT yet executed.
+
+    The qwen lane returns this; the daemon (Brain) authorizes it and only then
+    runs it — ADR-0005 §4: the model proposes, the daemon authorizes + executes.
+    """
+    skill: str
+    args: dict
+
+
+@dataclass
 class LaneResult:
     text: str
     lane: str
     skill: str | None = None
     speaker: str = ""  # "operator" | "far" | "" — who spoke; propagated from the call site
+    proposal: "SkillProposal | None" = None  # set when the lane proposed a skill to run
 
 
 def _reply_text(result: object) -> str:
@@ -128,7 +140,9 @@ class Tier1Qwen:
     def __init__(self, cfg: Config, skills: SkillRegistry | None = None) -> None:
         self.cfg = cfg
         self.skills = skills
-        self._grammar_cache: str | None = None
+        # Grammar is cached per speaker scope — the operator and the far party
+        # are offered different skill sets, so they need different grammars.
+        self._grammar_cache: dict[str, str] = {}
 
     def _complete(self, prompt: str, n_predict: int, *, grammar: str | None = None) -> str:
         payload: dict = {
@@ -146,7 +160,7 @@ class Tier1Qwen:
         with urllib.request.urlopen(req, timeout=self.cfg.qwen_timeout_s) as resp:
             return json.loads(resp.read()).get("content", "").strip()
 
-    def _build_grammar(self) -> str:
+    def _build_grammar(self, speaker: str = "") -> str:
         """Generate a GBNF grammar that constrains Qwen to emit a dispatch JSON.
 
         Output shape: ``{"skill":"<name>","args":{...}}``. Skill name is one of
@@ -154,9 +168,12 @@ class Tier1Qwen:
         object holds zero or more string-valued key/value pairs, so a skill that
         needs several arguments (e.g. calendar free/busy's ``start`` + ``end``)
         can be filled in one shot. Which keys to use is taught in the dispatch
-        prompt; ``handle()`` drops unknown keys and degrades on missing ones.
+        prompt; the daemon drops unknown keys and degrades on missing ones.
+
+        ``speaker`` scopes the offered names so operator_only skills are never
+        even nameable by the far party.
         """
-        names = list(self.skills.names()) if self.skills else []
+        names = list(self.skills.names(speaker)) if self.skills else []
         skill_choices = " | ".join(f'"{n}"' for n in names) or '"none"'
         return "\n".join([
             'root         ::= "{" ws "\\"skill\\"" ws ":" ws "\\"" skill-choice "\\"" ws "," ws "\\"args\\"" ws ":" ws args-obj ws "}"',
@@ -168,10 +185,10 @@ class Tier1Qwen:
             'ws           ::= [ \\t\\n]*',
         ])
 
-    def _dispatch_prompt(self, text: str) -> str:
+    def _dispatch_prompt(self, text: str, speaker: str = "") -> str:
         skills = self.skills
         lines = []
-        for e in (skills.manifest() if skills else []):
+        for e in (skills.manifest(speaker) if skills else []):
             params = e.get("params") or []
             if params:
                 arg_desc = ", ".join(
@@ -200,12 +217,27 @@ class Tier1Qwen:
             f"<|im_start|>user\n{text}<|im_end|>\n<|im_start|>assistant\n"
         )
 
-    def handle(self, text: str, *, allow_skills: bool = True, context_hint: str = "") -> LaneResult:
-        if allow_skills and self.skills and self.skills.names():
-            if self.skills.grammar_dirty or self._grammar_cache is None:
-                self._grammar_cache = self._build_grammar()
+    def handle(
+        self,
+        text: str,
+        *,
+        allow_skills: bool = True,
+        context_hint: str = "",
+        speaker: str = "",
+    ) -> LaneResult:
+        """Run the dispatch pass and, on a skill hit, return an *unexecuted*
+        ``SkillProposal`` — the daemon (Brain) authorizes and runs it. On
+        ``"none"`` (or no registry / DEMO) fall through to a chat completion.
+        """
+        if allow_skills and self.skills and self.skills.names(speaker):
+            if self.skills.grammar_dirty:
+                self._grammar_cache.clear()
                 self.skills.grammar_dirty = False
-            raw = self._complete(self._dispatch_prompt(text), 96, grammar=self._grammar_cache)
+            grammar = self._grammar_cache.get(speaker)
+            if grammar is None:
+                grammar = self._build_grammar(speaker)
+                self._grammar_cache[speaker] = grammar
+            raw = self._complete(self._dispatch_prompt(text, speaker), 96, grammar=grammar)
             try:
                 dispatch = json.loads(raw)
                 skill_name = dispatch.get("skill", "none")
@@ -221,17 +253,15 @@ class Tier1Qwen:
                         {k: v for k, v in args.items() if k in known}
                         if isinstance(args, dict) else {}
                     )
-                    try:
-                        result = skill.run(**call_args)
-                    except TypeError:
-                        # the model chose a skill but didn't supply a required arg —
-                        # ask for the detail instead of erroring out
-                        return LaneResult(
-                            "Sorry — I didn't catch the details for that. "
-                            "Could you say it another way?",
-                            self.name, skill=skill_name,
-                        )
-                    return LaneResult(_reply_text(result), self.name, skill=skill_name)
+                    # Skills that declare a ``speaker`` param get the real channel
+                    # so their own checks see who's calling on the dispatch path.
+                    if "speaker" in known:
+                        call_args["speaker"] = speaker or "operator"
+                    # Propose — do NOT execute. The daemon authorizes, then runs.
+                    return LaneResult(
+                        "", self.name, skill=skill_name, speaker=speaker,
+                        proposal=SkillProposal(skill_name, call_args),
+                    )
         # no skill selected, DEMO mode, or no registry — regular chat completion
         return LaneResult(
             self._complete(self._chat_prompt(text, context_hint), self.cfg.qwen_max_tokens), self.name
