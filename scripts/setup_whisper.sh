@@ -9,12 +9,23 @@
 #
 # Re-runnable. Model size via IRIS_WHISPER_MODEL_SIZE (default small.en).
 # After it finishes: `python -m iris.listen` can hear you (needs a llama-server).
+#
+# Pass --shared to install into the shared asset home ($IRIS_ASSET_HOME, else
+# $XDG_DATA_HOME/iris, else ~/.local/share/iris) instead of this repo. Every
+# clone then resolves these assets (see iris/audio/assets.py) without re-running
+# setup or env-pointing. Default (no flag) keeps the per-clone layout.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VENV="$ROOT/.venv-whisper"
+ASSET_ROOT="$ROOT"
+if [ "${1:-}" = "--shared" ]; then
+  ASSET_ROOT="${IRIS_ASSET_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/iris}"
+  echo "==> --shared: installing into shared asset home $ASSET_ROOT"
+  mkdir -p "$ASSET_ROOT"
+fi
+VENV="$ASSET_ROOT/.venv-whisper"
 SIZE="${IRIS_WHISPER_MODEL_SIZE:-small.en}"
-MODELS="$ROOT/models/whisper/$SIZE"
+MODELS="$ASSET_ROOT/models/whisper/$SIZE"
 
 echo "==> Creating 3.12 venv at $VENV"
 uv venv --python 3.12 "$VENV"

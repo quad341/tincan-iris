@@ -19,6 +19,8 @@ import urllib.request
 from pathlib import Path
 from typing import Protocol
 
+from .assets import resolve_asset
+
 
 class STTError(Exception):
     """Raised when a server-mode STT call fails."""
@@ -26,9 +28,10 @@ class STTError(Exception):
 
 _DEFAULT_STT_SERVER_URL = "http://127.0.0.1:8082"
 
-# Resolve paths relative to the repo so the code is portable; override with the
-# IRIS_WHISPER_* env vars. The transcribe script lives beside this module but
-# runs under the 3.12 venv's interpreter, never imported into this package.
+# Resolve paths via assets.resolve_asset (env override -> repo-local -> shared
+# XDG home), so any clone works without per-clone setup or env-pointing; override
+# explicitly with the IRIS_WHISPER_* env vars. The transcribe script lives beside
+# this module but runs under the 3.12 venv's interpreter, never imported here.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TRANSCRIBE_SCRIPT = Path(__file__).resolve().parent / "_whisper_transcribe.py"
 _DEFAULT_SIZE = os.environ.get("IRIS_WHISPER_MODEL_SIZE", "small.en")
@@ -57,13 +60,11 @@ class FasterWhisperSTT:
         beam_size: int = 5,
         isolate: bool = True,
     ) -> None:
-        self.python = python or os.environ.get(
-            "IRIS_WHISPER_PYTHON",
-            str(_REPO_ROOT / ".venv-whisper" / "bin" / "python"),
+        self.python = python or resolve_asset(
+            "IRIS_WHISPER_PYTHON", ".venv-whisper/bin/python", _REPO_ROOT
         )
-        self.model = model or os.environ.get(
-            "IRIS_WHISPER_DIR",
-            str(_REPO_ROOT / "models" / "whisper" / _DEFAULT_SIZE),
+        self.model = model or resolve_asset(
+            "IRIS_WHISPER_DIR", f"models/whisper/{_DEFAULT_SIZE}", _REPO_ROOT
         )
         self.compute_type = compute_type
         self.language = language

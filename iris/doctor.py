@@ -1,8 +1,20 @@
-"""iris doctor — health-check CLI for Iris systemd services."""
+"""iris doctor — health-check CLI for Iris's setup assets + systemd services.
+
+Two layers, because they fail at different times:
+
+  * **Assets** (:func:`check_assets`) — the setup layer the console resolves on
+    startup: the whisper STT and kokoro TTS venvs + models. This is the most
+    common first-run / fresh-clone failure (``python -m iris.console`` dies
+    before any service exists). Reuses the providers' own path resolution so
+    what the doctor reports is exactly what the runtime will use.
+  * **Services** (:func:`check_services`) — the runtime layer: the systemd
+    user units (llama/whisper/kokoro/brain/tincand) and their /health endpoints.
+"""
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -11,6 +23,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 from .config import DEFAULT
 
@@ -49,6 +62,15 @@ class ServiceCheckResult:
     required: bool
     note: str = ""
     round_trip_ms: float | None = None
+
+
+@dataclass
+class AssetCheckResult:
+    name: str
+    status: DoctorStatus
+    required: bool
+    detail: str = ""   # short, table-friendly (resolved path, or what's missing)
+    fix: str = ""       # full remediation; shown in the Setup block, not the table
 
 
 EXPECTED_SERVICES: list[ServiceDescriptor] = [
@@ -120,24 +142,126 @@ def _exit_code(results: list[ServiceCheckResult]) -> int:
     return code
 
 
+def _missing(*pairs: tuple[str, str]) -> list[str]:
+    """Return the labels whose paths don't exist (for a short 'missing: …' detail)."""
+    return [label for label, path in pairs if not Path(path).exists()]
+
+
+def check_assets() -> list[AssetCheckResult]:
+    """Check the local model assets the console/voice loop resolves at startup.
+
+    Instantiates the real providers so resolution (env override → repo-local →
+    shared XDG home; see ``iris/audio/assets.py``) matches the runtime exactly,
+    then reports each via its own ``.available()``. Never raises — a provider
+    import/instantiation failure is reported as UNKNOWN so the doctor still runs.
+    """
+    results: list[AssetCheckResult] = []
+
+    # --- Whisper STT — the console's ears. Required: the console has no text
+    #     fallback for input, so a missing whisper venv/model is a hard failure.
+    try:
+        from .audio.stt import FasterWhisperSTT
+        stt = FasterWhisperSTT()
+        if stt.available():
+            results.append(AssetCheckResult("whisper-stt", DoctorStatus.OK, True, detail=stt.model))
+        else:
+            miss = _missing(("venv", stt.python), ("model", stt.model))
+            results.append(AssetCheckResult(
+                "whisper-stt", DoctorStatus.DOWN, True,
+                detail="missing: " + ("+".join(miss) or "transcribe worker"),
+                fix="scripts/setup_whisper.sh  (add --shared to serve every clone)  "
+                    "OR set IRIS_WHISPER_DIR=<…/models/whisper/SIZE> "
+                    "IRIS_WHISPER_PYTHON=<…/.venv-whisper/bin/python>"))
+    except Exception as e:  # noqa: BLE001 — doctor must survive a broken provider
+        results.append(AssetCheckResult("whisper-stt", DoctorStatus.UNKNOWN, True, detail=str(e)))
+
+    # --- Kokoro TTS — the natural voice. Not required: espeak-ng is the
+    #     automatic fallback, so a miss is DEGRADED (robotic), not DOWN.
+    try:
+        from .audio.tts import KokoroTTS
+        tts = KokoroTTS()
+        if tts.available():
+            results.append(AssetCheckResult("kokoro-tts", DoctorStatus.OK, False, detail=tts.model))
+        else:
+            miss = _missing(("venv", tts.python), ("model", tts.model), ("voices", tts.voices))
+            results.append(AssetCheckResult(
+                "kokoro-tts", DoctorStatus.DEGRADED, False,
+                detail="missing: " + ("+".join(miss) or "synth worker") + " (espeak-ng fallback)",
+                fix="scripts/setup_kokoro.sh  (add --shared to serve every clone)  "
+                    "OR set IRIS_KOKORO_DIR=<…/models/kokoro> "
+                    "IRIS_KOKORO_PYTHON=<…/.venv-kokoro/bin/python>"))
+    except Exception as e:  # noqa: BLE001
+        results.append(AssetCheckResult("kokoro-tts", DoctorStatus.UNKNOWN, False, detail=str(e)))
+
+    # --- espeak-ng — the zero-setup fallback TTS. OK if on PATH.
+    if shutil.which("espeak-ng"):
+        results.append(AssetCheckResult("espeak-ng", DoctorStatus.OK, False, detail="fallback TTS present"))
+    else:
+        results.append(AssetCheckResult(
+            "espeak-ng", DoctorStatus.ABSENT, False,
+            detail="fallback TTS not installed",
+            fix="install espeak-ng (your package manager) for a no-setup voice fallback"))
+
+    return results
+
+
+def _asset_exit_code(results: list[AssetCheckResult]) -> int:
+    code = 0
+    for r in results:
+        if not r.required:
+            continue
+        if r.status in (DoctorStatus.DOWN, DoctorStatus.ABSENT):
+            code = max(code, 2)
+        elif r.status == DoctorStatus.DEGRADED:
+            code = max(code, 1)
+    return code
+
+
+def _sco_advisory() -> str | None:
+    """When IRIS_AUDIO rides live call audio, warn if no SCO node is present yet.
+
+    The bluez HFP/SCO PipeWire nodes only exist *during* an active call, so a
+    console launched before the call connects can't find them — the #1 gotcha.
+    Returns a one-line advisory, or None when not applicable / nodes are present.
+    """
+    if os.environ.get("IRIS_AUDIO", "").lower() not in ("tincan-sco", "sco"):
+        return None
+    try:
+        from .audio.endpoint import discover_sco_nodes
+        sink, _source = discover_sco_nodes()
+    except Exception:  # noqa: BLE001 — advisory only
+        sink = None
+    if sink:
+        return None
+    return ("IRIS_AUDIO=tincan-sco but no SCO sink found — the bluez nodes only exist "
+            "during an active call. Launch the console AFTER the call connects.")
+
+
 def doctor_main(args: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="iris doctor")
     parser.add_argument("--fix", action="store_true", help="restart DOWN services")
     parser.add_argument("--json", action="store_true", help="output JSON")
-    parser.add_argument("--check", metavar="SVC", help="narrow to one service")
+    parser.add_argument("--check", metavar="NAME", help="narrow to one asset or service")
     parser.add_argument("--deep", action="store_true", help="add round-trip check")
     ns = parser.parse_args(args if args is not None else sys.argv[1:])
 
     services = list(EXPECTED_SERVICES)
+    assets = check_assets()
     if ns.check:
         services = [s for s in services if s.name == ns.check]
+        assets = [a for a in assets if a.name == ns.check]
 
     timeout_s = DEFAULT.doctor_deep_timeout_s if ns.deep else DEFAULT.doctor_timeout_s
     results = check_services(services, timeout_s=timeout_s, deep=ns.deep)
-    exit_code = _exit_code(results)
+    exit_code = max(_exit_code(results), _asset_exit_code(assets))
 
     if ns.json:
         print(json.dumps({
+            "assets": [
+                {"name": a.name, "status": a.status.value, "required": a.required,
+                 "detail": a.detail}
+                for a in assets
+            ],
             "services": [
                 {"name": r.name, "status": r.status.value, "required": r.required,
                  "round_trip_ms": r.round_trip_ms}
@@ -148,6 +272,18 @@ def doctor_main(args: list[str] | None = None) -> int:
         return exit_code
 
     cols = shutil.get_terminal_size().columns
+
+    if assets:
+        print("Assets")
+        print(f"{'Asset':<14} {'Status':<12} {'Req':<5} Detail")
+        print("-" * min(cols, 72))
+        for a in assets:
+            sym = _SYMBOL[a.status]
+            req_str = "yes" if a.required else "no"
+            print(f"{a.name:<14} {sym + ' ' + a.status.value:<12} {req_str:<5} {a.detail}".rstrip())
+        print()
+        print("Services")
+
     show_rtt = ns.deep
     show_notes = cols >= (84 if show_rtt else 72)
 
@@ -188,6 +324,21 @@ def doctor_main(args: list[str] | None = None) -> int:
                     capture_output=True,
                     text=True,
                 )
+
+    # Asset remediation is intentionally manual — provisioning downloads models
+    # and builds venvs (slow, network), so --fix never auto-runs it. Surface the
+    # exact commands instead.
+    fixes = [a for a in assets if a.fix and a.status is not DoctorStatus.OK]
+    if fixes:
+        print()
+        print("Setup — provision the items flagged above:")
+        for a in fixes:
+            print(f"  {a.name}: {a.fix}")
+
+    advisory = _sco_advisory()
+    if advisory:
+        print()
+        print(f"note: {advisory}")
 
     return exit_code
 

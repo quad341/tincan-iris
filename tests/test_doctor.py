@@ -11,6 +11,19 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolate_assets():
+    """These tests exercise the systemd-service layer in isolation.
+
+    doctor_main() now also runs the asset preflight (check_assets), which would
+    otherwise see no models in CI and perturb exit codes / output here. The asset
+    layer has its own coverage in test_doctor_assets.py; neutralize it for this
+    module so the service assertions stand alone.
+    """
+    with patch("iris.doctor.check_assets", return_value=[]):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
