@@ -103,14 +103,19 @@ exactly what works. Past setup, it's all natural language — just ask.
 | **Calendar** | a Google OAuth token *(setup pending)* | "am I free at 3pm?", "add an event …" |
 | **Messages** (SMS/MAP) | a running `tincand` *(pending)* | "read my texts", "text … …" |
 
-### Email (Gmail example)
+### Email (Gmail) — one command
 
-1. `config.toml` `[email]`: `imap_host = "imap.gmail.com"`, `smtp_host = "smtp.gmail.com"`, `user = "you@gmail.com"`.
-2. Create a Gmail **App Password** (Google Account → Security → 2-Step
-   Verification → App passwords) and put it in `secrets.toml` `[email] password`.
-3. Verify: `iris-email-check`. The email skills then auto-register and qwen can
-   read / triage / draft replies (bodies are summarized **locally** — never sent
-   to the cloud tier).
+```bash
+iris-auth gmail                 # or: iris-auth gmail you@gmail.com
+```
+
+It prompts for a Gmail **App Password** (input hidden), verifies the IMAP login,
+writes the config + a `chmod 600` secret for you, and confirms. You'll need an
+App Password first (Google Account → Security → 2-Step Verification → App
+passwords — *not* your normal password). After it succeeds the email skills
+auto-register and qwen can read / triage / draft replies (bodies are summarized
+**locally** — never sent to the cloud tier). Re-check any time with
+`iris-email-check`.
 
 ### Calendar (status)
 
