@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -25,6 +24,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from . import settings
 from .config import DEFAULT
 
 
@@ -224,7 +224,7 @@ def _sco_advisory() -> str | None:
     console launched before the call connects can't find them — the #1 gotcha.
     Returns a one-line advisory, or None when not applicable / nodes are present.
     """
-    if os.environ.get("IRIS_AUDIO", "").lower() not in ("tincan-sco", "sco"):
+    if settings.get("IRIS_AUDIO", "").lower() not in ("tincan-sco", "sco"):
         return None
     try:
         from .audio.endpoint import discover_sco_nodes
@@ -257,6 +257,11 @@ def doctor_main(args: list[str] | None = None) -> int:
 
     if ns.json:
         print(json.dumps({
+            "config": {
+                "path": str(settings.config_path()),
+                "found": settings.config_path().exists(),
+                "home": str(settings.iris_home()),
+            },
             "assets": [
                 {"name": a.name, "status": a.status.value, "required": a.required,
                  "detail": a.detail}
@@ -272,6 +277,11 @@ def doctor_main(args: list[str] | None = None) -> int:
         return exit_code
 
     cols = shutil.get_terminal_size().columns
+
+    cfg_path = settings.config_path()
+    cfg_src = "loaded" if cfg_path.exists() else "not found — built-in defaults + env"
+    print(f"config: {cfg_path}  ({cfg_src})")
+    print()
 
     if assets:
         print("Assets")

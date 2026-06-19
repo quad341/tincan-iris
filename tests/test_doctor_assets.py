@@ -180,3 +180,18 @@ def test_no_sco_advisory_when_not_sco_mode(capsys, monkeypatch):
          patch("iris.doctor.check_services", return_value=[]):
         doctor.doctor_main(args=[])
     assert "active call" not in capsys.readouterr().out
+
+
+def test_json_includes_config_block(capsys):
+    with patch("iris.doctor.check_assets", return_value=[]), \
+         patch("iris.doctor.check_services", return_value=[]):
+        doctor.doctor_main(args=["--json"])
+    cfg = json.loads(capsys.readouterr().out)["config"]
+    assert "path" in cfg and "found" in cfg and "home" in cfg
+
+
+def test_human_output_shows_config_line(capsys):
+    with patch("iris.doctor.check_assets", return_value=[]), \
+         patch("iris.doctor.check_services", return_value=[]):
+        doctor.doctor_main(args=[])
+    assert "config:" in capsys.readouterr().out
