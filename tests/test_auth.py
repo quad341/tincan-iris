@@ -74,3 +74,49 @@ def test_gmail_uses_configured_user_when_no_arg(monkeypatch):
         rc = auth.main(["gmail"])
     assert rc == 0
     assert settings.get_secret("IRIS_EMAIL_PASSWORD") == "pw"
+
+
+# ---------------------------------------------------------------------------
+# gcal — OAuth helpers (the interactive loopback is verified live, not here)
+# ---------------------------------------------------------------------------
+
+def _mock_resp(data):
+    from unittest.mock import MagicMock
+    import json as _json
+    r = MagicMock()
+    r.__enter__ = lambda s: s
+    r.__exit__ = MagicMock(return_value=False)
+    r.read.return_value = _json.dumps(data).encode()
+    return r
+
+
+def test_load_gcal_client_from_installed_credentials(tmp_path):
+    import json
+    cred = tmp_path / "credentials.json"
+    cred.write_text(json.dumps({"installed": {"client_id": "cid.apps", "client_secret": "csec"}}))
+    assert auth._load_gcal_client(str(cred)) == ("cid.apps", "csec")
+
+
+def test_load_gcal_client_from_flat_credentials(tmp_path):
+    import json
+    cred = tmp_path / "c.json"
+    cred.write_text(json.dumps({"client_id": "x", "client_secret": "y"}))
+    assert auth._load_gcal_client(str(cred)) == ("x", "y")
+
+
+def test_build_gcal_auth_url_has_offline_consent_and_scope():
+    url = auth._build_gcal_auth_url("cid", "http://127.0.0.1:5555/", "st8")
+    assert url.startswith(auth._GCAL_AUTH)
+    assert "client_id=cid" in url
+    assert "access_type=offline" in url
+    assert "prompt=consent" in url
+    assert "state=st8" in url
+    assert "calendar" in url  # the scope
+    assert "127.0.0.1%3A5555" in url or "127.0.0.1:5555" in url
+
+
+def test_exchange_gcal_code_posts_and_parses():
+    with patch("urllib.request.urlopen", return_value=_mock_resp({"access_token": "AT", "refresh_token": "RT", "expires_in": 3600})):
+        tok = auth._exchange_gcal_code("code123", "cid", "csec", "http://127.0.0.1:1/")
+    assert tok["access_token"] == "AT"
+    assert tok["refresh_token"] == "RT"

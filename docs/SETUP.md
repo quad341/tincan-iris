@@ -100,7 +100,7 @@ exactly what works. Past setup, it's all natural language — just ask.
 | **Web search** | nothing | "search the web for …" |
 | **Roster** (contacts) | nothing (local) | "add a contact …", "what's …'s number?" |
 | **Email** | `[email]` config + app-password | "any important email?", "reply to … saying …" |
-| **Calendar** | a Google OAuth token *(setup pending)* | "am I free at 3pm?", "add an event …" |
+| **Calendar** | `iris-auth gcal` (Google OAuth) | "am I free at 3pm?", "add an event …" |
 | **Messages** (SMS/MAP) | a running `tincand` *(pending)* | "read my texts", "text … …" |
 
 ### Email (Gmail) — one command
@@ -110,20 +110,27 @@ iris-auth gmail                 # or: iris-auth gmail you@gmail.com
 ```
 
 It prompts for a Gmail **App Password** (input hidden), verifies the IMAP login,
-writes the config + a `chmod 600` secret for you, and confirms. You'll need an
-App Password first (Google Account → Security → 2-Step Verification → App
-passwords — *not* your normal password). After it succeeds the email skills
-auto-register and qwen can read / triage / draft replies (bodies are summarized
-**locally** — never sent to the cloud tier). Re-check any time with
+writes the config + a `chmod 600` secret for you, and confirms. Create the App
+Password first — **<https://myaccount.google.com/apppasswords>** (requires
+2-Step Verification; this is *not* your normal password). Help article:
+<https://support.google.com/mail/answer/185833>. After it succeeds the email
+skills auto-register and qwen can read / triage / draft replies (bodies are
+summarized **locally** — never sent to the cloud tier). Re-check any time with
 `iris-email-check`.
 
-### Calendar (status)
+### Calendar (Google) — one command
 
-The calendar skills (free/busy, create, move) are built and wired — they
-register the moment a Google OAuth token exists. The `iris auth gcal` flow that
-mints that token needs a Google Cloud **OAuth client** (yours) and an
-interactive browser consent, so it's a guided one-time step (see the open
-calendar issue).
+```bash
+iris-auth gcal ~/Downloads/credentials.json     # or just: iris-auth gcal (paste id/secret)
+```
+
+First, a one-time Google setup: in **Google Cloud Console** create an OAuth
+**"Desktop app"** client and **enable the Google Calendar API**; download its
+`credentials.json`. Then `iris-auth gcal` opens your browser for consent,
+catches the loopback redirect, and saves a **refreshable** token (`chmod 600`).
+The calendar skills (free/busy, create, move) then auto-register and qwen can
+field "am I free at 3pm?" / "add an event …". Access tokens refresh
+automatically.
 
 ---
 
