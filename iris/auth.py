@@ -177,12 +177,30 @@ def _exchange_gcal_code(code: str, client_id: str, client_secret: str, redirect_
         return json.loads(resp.read())
 
 
+def _project_from_client_id(client_id: str) -> str:
+    """Extract the Google project number from an OAuth client_id.
+
+    Client ids look like ``<PROJECT_NUMBER>-<rand>.apps.googleusercontent.com``;
+    return the leading number when it matches that shape, else ``""``.
+    """
+    head = client_id.split("-", 1)[0]
+    return head if head.isdigit() else ""
+
+
+def _calendar_api_url(project: str = "") -> str:
+    """The 'enable Google Calendar API' console URL, pinned to ``project`` when known."""
+    base = "https://console.cloud.google.com/apis/library/calendar-json.googleapis.com"
+    return f"{base}?project={project}" if project else base
+
+
 def _gcal_howto() -> None:
     """Print how to create the Google OAuth client this command needs."""
     print(
         "Google Calendar needs a Google OAuth *Desktop app* client (one-time, a few min):\n"
         "  1. Pick/create a project:   https://console.cloud.google.com/projectcreate\n"
-        "  2. Enable the Calendar API: https://console.cloud.google.com/apis/library/calendar-json.googleapis.com\n"
+        "  2. Enable the Calendar API — make sure the project selector (top bar) shows\n"
+        "     the SAME project, it can default to another one and then calls 403:\n"
+        "                              https://console.cloud.google.com/apis/library/calendar-json.googleapis.com\n"
         "  3. OAuth consent screen — User type 'External', then add your Google address\n"
         "     under 'Test users':       https://console.cloud.google.com/apis/credentials/consent\n"
         "  4. Create credentials -> 'OAuth client ID' -> Application type 'Desktop app':\n"
@@ -235,6 +253,8 @@ def _gcal(args: argparse.Namespace) -> int:
 
     print("Opening your browser to authorize Google Calendar…")
     print(f"  If it doesn't open, visit:\n  {url}")
+    print("  Tip: if consent fails or loops, open that URL in a private / incognito window —")
+    print("       it forces a clean Google account picker (a wrong signed-in account is the usual culprit).")
     try:
         webbrowser.open(url)
     except Exception:  # noqa: BLE001 — headless box; the printed URL is the fallback
@@ -272,7 +292,26 @@ def _gcal(args: argparse.Namespace) -> int:
     if not token["refresh_token"]:
         print("  note: no refresh_token returned — revoke iris's access in your Google account, then re-run.")
     print(f"✓ Calendar authorized. token: {path} (chmod 600)")
-    print('  Try it — ask Iris: "am I free at 3pm?"')
+
+    # Smoke-probe a real call so a not-yet-enabled API surfaces now, at setup,
+    # instead of on the first "am I free at 3pm?" weeks later.
+    from .calendar import CalendarClient
+    ok, hint = CalendarClient().verify_reachable()
+    if ok:
+        print("✓ Calendar API reachable.")
+        print('  Try it — ask Iris: "am I free at 3pm?"')
+        return 0
+    print(f"⚠ Authorized, but a test read didn't go through yet:\n  {hint}", file=sys.stderr)
+    if "http" not in hint:   # hint carries no pinned URL — derive one from the client_id
+        project = _project_from_client_id(client_id)
+        print(
+            "  If the Calendar API isn't enabled, turn it on "
+            f"(verify the project selector shows {project or 'your OAuth project'}):\n"
+            f"    {_calendar_api_url(project)}",
+            file=sys.stderr,
+        )
+    print('  Once it\'s enabled the saved token just works — then ask Iris: "am I free at 3pm?"',
+          file=sys.stderr)
     return 0
 
 

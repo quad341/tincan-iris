@@ -139,3 +139,23 @@ def test_gcal_howto_when_no_credentials(capsys):
         rc = auth.main(["gcal"])
     assert rc == 1
     assert "console.cloud.google.com" in capsys.readouterr().out
+
+
+def test_project_from_client_id_extracts_number():
+    assert auth._project_from_client_id(
+        "967870440993-abc.apps.googleusercontent.com"
+    ) == "967870440993"
+    assert auth._project_from_client_id("not-a-number.apps") == ""
+    assert auth._project_from_client_id("plainstring") == ""
+
+
+def test_calendar_api_url_pins_project_when_known():
+    assert auth._calendar_api_url("123").endswith(
+        "calendar-json.googleapis.com?project=123"
+    )
+    assert "?project=" not in auth._calendar_api_url("")
+
+
+def test_gcal_howto_warns_to_check_project_selector(capsys):
+    auth._gcal_howto()
+    assert "project selector" in capsys.readouterr().out.lower()
