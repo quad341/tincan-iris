@@ -219,7 +219,10 @@ class HomeApp(App):
 
 
 def main() -> None:
-    HomeApp().run()
+    # Inject a real Brain so Home can actually talk to qwen (and the offline
+    # skills wired into it); without this it was a dead shell.
+    from ..brain import Brain
+    HomeApp(brain=Brain()).run()
 
 
 if __name__ == "__main__":
