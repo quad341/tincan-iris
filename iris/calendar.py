@@ -19,6 +19,7 @@ event details, OAuth guidance, and act-without-disclose markers.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -28,8 +29,23 @@ from pathlib import Path
 from .skills import SkillParam
 
 _TOKEN_PATH = Path.home() / ".config/iris/gcal_token.json"
+_TOKEN_URI = "https://oauth2.googleapis.com/token"
 _GCAL_BASE = "https://www.googleapis.com/calendar/v3"
 _CALENDAR_ID = "primary"
+
+
+def save_token(token: dict, path: Path | None = None) -> Path:
+    """Persist an OAuth token dict for the calendar client (chmod 600).
+
+    Used by ``iris-auth gcal`` after the consent flow. The dict should carry
+    ``access_token`` and, for unattended refresh, ``refresh_token`` +
+    ``client_id`` + ``client_secret`` (+ ``expires_at`` epoch seconds).
+    """
+    p = path or _TOKEN_PATH
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(token))
+    p.chmod(0o600)
+    return p
 
 
 # ---------------------------------------------------------------------------
@@ -68,10 +84,35 @@ class CalendarClient:
     def _headers(self) -> dict[str, str]:
         if not self._token:
             raise PermissionError("Google Calendar not authorised — run: iris auth gcal")
+        self._maybe_refresh()
         return {
             "Authorization": f"Bearer {self._token['access_token']}",
             "Content-Type": "application/json",
         }
+
+    def _maybe_refresh(self) -> None:
+        """Refresh the access token when it's near expiry, if we can.
+
+        No-op for a static token (no refresh_token / client creds) — it's used
+        as-is. A 60s skew avoids racing the expiry boundary.
+        """
+        tok = self._token
+        if not tok or not tok.get("refresh_token") or not tok.get("client_id"):
+            return
+        if time.time() < float(tok.get("expires_at", 0)) - 60:
+            return
+        data = urllib.parse.urlencode({
+            "grant_type": "refresh_token",
+            "refresh_token": tok["refresh_token"],
+            "client_id": tok["client_id"],
+            "client_secret": tok.get("client_secret", ""),
+        }).encode()
+        req = urllib.request.Request(tok.get("token_uri", _TOKEN_URI), data, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            new = json.loads(resp.read())
+        tok["access_token"] = new["access_token"]
+        tok["expires_at"] = time.time() + new.get("expires_in", 3600)
+        self._save_token(tok)
 
     def _get(self, path: str, params: dict | None = None) -> dict:
         url = _GCAL_BASE + path
