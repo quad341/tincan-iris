@@ -23,7 +23,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .skills import SkillParam
@@ -46,6 +46,32 @@ def save_token(token: dict, path: Path | None = None) -> Path:
     p.write_text(json.dumps(token))
     p.chmod(0o600)
     return p
+
+
+def _gcal_http_hint(exc: urllib.error.HTTPError) -> str:
+    """Turn a Google Calendar HTTP error into a human hint + fix.
+
+    For "API not enabled" (``SERVICE_DISABLED`` / ``accessNotConfigured``) Google
+    returns a project-pinned activation URL in ``error.details[].metadata`` —
+    surface it verbatim so the API gets enabled on the *right* project. Falls
+    back to the API's own message, else the status code.
+    """
+    try:
+        data = json.loads(exc.read().decode())
+    except Exception:  # noqa: BLE001 — non-JSON / unreadable body
+        return f"Google Calendar API error (HTTP {getattr(exc, 'code', '?')})."
+    err = data.get("error", {}) if isinstance(data, dict) else {}
+    for detail in err.get("details", []):
+        url = (detail.get("metadata") or {}).get("activationUrl")
+        if url:
+            return (
+                "the Google Calendar API isn't enabled on this project yet — "
+                "enable it (double-check the project selector matches!):\n"
+                f"      {url}\n"
+                "      then wait ~1–2 min and retry; no need to re-run gcal."
+            )
+    msg = err.get("message")
+    return msg or f"Google Calendar API error (HTTP {getattr(exc, 'code', '?')})."
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +106,35 @@ class CalendarClient:
 
     def has_token(self) -> bool:
         return self._token is not None
+
+    def verify_reachable(self) -> tuple[bool, str]:
+        """Best-effort setup check: is the Calendar API enabled and the token usable?
+
+        Makes one tiny ``freeBusy`` call. Returns ``(ok, hint)``; on failure
+        ``hint`` is a console-safe explanation + fix. For the common
+        "API not enabled" case it carries Google's own project-pinned activation
+        URL, so the operator enables it on the *right* project. Never raises — a
+        setup probe must not crash setup.
+        """
+        if not self._token:
+            return False, "no calendar token saved — run: iris auth gcal"
+        now = datetime.now(timezone.utc)
+        body = {
+            "timeMin": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "timeMax": (now + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "items": [{"id": _CALENDAR_ID}],
+        }
+        try:
+            req = urllib.request.Request(
+                _GCAL_BASE + "/freeBusy", json.dumps(body).encode(),
+                headers=self._headers(), method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10):
+                return True, ""
+        except urllib.error.HTTPError as exc:
+            return False, _gcal_http_hint(exc)
+        except Exception as exc:  # noqa: BLE001 — best-effort probe, never crash setup
+            return False, f"couldn't reach Google Calendar ({exc})"
 
     def _headers(self) -> dict[str, str]:
         if not self._token:

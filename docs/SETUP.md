@@ -125,12 +125,17 @@ iris-auth gcal ~/Downloads/credentials.json     # or just: iris-auth gcal (paste
 ```
 
 First, a one-time Google setup: in **Google Cloud Console** create an OAuth
-**"Desktop app"** client and **enable the Google Calendar API**; download its
-`credentials.json`. Then `iris-auth gcal` opens your browser for consent,
-catches the loopback redirect, and saves a **refreshable** token (`chmod 600`).
-The calendar skills (free/busy, create, move) then auto-register and qwen can
-field "am I free at 3pm?" / "add an event …". Access tokens refresh
-automatically.
+**"Desktop app"** client and **enable the Google Calendar API** — when enabling
+it, **double-check the project selector (top bar) shows the same project your
+OAuth client is in**. It can silently default to a different project, and then
+calls fail `403 SERVICE_DISABLED`. Download the client's `credentials.json`.
+Then `iris-auth gcal` opens your browser for consent, catches the loopback
+redirect, saves a **refreshable** token (`chmod 600`), and runs a quick test
+read — so a not-yet-enabled API is caught right there, with a project-pinned
+link to fix it. If consent loops or fails, open the printed URL in a **private /
+incognito window** — that forces a clean Google account picker. The calendar
+skills (free/busy, create, move) then auto-register and qwen can field "am I
+free at 3pm?" / "add an event …". Access tokens refresh automatically.
 
 ---
 
