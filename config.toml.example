@@ -45,8 +45,9 @@ kokoro_voice = "af_heart"       # IRIS_KOKORO_VOICE
 
 [email]
 # Email lane (disabled when imap_host is empty). The PASSWORD is deliberately
-# NOT a config key — it's a secret; set IRIS_EMAIL_PASSWORD in your environment
-# only (e.g. a Gmail App Password). Verify with `iris-email-check`.
+# NOT a config key — it's a secret. Put it in $IRIS_HOME/secrets.toml ([email]
+# password, chmod 600) or set IRIS_EMAIL_PASSWORD in the env. See
+# secrets.toml.example. Verify the lane with `iris-email-check`.
 # imap_host = "imap.gmail.com"  # IRIS_EMAIL_IMAP_HOST
 # imap_port = 993               # IRIS_EMAIL_IMAP_PORT
 # smtp_host = "smtp.gmail.com"  # IRIS_EMAIL_SMTP_HOST

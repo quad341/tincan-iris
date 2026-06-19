@@ -17,7 +17,6 @@ running.
 from __future__ import annotations
 
 import imaplib
-import os
 import smtplib
 import sys
 
@@ -111,7 +110,7 @@ def main() -> int:
         sys.exit(1)
     smtp_host = settings.get("IRIS_EMAIL_SMTP_HOST", "").strip()
     user = settings.get("IRIS_EMAIL_USER", "").strip()
-    password = os.environ.get("IRIS_EMAIL_PASSWORD", "").strip()  # secret: env only
+    password = (settings.get_secret("IRIS_EMAIL_PASSWORD") or "").strip()  # env or secrets.toml
 
     if not imap_host:
         if not args.quiet:

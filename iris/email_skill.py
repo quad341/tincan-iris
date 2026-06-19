@@ -394,3 +394,33 @@ def email_skills(
         CancelEmailSkill(pending),
         TriageEmailSkill(provider, triage),
     ]
+
+
+def configured_email_skills(roster: "RosterProvider | None" = None) -> list[object]:
+    """Build email skills from config, or return ``[]`` if the lane isn't set up.
+
+    Reads IMAP/SMTP host + user from config (:func:`iris.settings.get`) and the
+    password from the secrets layer (:func:`iris.settings.get_secret` — env or
+    secrets.toml). When host, user, and password are all present, constructs an
+    IMAPEmailProvider and returns its skills so qwen can field natural-language
+    email requests; otherwise returns ``[]`` and the brain simply omits email.
+    """
+    from . import settings
+
+    host = (settings.get("IRIS_EMAIL_IMAP_HOST") or "").strip()
+    user = (settings.get("IRIS_EMAIL_USER") or "").strip()
+    password = (settings.get_secret("IRIS_EMAIL_PASSWORD") or "").strip()
+    if not (host and user and password):
+        return []
+
+    from .email_provider import IMAPEmailProvider
+
+    provider = IMAPEmailProvider(
+        imap_host=host,
+        imap_port=settings.get_int("IRIS_EMAIL_IMAP_PORT", 993),
+        smtp_host=(settings.get("IRIS_EMAIL_SMTP_HOST") or "").strip(),
+        smtp_port=settings.get_int("IRIS_EMAIL_SMTP_PORT", 587),
+        user=user,
+        password=password,
+    )
+    return email_skills(provider, roster=roster)
