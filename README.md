@@ -59,6 +59,22 @@ Iris knows *who's speaking from the audio channel*, not voice ID: you're on the 
 
 The grant is **operator-only and spoof-proof** — honored only on the mic channel, so a caller can't talk their way into your data. For the far party the rule is **requests push *in*, data never pulls *out*.**
 
+## Running Iris
+
+Everything lives under one home — `IRIS_HOME` (default `~/.local/share/iris`).
+Your brain is any llama.cpp-compatible server on `:8080`; provision the voice
+assets once; check it all with the doctor:
+
+```bash
+scripts/setup_whisper.sh --shared && scripts/setup_kokoro.sh --shared   # once
+python -m iris.doctor      # assets + services + config, one screen
+iris-home                  # out-of-call dashboard — chat to Iris
+```
+
+Knobs go in `$IRIS_HOME/config.toml`, credentials in `secrets.toml` (`chmod
+600`). Full walkthrough — including the email / calendar / web-search / notes
+connectors and how qwen uses them — in **[docs/SETUP.md](docs/SETUP.md)**.
+
 ## Status
 
 **v1 is built and running** — and has already held real, **disclosed** phone calls.
@@ -81,6 +97,8 @@ This project depends on **[tincan](https://github.com/quad341/tincan)** — see 
 
 ## More
 
+- **[Setup & running](docs/SETUP.md)** — get Iris running, the doctor, and the email/calendar/web/notes connectors
+- **[Commands](docs/COMMANDS.md)** — what you can say (local commands + qwen skills)
 - **[Architecture](ARCHITECTURE.md)** — the loop, the dispatch layer (skills vs. LLM), the trust/capability model, pluggable providers, the tincan contract
 - **[Security](SECURITY.md)** — network-isolated model inference + call-data privacy
 - **[Roadmap](https://github.com/quad341/tincan-iris/issues?q=is%3Aissue+label%3Aroadmap)** — where we're headed (intent, not promises)

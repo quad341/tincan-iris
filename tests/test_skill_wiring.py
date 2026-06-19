@@ -54,3 +54,19 @@ def test_email_present_when_configured(stores, monkeypatch):
     monkeypatch.setenv("IRIS_EMAIL_PASSWORD", "pw")
     names = {s.name for s in optional_skills(**stores)}
     assert {"read_email", "triage_email", "send_email"} <= names
+
+
+def test_calendar_gate_absent_without_token():
+    from unittest.mock import MagicMock
+    from iris.calendar import configured_calendar_skills
+    c = MagicMock()
+    c.has_token.return_value = False
+    assert configured_calendar_skills(client=c) == []
+
+
+def test_calendar_gate_present_with_token():
+    from unittest.mock import MagicMock
+    from iris.calendar import configured_calendar_skills
+    c = MagicMock()
+    c.has_token.return_value = True
+    assert len(configured_calendar_skills(client=c)) == 3

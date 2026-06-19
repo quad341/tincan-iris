@@ -377,3 +377,16 @@ def calendar_skills(client: CalendarClient | None = None) -> list:
         CalendarCreateSkill(c),
         CalendarMoveSkill(c),
     ]
+
+
+def configured_calendar_skills(client: CalendarClient | None = None) -> list:
+    """Return calendar skills when a Google token exists, else ``[]``.
+
+    The brain registers these only once the OAuth token is present (see
+    ``iris auth gcal``), so qwen offers calendar actions exactly when they can
+    work — mirroring the email lane's config-gated registration.
+    """
+    c = client or CalendarClient()
+    if not c.has_token():
+        return []
+    return calendar_skills(c)

@@ -18,6 +18,23 @@ Haiku, or your connection is down.
 | "goodbye" · "good night" | signs off |
 | **"what can you do"** · "help" | lists these commands |
 
+## Skills (Tier 1 — qwen routes your words to an action)
+
+These are natural-language — phrase them however you like; qwen maps the request
+to the skill. Each appears **only when its connector is set up** (see
+[SETUP.md](SETUP.md)); ask `iris doctor` what's available.
+
+| Say… | Iris… | Needs |
+|---|---|---|
+| "take a note: pick up milk" · "what are my notes?" | captures / lists notes | — |
+| "search the web for …" | looks it up | — |
+| "add a contact …" · "what's …'s number?" | manages your roster | — |
+| "any important email?" · "reply to … saying …" | reads / triages / drafts email | email setup |
+| "am I free at 3pm?" · "add an event …" | checks / edits your calendar | calendar auth |
+| "read my texts" · "text … …" | reads / sends messages | a running tincand |
+
+Email/message bodies are summarized **locally** — never sent to the cloud tier.
+
 ## Everything else
 
 - A normal question → **local Qwen** (fast, ~sub-second when the box is free).
