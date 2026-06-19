@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import re
+import urllib.error
+import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -9,7 +11,7 @@ from .config import DEFAULT, Config
 from .lanes import LaneResult, Tier0Rules, Tier1Qwen, Tier2RawHaiku
 from .latency import Timeline
 from .masking import run_with_masking
-from .notes import NotesStore, notes_skills
+from .notes import NotesStore
 from .prefs import PreferencesStore
 from .skills import SkillRegistry, default_registry
 from .trust import TrustMode
@@ -48,18 +50,30 @@ class Brain:
         self.context_hint: str = ""   # supplementary context hint (caller-level notes etc.)
         if skills is None:
             self.skills = default_registry()
-            for s in notes_skills(notes_store or NotesStore()):
-                self.skills.register(s)
-            # Offline connectors: register each lane's skills when configured, so
-            # qwen can field natural-language requests for them (no-op otherwise).
-            from .email_skill import configured_email_skills
-            for s in configured_email_skills():
+            # Optional/offline lanes (notes, roster, web search, email when
+            # configured); each registers only when its dependency is present, so
+            # qwen — and the HomeApp that drives this Brain — get exactly the
+            # skills that work.
+            from .skill_wiring import optional_skills
+            for s in optional_skills(notes_store=notes_store):
                 self.skills.register(s)
         else:
             self.skills = skills
         self.tier0 = Tier0Rules(self.skills)
         self.tier1 = Tier1Qwen(cfg, skills=self.skills)
         self.tier2 = Tier2RawHaiku(cfg)
+
+    def is_reachable(self) -> bool:
+        """True if the local qwen server (Tier-1 backend) is responding.
+
+        Probes the configured ``qwen_base_url`` /health (llama.cpp-compatible).
+        The HomeApp uses this to decide whether to accept input.
+        """
+        try:
+            with urllib.request.urlopen(self.cfg.qwen_base_url + "/health", timeout=2) as resp:
+                return 200 <= getattr(resp, "status", 200) < 300
+        except (urllib.error.URLError, OSError):
+            return False
 
     def _masked(
         self,
