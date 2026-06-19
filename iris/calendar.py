@@ -34,6 +34,27 @@ _GCAL_BASE = "https://www.googleapis.com/calendar/v3"
 _CALENDAR_ID = "primary"
 
 
+def _aware(value: str) -> datetime:
+    """Parse an ISO 8601 string to a timezone-AWARE datetime.
+
+    A value with an offset (or trailing ``Z``) is honored as-is; a *naive* value
+    is interpreted in the host's LOCAL timezone — "3pm" means 3pm where the
+    operator is, not 3pm UTC. This is the fix for free/busy and event times
+    silently being treated as UTC.
+    """
+    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return dt if dt.tzinfo is not None else dt.astimezone()
+
+
+def _utc_z(value: str) -> str:
+    """Normalize an ISO 8601 datetime to a UTC instant with a ``Z`` suffix.
+
+    For Calendar ``freeBusy`` ``timeMin``/``timeMax``, which must be unambiguous
+    instants. Naive inputs are taken as local time (see :func:`_aware`).
+    """
+    return _aware(value).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def save_token(token: dict, path: Path | None = None) -> Path:
     """Persist an OAuth token dict for the calendar client (chmod 600).
 
@@ -211,8 +232,8 @@ class CalendarClient:
     def free_busy(self, *, start: str, end: str) -> dict:
         """Return ``{"busy": [...]}`` for the primary calendar in the given range."""
         body = {
-            "timeMin": start if start.endswith("Z") else start + "Z",
-            "timeMax": end if end.endswith("Z") else end + "Z",
+            "timeMin": _utc_z(start),
+            "timeMax": _utc_z(end),
             "items": [{"id": _CALENDAR_ID}],
         }
         resp = self._post("/freeBusy", body)
@@ -256,7 +277,7 @@ class CalendarClient:
         If any attendee email is malformed, returns the event dict with an
         ``"attendee_error"`` key containing the bad address.
         """
-        start_dt = datetime.fromisoformat(start)
+        start_dt = _aware(start)
         end_dt = start_dt + timedelta(hours=duration_hours)
         body: dict = {
             "summary": title,
@@ -287,10 +308,10 @@ class CalendarClient:
         """Reschedule an event to ``new_start`` (preserves duration)."""
         # Fetch existing event to get duration
         existing = self._get(f"/calendars/{_CALENDAR_ID}/events/{event_id}")
-        old_start = datetime.fromisoformat(existing["start"]["dateTime"])
-        old_end = datetime.fromisoformat(existing["end"]["dateTime"])
+        old_start = _aware(existing["start"]["dateTime"])
+        old_end = _aware(existing["end"]["dateTime"])
         duration = old_end - old_start
-        new_start_dt = datetime.fromisoformat(new_start)
+        new_start_dt = _aware(new_start)
         new_end_dt = new_start_dt + duration
         body = {
             "start": {"dateTime": new_start_dt.isoformat()},
