@@ -28,6 +28,20 @@ class LaneResult:
     speaker: str = ""  # "operator" | "far" | "" — who spoke; propagated from the call site
 
 
+def _reply_text(result: object) -> str:
+    """Collapse a skill's return value to the single spoken/displayed string.
+
+    Most skills return a ``str``. The calendar skills (act-without-disclose)
+    return a ``(spoken_reply, console_annotation)`` tuple; the lane and console
+    speak ``LaneResult.text``, so we keep the spoken half and drop the
+    console-only annotation (a dedicated annotation channel is future work —
+    dropping it here is strictly better than speaking it).
+    """
+    if isinstance(result, tuple):
+        return str(result[0]) if result else ""
+    return result if isinstance(result, str) else str(result)
+
+
 _INTRO = (
     "Hi, I'm Iris — a voice assistant, and I'll always tell you I'm an AI. I ride "
     "along on tincan to help with calls and messages, and I keep things local and "
@@ -135,17 +149,19 @@ class Tier1Qwen:
     def _build_grammar(self) -> str:
         """Generate a GBNF grammar that constrains Qwen to emit a dispatch JSON.
 
-        Output shape: ``{"skill":"<name>","args":{...}}``.  Skill name is one of
-        the registered names or ``"none"`` (fall through to chat). Args object
-        allows an optional single string key/value pair — sufficient for demo
-        skills; richer arg grammars land with ti-ccc.7+.
+        Output shape: ``{"skill":"<name>","args":{...}}``. Skill name is one of
+        the registered names or ``"none"`` (fall through to chat). The args
+        object holds zero or more string-valued key/value pairs, so a skill that
+        needs several arguments (e.g. calendar free/busy's ``start`` + ``end``)
+        can be filled in one shot. Which keys to use is taught in the dispatch
+        prompt; ``handle()`` drops unknown keys and degrades on missing ones.
         """
         names = list(self.skills.names()) if self.skills else []
         skill_choices = " | ".join(f'"{n}"' for n in names) or '"none"'
         return "\n".join([
             'root         ::= "{" ws "\\"skill\\"" ws ":" ws "\\"" skill-choice "\\"" ws "," ws "\\"args\\"" ws ":" ws args-obj ws "}"',
             f'skill-choice ::= "none" | {skill_choices}',
-            'args-obj     ::= "{}" | "{" ws str-kv ws "}"',
+            'args-obj     ::= "{" ws ( str-kv ( ws "," ws str-kv )* )? ws "}"',
             'str-kv       ::= "\\"" key "\\"" ws ":" ws "\\"" str-val "\\""',
             'key          ::= [a-z_]+',
             'str-val      ::= [^"\\\\\\n]*',
@@ -154,13 +170,24 @@ class Tier1Qwen:
 
     def _dispatch_prompt(self, text: str) -> str:
         skills = self.skills
-        skill_list = "; ".join(
-            f'"{e["name"]}" — {e["description"]}'
-            for e in (skills.manifest() if skills else [])
-        )
+        lines = []
+        for e in (skills.manifest() if skills else []):
+            params = e.get("params") or []
+            if params:
+                arg_desc = ", ".join(
+                    f'{p["name"]}{"" if p["required"] else "?"} ({p["description"]})'
+                    for p in params
+                )
+                lines.append(f'"{e["name"]}" — {e["description"]} args: {arg_desc}')
+            else:
+                lines.append(f'"{e["name"]}" — {e["description"]} (no args)')
+        skill_list = "; ".join(lines)
+        now = _dt.datetime.now().strftime("%A %Y-%m-%dT%H:%M")
         return (
             '<|im_start|>system\nYou are Iris. Choose the best skill to call, or output '
             '{"skill":"none","args":{}} to reply in natural language.\n'
+            f'Right now it is {now} (local time); give any datetime arg as ISO 8601. '
+            'Fill every required arg the chosen skill needs.\n'
             f'Available skills: {skill_list}<|im_end|>\n'
             f'<|im_start|>user\n{text}<|im_end|>\n<|im_start|>assistant\n'
         )
@@ -189,8 +216,22 @@ class Tier1Qwen:
             if skill_name != "none":
                 skill = self.skills.get(skill_name)
                 if skill is not None:
-                    result = skill.run(**{k: v for k, v in args.items()})
-                    return LaneResult(result, self.name, skill=skill_name)
+                    known = {p.name for p in getattr(skill, "params", [])}
+                    call_args = (
+                        {k: v for k, v in args.items() if k in known}
+                        if isinstance(args, dict) else {}
+                    )
+                    try:
+                        result = skill.run(**call_args)
+                    except TypeError:
+                        # the model chose a skill but didn't supply a required arg —
+                        # ask for the detail instead of erroring out
+                        return LaneResult(
+                            "Sorry — I didn't catch the details for that. "
+                            "Could you say it another way?",
+                            self.name, skill=skill_name,
+                        )
+                    return LaneResult(_reply_text(result), self.name, skill=skill_name)
         # no skill selected, DEMO mode, or no registry — regular chat completion
         return LaneResult(
             self._complete(self._chat_prompt(text, context_hint), self.cfg.qwen_max_tokens), self.name
