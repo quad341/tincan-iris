@@ -19,7 +19,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ASSET_ROOT="$ROOT"
 if [ "${1:-}" = "--shared" ]; then
-  ASSET_ROOT="${IRIS_ASSET_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/iris}"
+  ASSET_ROOT="${IRIS_ASSET_HOME:-${IRIS_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/iris}}"
   echo "==> --shared: installing into shared asset home $ASSET_ROOT"
   mkdir -p "$ASSET_ROOT"
 fi

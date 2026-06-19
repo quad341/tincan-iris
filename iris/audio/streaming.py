@@ -9,17 +9,17 @@ push-to-talk). Pair with ``iris.addressing`` to act only when named.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import threading
 from collections.abc import Callable
 from pathlib import Path
 
+from .. import settings
 from .assets import resolve_asset
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _STREAM_SCRIPT = Path(__file__).resolve().parent / "_whisper_stream.py"
-_DEFAULT_SIZE = os.environ.get("IRIS_WHISPER_MODEL_SIZE", "small.en")
+_DEFAULT_SIZE = settings.get("IRIS_WHISPER_MODEL_SIZE", "small.en")
 
 
 class StreamingTranscriber:

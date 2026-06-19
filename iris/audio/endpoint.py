@@ -12,13 +12,14 @@ built on it.
 """
 from __future__ import annotations
 
-import os
 import shutil
 import signal
 import subprocess
 import tempfile
 import time
 from typing import Protocol
+
+from .. import settings
 
 
 class AudioEndpoint(Protocol):
@@ -386,9 +387,9 @@ def default_endpoint() -> AudioEndpoint:
       PipeWire/PulseAudio devices for local audio (e.g. a USB headset).
       Run ``python -m iris.audio.endpoint --list`` to see available devices.
     """
-    if os.environ.get("IRIS_AUDIO", "").lower() in ("tincan-sco", "sco"):
-        sink = os.environ.get("IRIS_SCO_SINK")
-        source = os.environ.get("IRIS_SCO_SOURCE")
+    if (settings.get("IRIS_AUDIO", "") or "").lower() in ("tincan-sco", "sco"):
+        sink = settings.get("IRIS_SCO_SINK")
+        source = settings.get("IRIS_SCO_SOURCE")
         if not sink or not source:
             d_sink, d_source = discover_sco_nodes()
             sink = sink or d_sink
@@ -398,17 +399,17 @@ def default_endpoint() -> AudioEndpoint:
                 "tincan-sco: no HFP/SCO sink found — is a call active on the dongle? "
                 "Set IRIS_SCO_SINK / IRIS_SCO_SOURCE to override."
             )
-        aec = os.environ.get("IRIS_AEC", "").strip() in ("1", "true", "yes")
+        aec = settings.get_bool("IRIS_AEC")
         return TincanSCOAudio(sink, source, aec=aec)
-    target = os.environ.get("IRIS_PLAYBACK_TARGET")
+    target = settings.get("IRIS_PLAYBACK_TARGET")
     if target:
-        capture = os.environ.get("IRIS_CAPTURE_TARGET") or (
-            _VA_AEC_SRC if os.environ.get("IRIS_VA_AEC") else None
+        capture = settings.get("IRIS_CAPTURE_TARGET") or (
+            _VA_AEC_SRC if settings.get_bool("IRIS_VA_AEC") else None
         )
         return VirtualDeviceAudio(target, capture)
     # Named local devices (USB headset, etc.)
-    play_dev = os.environ.get("IRIS_PLAYBACK_DEVICE")
-    cap_dev = os.environ.get("IRIS_CAPTURE_DEVICE")
+    play_dev = settings.get("IRIS_PLAYBACK_DEVICE")
+    cap_dev = settings.get("IRIS_CAPTURE_DEVICE")
     if play_dev or cap_dev:
         player = (["paplay", f"--device={play_dev}"] if play_dev else None)
         recorder = (
