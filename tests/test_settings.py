@@ -13,9 +13,10 @@ import pytest
 from iris import settings
 
 _ENV_VARS = (
-    "IRIS_HOME", "IRIS_CONFIG", "XDG_DATA_HOME",
+    "IRIS_HOME", "IRIS_CONFIG", "IRIS_SECRETS", "XDG_DATA_HOME",
     "IRIS_AUDIO", "IRIS_AEC", "IRIS_KOKORO_VOICE", "IRIS_WHISPER_MODEL_SIZE",
-    "IRIS_EMAIL_IMAP_PORT", "IRIS_EMAIL_USER", "IRIS_SC_INTRO_S",
+    "IRIS_EMAIL_IMAP_PORT", "IRIS_EMAIL_USER", "IRIS_EMAIL_IMAP_HOST",
+    "IRIS_EMAIL_SMTP_HOST", "IRIS_EMAIL_PASSWORD", "IRIS_SC_INTRO_S",
     "IRIS_SC_RELAY_TIMEOUT_S", "IRIS_TM_MSG_S", "IRIS_STT_SERVER_URL", "IRIS_LOG_FILE",
 )
 
@@ -33,6 +34,15 @@ def _write_config(tmp_path, body: str, monkeypatch) -> Path:
     p = tmp_path / "config.toml"
     p.write_text(body)
     monkeypatch.setenv("IRIS_CONFIG", str(p))
+    settings.reload()
+    return p
+
+
+def _write_secrets(tmp_path, body: str, monkeypatch) -> Path:
+    p = tmp_path / "secrets.toml"
+    p.write_text(body)
+    p.chmod(0o600)
+    monkeypatch.setenv("IRIS_SECRETS", str(p))
     settings.reload()
     return p
 
@@ -178,3 +188,53 @@ def test_phase2_keymap_groups(tmp_path, monkeypatch):
     assert settings.get_float("IRIS_TM_MSG_S", 30.0) == 45.0
     assert settings.get("IRIS_STT_SERVER_URL") == "http://h:1/"
     assert settings.get("IRIS_LOG_FILE") == "/tmp/c.log"
+
+
+# --- secrets (get_secret + secrets.toml) ------------------------------------
+
+def test_secrets_path_default_and_override(monkeypatch):
+    monkeypatch.setenv("IRIS_HOME", "/srv/iris")
+    assert settings.secrets_path() == Path("/srv/iris/secrets.toml")
+    monkeypatch.setenv("IRIS_SECRETS", "/etc/iris-secrets.toml")
+    assert settings.secrets_path() == Path("/etc/iris-secrets.toml")
+
+
+def test_get_secret_from_file(tmp_path, monkeypatch):
+    _write_secrets(tmp_path, '[email]\npassword = "app-pw"\n', monkeypatch)
+    assert settings.get_secret("IRIS_EMAIL_PASSWORD") == "app-pw"
+
+
+def test_get_secret_env_overrides_file(tmp_path, monkeypatch):
+    _write_secrets(tmp_path, '[email]\npassword = "from-file"\n', monkeypatch)
+    monkeypatch.setenv("IRIS_EMAIL_PASSWORD", "from-env")
+    assert settings.get_secret("IRIS_EMAIL_PASSWORD") == "from-env"
+
+
+def test_get_secret_none_when_unset():
+    assert settings.get_secret("IRIS_EMAIL_PASSWORD") is None
+
+
+def test_config_get_never_reads_secrets(tmp_path, monkeypatch):
+    # a password in secrets.toml must NOT be visible via the config layer
+    _write_secrets(tmp_path, '[email]\npassword = "app-pw"\n', monkeypatch)
+    assert settings.get("IRIS_EMAIL_PASSWORD") is None
+    assert settings.get_secret("IRIS_EMAIL_PASSWORD") == "app-pw"
+
+
+def test_password_is_in_secret_keymap_only():
+    assert "IRIS_EMAIL_PASSWORD" in settings._SECRET_KEYMAP.values()
+    assert "IRIS_EMAIL_PASSWORD" not in settings._KEYMAP.values()
+
+
+def test_reload_clears_secrets_cache(tmp_path, monkeypatch):
+    p = _write_secrets(tmp_path, '[email]\npassword = "v1"\n', monkeypatch)
+    assert settings.get_secret("IRIS_EMAIL_PASSWORD") == "v1"
+    p.write_text('[email]\npassword = "v2"\n')
+    settings.reload()
+    assert settings.get_secret("IRIS_EMAIL_PASSWORD") == "v2"
+
+
+def test_missing_secrets_file_is_silent(tmp_path, monkeypatch):
+    monkeypatch.setenv("IRIS_SECRETS", str(tmp_path / "absent.toml"))
+    settings.reload()
+    assert settings.get_secret("IRIS_EMAIL_PASSWORD") is None

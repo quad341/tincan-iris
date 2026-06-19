@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import tomllib
+import warnings
 from functools import lru_cache
 from pathlib import Path
 
@@ -47,6 +48,17 @@ def config_path() -> Path:
     """Location of config.toml: ``IRIS_CONFIG`` if set, else ``$IRIS_HOME/config.toml``."""
     override = os.environ.get("IRIS_CONFIG")
     return Path(override).expanduser() if override else iris_home() / "config.toml"
+
+
+def secrets_path() -> Path:
+    """Location of secrets.toml: ``IRIS_SECRETS`` if set, else ``$IRIS_HOME/secrets.toml``.
+
+    Holds credentials (e.g. the email app-password). NEVER commit it — keep it
+    gitignored and ``chmod 600``. Read only by :func:`get_secret`, never merged
+    into :func:`get` / config.toml.
+    """
+    override = os.environ.get("IRIS_SECRETS")
+    return Path(override).expanduser() if override else iris_home() / "secrets.toml"
 
 
 # config.toml ``[section].key`` -> ``IRIS_*`` environment name. Add a row here to
@@ -91,6 +103,13 @@ _KEYMAP: dict[tuple[str, str], str] = {
 }
 
 
+# secrets.toml ``[section].key`` -> ``IRIS_*`` name, for CREDENTIALS ONLY. Kept
+# separate from _KEYMAP so secrets are never read from the shareable config.toml.
+_SECRET_KEYMAP: dict[tuple[str, str], str] = {
+    ("email", "password"): "IRIS_EMAIL_PASSWORD",
+}
+
+
 def _stringify(value: object) -> str:
     """Render a TOML scalar the way the env layer expects (bools -> 1/0)."""
     if isinstance(value, bool):
@@ -118,9 +137,39 @@ def _file_values() -> dict[str, str]:
     return values
 
 
+@lru_cache(maxsize=1)
+def _secret_values() -> dict[str, str]:
+    """``IRIS_*`` credentials sourced from secrets.toml (empty if absent/unreadable).
+
+    Warns once per process if the file is group/other-readable — a secrets file
+    should be ``chmod 600``. Cached like :func:`_file_values`.
+    """
+    path = secrets_path()
+    try:
+        raw = path.read_text()
+    except (FileNotFoundError, IsADirectoryError, OSError):
+        return {}
+    try:
+        if path.stat().st_mode & 0o077:
+            warnings.warn(f"{path} is group/other-readable; run: chmod 600 {path}", stacklevel=2)
+    except OSError:
+        pass
+    try:
+        data = tomllib.loads(raw)
+    except tomllib.TOMLDecodeError:
+        return {}
+    values: dict[str, str] = {}
+    for (section, key), env_name in _SECRET_KEYMAP.items():
+        sec = data.get(section)
+        if isinstance(sec, dict) and key in sec:
+            values[env_name] = _stringify(sec[key])
+    return values
+
+
 def reload() -> None:
-    """Drop the cached config.toml read (call after the file changes; tests)."""
+    """Drop the cached config.toml + secrets.toml reads (after changes; tests)."""
     _file_values.cache_clear()
+    _secret_values.cache_clear()
 
 
 def get(name: str, default: str | None = None) -> str | None:
@@ -131,6 +180,16 @@ def get(name: str, default: str | None = None) -> str | None:
     if name in file_values:
         return file_values[name]
     return default
+
+
+def get_secret(name: str) -> str | None:
+    """Resolve a credential: environment → secrets.toml → ``None``.
+
+    Never reads config.toml — secrets must not live in the shareable config.
+    """
+    if name in os.environ:
+        return os.environ[name]
+    return _secret_values().get(name)
 
 
 def get_bool(name: str, default: bool = False) -> bool:

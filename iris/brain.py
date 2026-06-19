@@ -50,6 +50,11 @@ class Brain:
             self.skills = default_registry()
             for s in notes_skills(notes_store or NotesStore()):
                 self.skills.register(s)
+            # Offline connectors: register each lane's skills when configured, so
+            # qwen can field natural-language requests for them (no-op otherwise).
+            from .email_skill import configured_email_skills
+            for s in configured_email_skills():
+                self.skills.register(s)
         else:
             self.skills = skills
         self.tier0 = Tier0Rules(self.skills)
