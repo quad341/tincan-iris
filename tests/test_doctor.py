@@ -13,14 +13,18 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _isolate_assets():
-    """These tests exercise the systemd-service layer in isolation.
+    """Isolate the systemd-service layer.
 
-    doctor_main() now also runs the asset preflight (check_assets), which would
-    otherwise see no models in CI and perturb exit codes / output here. The asset
-    layer has its own coverage in test_doctor_assets.py; neutralize it for this
-    module so the service assertions stand alone.
+    Two defaults: neutralize the asset preflight (covered in
+    test_doctor_assets.py), and make the /health probe default to 'no server' so
+    a real server on the dev box (e.g. a live llama.cpp on :8080) can't leak into
+    a unit-state assertion. Tests that need a reachable endpoint override
+    ``iris.doctor.urllib.request.urlopen`` locally (inner patch wins).
     """
-    with patch("iris.doctor.check_assets", return_value=[]):
+    import urllib.error
+    with patch("iris.doctor.check_assets", return_value=[]), \
+         patch("iris.doctor.urllib.request.urlopen",
+               side_effect=urllib.error.URLError("no server (test default)")):
         yield
 
 
@@ -319,3 +323,53 @@ def test_table_includes_notes_col_at_wide_terminal(capsys, monkeypatch):
 
     out = capsys.readouterr().out
     assert "Notes" in out
+
+
+# ---------------------------------------------------------------------------
+# Port probe is independent of the systemd unit (a server run by hand counts)
+# ---------------------------------------------------------------------------
+
+def _mock_health(data) -> MagicMock:
+    resp = MagicMock()
+    resp.__enter__ = lambda s: s
+    resp.__exit__ = MagicMock(return_value=False)
+    resp.read.return_value = json.dumps(data).encode()
+    return resp
+
+
+def test_health_ready_accepts_llama_and_iris_formats():
+    from iris.doctor import _health_ready
+    assert _health_ready({"ready": True}) is True
+    assert _health_ready({"ready": False}) is False
+    assert _health_ready({"status": "ok"}) is True          # llama.cpp
+    assert _health_ready({"status": "error"}) is False
+    assert _health_ready({}) is True                          # answered, no signal
+
+
+def test_ok_when_port_healthy_without_unit():
+    # operator's case: no systemd unit, but a server is live on the port
+    from iris.doctor import DoctorStatus, check_services
+    svc = _get_services()[0]  # iris-llama (:8080)
+    with patch("iris.doctor.subprocess.run", return_value=_mock_not_found()), \
+         patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health({"status": "ok"})):
+        results = check_services([svc])
+    assert results[0].status == DoctorStatus.OK
+    assert "running" in results[0].note.lower()
+
+
+def test_ok_when_port_healthy_unit_inactive():
+    from iris.doctor import DoctorStatus, check_services
+    svc = _get_services()[0]
+    with patch("iris.doctor.subprocess.run", return_value=_mock_inactive()), \
+         patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health({"ready": True})):
+        results = check_services([svc])
+    assert results[0].status == DoctorStatus.OK
+
+
+def test_absent_when_no_unit_and_no_server():
+    from iris.doctor import DoctorStatus, check_services
+    svc = _get_services()[0]
+    # subprocess not-found + the autouse default (urlopen -> URLError) = nothing there
+    with patch("iris.doctor.subprocess.run", return_value=_mock_not_found()):
+        results = check_services([svc])
+    assert results[0].status == DoctorStatus.ABSENT

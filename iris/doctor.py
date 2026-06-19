@@ -82,6 +82,21 @@ EXPECTED_SERVICES: list[ServiceDescriptor] = [
 ]
 
 
+def _health_ready(data: object) -> bool:
+    """Interpret a /health JSON body across server flavors.
+
+    Accepts iris's own ``{"ready": true}`` and llama.cpp's ``{"status": "ok"}``;
+    any other valid-JSON 200 body counts as ready (it answered). Only an explicit
+    not-ready signal (``ready: false`` / a non-ok ``status``) is treated as down.
+    """
+    if isinstance(data, dict):
+        if "ready" in data:
+            return bool(data["ready"])
+        if "status" in data:
+            return str(data["status"]).lower() in ("ok", "ready", "healthy", "up", "200")
+    return True
+
+
 def check_services(
     services: list[ServiceDescriptor],
     *,
@@ -90,42 +105,50 @@ def check_services(
 ) -> list[ServiceCheckResult]:
     results: list[ServiceCheckResult] = []
     for svc in services:
+        # 1. systemd unit state (a managed unit is the common case)
         try:
             proc = subprocess.run(
                 ["systemctl", "--user", "is-active", svc.unit],
                 capture_output=True,
                 text=True,
             )
+            unit = {0: "active", 4: "absent"}.get(proc.returncode, "down")
         except OSError:
-            results.append(ServiceCheckResult(svc.name, svc.unit, DoctorStatus.UNKNOWN, svc.required))
-            continue
+            unit = "unknown"
 
-        if proc.returncode == 4:
-            results.append(ServiceCheckResult(svc.name, svc.unit, DoctorStatus.ABSENT, svc.required))
-            continue
-
-        if proc.returncode != 0:
-            results.append(ServiceCheckResult(svc.name, svc.unit, DoctorStatus.DOWN, svc.required))
-            continue
-
-        # Unit is active — check health URL if present
-        if not svc.health_url:
-            results.append(ServiceCheckResult(svc.name, svc.unit, DoctorStatus.OK, svc.required))
-            continue
-
+        # 2. probe the health endpoint if one exists — independent of the unit,
+        #    so a server run by hand (e.g. a bare llama.cpp on :8080) still counts.
+        health: bool | None = None
         rtt_ms: float | None = None
-        try:
-            req = urllib.request.Request(svc.health_url)
-            t0 = time.monotonic()
-            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-                data = json.loads(resp.read())
+        if svc.health_url:
+            try:
+                t0 = time.monotonic()
+                with urllib.request.urlopen(urllib.request.Request(svc.health_url), timeout=timeout_s) as resp:
+                    data = json.loads(resp.read())
                 if deep:
                     rtt_ms = (time.monotonic() - t0) * 1000
-                status = DoctorStatus.OK if data.get("ready") else DoctorStatus.DEGRADED
-        except (urllib.error.URLError, OSError):
-            status = DoctorStatus.DEGRADED
+                health = _health_ready(data)
+            except (urllib.error.URLError, OSError, ValueError):
+                health = False
 
-        results.append(ServiceCheckResult(svc.name, svc.unit, status, svc.required, round_trip_ms=rtt_ms))
+        # 3. combine — a healthy port wins, managed or not.
+        note = ""
+        if health is True:
+            status = DoctorStatus.OK
+            if unit == "absent":
+                note = "running (no systemd unit)"
+            elif unit != "active":
+                note = "running (unit inactive)"
+        elif unit == "active":
+            status = DoctorStatus.DEGRADED if svc.health_url else DoctorStatus.OK
+        elif unit == "absent":
+            status = DoctorStatus.ABSENT
+        elif unit == "down":
+            status = DoctorStatus.DOWN
+        else:
+            status = DoctorStatus.UNKNOWN
+
+        results.append(ServiceCheckResult(svc.name, svc.unit, status, svc.required, note=note, round_trip_ms=rtt_ms))
 
     return results
 
