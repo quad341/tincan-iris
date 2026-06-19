@@ -12,7 +12,7 @@ DBs, and (optionally) the shared model assets. Check the whole setup any time
 with:
 
 ```bash
-python -m iris.doctor          # assets + services + config, one screen
+iris doctor          # assets + services + config, one screen
 ```
 
 ---
@@ -28,7 +28,7 @@ by probing the port, whether or not it's a managed systemd unit:
 iris-llama   ✓ ok   yes   running (no systemd unit)
 ```
 
-(Optionally run it as a managed service with `iris-install-services`.)
+(Optionally run it as a managed service with `iris install-services`.)
 
 ## 2. Voice assets (STT + TTS)
 
@@ -51,9 +51,9 @@ per-clone setup, no env-pointing. `iris doctor` shows exactly what resolved.
 ## 3. Run
 
 ```bash
-python -m iris.doctor            # verify (exit 0 = nothing broken)
-iris-home                        # out-of-call dashboard (chat to Iris)
-python -m iris.console           # in-call console (needs an active call)
+iris doctor            # verify (exit 0 = nothing broken)
+iris home                        # out-of-call dashboard (chat to Iris)
+iris console           # in-call console (needs an active call)
 ```
 
 ---
@@ -100,13 +100,13 @@ exactly what works. Past setup, it's all natural language — just ask.
 | **Web search** | nothing | "search the web for …" |
 | **Roster** (contacts) | nothing (local) | "add a contact …", "what's …'s number?" |
 | **Email** | `[email]` config + app-password | "any important email?", "reply to … saying …" |
-| **Calendar** | `iris-auth gcal` (Google OAuth) | "am I free at 3pm?", "add an event …" |
+| **Calendar** | `iris auth gcal` (Google OAuth) | "am I free at 3pm?", "add an event …" |
 | **Messages** (SMS/MAP) | a running `tincand` *(pending)* | "read my texts", "text … …" |
 
 ### Email (Gmail) — one command
 
 ```bash
-iris-auth gmail                 # or: iris-auth gmail you@gmail.com
+iris auth gmail                 # or: iris auth gmail you@gmail.com
 ```
 
 It prompts for a Gmail **App Password** (input hidden), verifies the IMAP login,
@@ -116,12 +116,12 @@ Password first — **<https://myaccount.google.com/apppasswords>** (requires
 <https://support.google.com/mail/answer/185833>. After it succeeds the email
 skills auto-register and qwen can read / triage / draft replies (bodies are
 summarized **locally** — never sent to the cloud tier). Re-check any time with
-`iris-email-check`.
+`iris email-check`.
 
 ### Calendar (Google) — one command
 
 ```bash
-iris-auth gcal ~/Downloads/credentials.json     # or just: iris-auth gcal (paste id/secret)
+iris auth gcal ~/Downloads/credentials.json     # or just: iris auth gcal (paste id/secret)
 ```
 
 First, a one-time Google setup: in **Google Cloud Console** create an OAuth
@@ -129,7 +129,7 @@ First, a one-time Google setup: in **Google Cloud Console** create an OAuth
 it, **double-check the project selector (top bar) shows the same project your
 OAuth client is in**. It can silently default to a different project, and then
 calls fail `403 SERVICE_DISABLED`. Download the client's `credentials.json`.
-Then `iris-auth gcal` opens your browser for consent, catches the loopback
+Then `iris auth gcal` opens your browser for consent, catches the loopback
 redirect, saves a **refreshable** token (`chmod 600`), and runs a quick test
 read — so a not-yet-enabled API is caught right there, with a project-pinned
 link to fix it. If consent loops or fails, open the printed URL in a **private /
@@ -141,7 +141,7 @@ free at 3pm?" / "add an event …". Access tokens refresh automatically.
 
 ## Troubleshooting
 
-- **`python -m iris.console` fails on startup** → run `python -m iris.doctor`;
+- **`iris console` fails on startup** → run `iris doctor`;
   it shows which asset is missing and the exact fix command.
 - **`IRIS_AUDIO=tincan-sco` can't find audio** → the SCO nodes only exist
   *during* a call; launch the console after the call connects (the doctor warns

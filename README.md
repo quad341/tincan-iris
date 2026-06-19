@@ -67,9 +67,13 @@ assets once; check it all with the doctor:
 
 ```bash
 scripts/setup_whisper.sh --shared && scripts/setup_kokoro.sh --shared   # once
-python -m iris.doctor      # assets + services + config, one screen
-iris-home                  # out-of-call dashboard — chat to Iris
+iris doctor      # assets + services + config, one screen
+iris home        # out-of-call dashboard — chat to Iris
 ```
+
+One `iris` command fronts everything — `iris --help` lists every subcommand
+(`iris doctor`, `iris home`, `iris console`, `iris auth gcal`, …). The legacy
+`iris-*` scripts and `python -m iris.<x>` forms still work.
 
 Knobs go in `$IRIS_HOME/config.toml`, credentials in `secrets.toml` (`chmod
 600`). Full walkthrough — including the email / calendar / web-search / notes

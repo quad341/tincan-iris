@@ -13,6 +13,7 @@ dependencies = []
 console = ["textual>=8"]
 
 [project.scripts]
+iris = "iris.__main__:main"
 iris-chat = "iris.cli:main"
 iris-speak = "iris.voice:main"
 iris-listen = "iris.listen:main"
