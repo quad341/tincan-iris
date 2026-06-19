@@ -32,9 +32,23 @@ class Skill(Protocol):
     name: str
     description: str
     params: list[SkillParam]    # empty list = skill takes no args
+    # operator_only marks a privileged skill that must NEVER be offered to,
+    # or run for, the far party — even at FULL trust. The registry filters these
+    # out of the dispatch grammar/manifest for any speaker other than the
+    # operator (mic channel), and the lane refuses to run one for a non-operator
+    # speaker as a second line of defence. Optional: skills that don't set it are
+    # treated as operator_only=False (available to whoever the trust gate allows).
+    operator_only: bool
 
     def run(self, **kwargs: object) -> str:
         ...
+
+
+def is_operator_only(skill: object) -> bool:
+    """True if ``skill`` is marked operator/mic-channel only.
+
+    Tolerant of skills that predate the attribute (defaults to ``False``)."""
+    return bool(getattr(skill, "operator_only", False))
 
 
 class TimeSkill:
@@ -73,15 +87,28 @@ class SkillRegistry:
     def get(self, name: str) -> Skill | None:
         return self._skills.get(name)
 
-    def names(self) -> list[str]:
-        return list(self._skills)
+    def _visible_to(self, speaker: str) -> list[Skill]:
+        """Skills the given speaker may see/dispatch.
 
-    def manifest(self) -> list[dict]:
-        """Return [{name, description, params}] for all registered skills.
+        ``speaker=""`` (the default everywhere this isn't threaded yet) returns
+        every skill — unchanged behaviour. Any non-operator speaker (e.g.
+        ``"far"``) has operator_only skills filtered out, so a privileged action
+        is never even offered to the far party."""
+        if not speaker or speaker == "operator":
+            return list(self._skills.values())
+        return [s for s in self._skills.values() if not is_operator_only(s)]
+
+    def names(self, speaker: str = "") -> list[str]:
+        """Registered skill names, optionally scoped to ``speaker`` (see ``_visible_to``)."""
+        return [s.name for s in self._visible_to(speaker)]
+
+    def manifest(self, speaker: str = "") -> list[dict]:
+        """Return [{name, description, params}] for the registered skills.
 
         Used by Tier1Qwen to build the dispatch grammar and inject into the system
         prompt. ``params`` is a list of param dicts so the caller can serialize
-        without further dataclass introspection.
+        without further dataclass introspection. ``speaker`` scopes the result so
+        operator_only skills are hidden from the far party (see ``_visible_to``).
         """
         return [
             {
@@ -99,7 +126,7 @@ class SkillRegistry:
                     for p in s.params
                 ],
             }
-            for s in self._skills.values()
+            for s in self._visible_to(speaker)
         ]
 
 

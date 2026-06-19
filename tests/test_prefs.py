@@ -140,7 +140,7 @@ def test_respond_threads_hint_to_tier1(tmp_path):
 
     captured: list = []
 
-    def fake_handle(text, *, allow_skills=True, context_hint=""):
+    def fake_handle(text, *, allow_skills=True, context_hint="", speaker=""):
         captured.append(context_hint)
         from iris.lanes import LaneResult
         return LaneResult("ok", "tier1-qwen")

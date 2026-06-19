@@ -124,5 +124,85 @@ def test_tier1_grammar_rebuilt_when_dirty():
     dispatch_resp = json.dumps({"skill": "echo", "args": {"text": "x"}})
     with patch("urllib.request.urlopen", return_value=_fake_urlopen(dispatch_resp)):
         t1.handle("say x")
-    assert t1._grammar_cache is not None
+    assert t1._grammar_cache  # populated after the dispatch pass
     assert reg.grammar_dirty is False  # cleared after rebuild
+
+
+# --- operator_only privilege gating (registry + lane) ---
+
+class _PrivSkill:
+    """A privileged (operator-only) skill that records whether it ran."""
+
+    name = "secret_action"
+    description = "A privileged action."
+    operator_only = True
+    params = [SkillParam(name="speaker", type="string", description="caller",
+                         required=False, default="operator")]
+
+    def __init__(self) -> None:
+        self.ran_for: list[str] = []
+
+    def run(self, *, speaker="operator", **_):
+        self.ran_for.append(speaker)
+        return f"did it for {speaker}"
+
+
+def test_registry_filters_operator_only_for_far_party():
+    reg = SkillRegistry([EchoSkill(), _PrivSkill()])
+    # default (no speaker) and operator see everything
+    assert "secret_action" in reg.names()
+    assert "secret_action" in reg.names("operator")
+    # far party never sees the privileged skill
+    assert "secret_action" not in reg.names("far")
+    assert "echo" in reg.names("far")
+    far_manifest = {e["name"] for e in reg.manifest("far")}
+    assert "secret_action" not in far_manifest
+    assert "echo" in far_manifest
+
+
+def test_grammar_omits_operator_only_skill_for_far_party():
+    reg = SkillRegistry([EchoSkill(), _PrivSkill()])
+    t1 = _qwen(skills=reg)
+    assert "secret_action" in t1._build_grammar("operator")
+    assert "secret_action" not in t1._build_grammar("far")
+
+
+def test_lane_refuses_operator_only_skill_named_for_far_party():
+    """Defence in depth: even if the model names a privileged skill, the lane
+    must not run it for a non-operator speaker — it falls through to chat.
+
+    A non-privileged skill is also registered so the far party still gets a
+    dispatch pass (otherwise there's nothing to dispatch and the question is
+    moot); the model is then made to (wrongly) name the operator-only skill."""
+    priv = _PrivSkill()
+    reg = SkillRegistry([EchoSkill(), priv])
+    t1 = _qwen(skills=reg)
+    dispatch_resp = json.dumps({"skill": "secret_action", "args": {}})
+    chat_resp = "Let's just chat."
+    responses = [dispatch_resp, chat_resp]
+    idx = 0
+
+    def fake_urlopen(req, timeout):
+        nonlocal idx
+        resp = responses[min(idx, len(responses) - 1)]
+        idx += 1
+        return _fake_urlopen(resp)
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        result = t1.handle("do the secret thing", speaker="far")
+    assert priv.ran_for == []          # never executed for the far party
+    assert result.skill is None        # fell through to chat
+    assert result.text == chat_resp
+
+
+def test_lane_injects_speaker_into_skill_on_dispatch():
+    """A skill declaring a ``speaker`` param receives the real channel on the
+    dispatch path (so its own operator-gate works there, not just on direct calls)."""
+    priv = _PrivSkill()
+    reg = SkillRegistry([priv])
+    t1 = _qwen(skills=reg)
+    dispatch_resp = json.dumps({"skill": "secret_action", "args": {}})
+    with patch("urllib.request.urlopen", return_value=_fake_urlopen(dispatch_resp)):
+        result = t1.handle("do the secret thing", speaker="operator")
+    assert priv.ran_for == ["operator"]
+    assert result.skill == "secret_action"

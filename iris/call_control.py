@@ -97,6 +97,29 @@ class TincanCallControl:
         except Exception:  # noqa: BLE001 — D-Bus hiccup: log and move on
             self.emit(("answer_error", call_id))
 
+    def dial(self, number: str) -> str | None:
+        """Place an outgoing call via ``Dial(number)`` on ``im.tincan.Calls``.
+
+        tincand drives oFono's VoiceCallManager.Dial; on success it returns the
+        new call's id (a string), and a ``CallConnected`` signal later binds the
+        SCO audio endpoint exactly as for an answered call — so Iris rides an
+        outgoing call the same way she rides an incoming one. Mirrors
+        :meth:`_answer`: no bus → no-op; a D-Bus error emits ``("dial_error",
+        number)`` and returns ``None`` rather than raising, so a dialing hiccup
+        never crashes the brain.
+
+        This is a privileged action — the *skill* that calls it is gated to the
+        operator/mic channel; this transport method does no gating itself."""
+        if self._bus is None:
+            return None
+        try:
+            proxy = self._bus.get_object(_BUS_NAME, _OBJECT_PATH)
+            result = proxy.get_dbus_method("Dial", _INTERFACE)(number)
+            return str(result) if result is not None else ""
+        except Exception:  # noqa: BLE001 — D-Bus hiccup: log and move on
+            self.emit(("dial_error", number))
+            return None
+
     # --- lifecycle ---
 
     def start(self) -> None:

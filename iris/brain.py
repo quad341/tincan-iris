@@ -135,7 +135,9 @@ class Brain:
         hint = self.prefs.hint(self.call_context) if self.call_context else ""
         try:
             r1 = self._masked(
-                lambda: self.tier1.handle(text, allow_skills=not demo_mode, context_hint=hint),
+                lambda: self.tier1.handle(
+                    text, allow_skills=not demo_mode, context_hint=hint, speaker=speaker,
+                ),
                 "tier1-qwen", on_filler,
             )
             tl.mark("tier1-qwen")

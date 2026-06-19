@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from .config import Config
 from .scope import ScopeManifest
-from .skills import SkillRegistry
+from .skills import SkillRegistry, is_operator_only
 
 
 @dataclass
@@ -128,7 +128,10 @@ class Tier1Qwen:
     def __init__(self, cfg: Config, skills: SkillRegistry | None = None) -> None:
         self.cfg = cfg
         self.skills = skills
-        self._grammar_cache: str | None = None
+        # Grammar is keyed by speaker scope: the operator and the far party see
+        # different skill sets (operator_only skills are hidden from the far
+        # party), so they need different grammars.
+        self._grammar_cache: dict[str, str] = {}
 
     def _complete(self, prompt: str, n_predict: int, *, grammar: str | None = None) -> str:
         payload: dict = {
@@ -146,7 +149,7 @@ class Tier1Qwen:
         with urllib.request.urlopen(req, timeout=self.cfg.qwen_timeout_s) as resp:
             return json.loads(resp.read()).get("content", "").strip()
 
-    def _build_grammar(self) -> str:
+    def _build_grammar(self, speaker: str = "") -> str:
         """Generate a GBNF grammar that constrains Qwen to emit a dispatch JSON.
 
         Output shape: ``{"skill":"<name>","args":{...}}``. Skill name is one of
@@ -155,8 +158,11 @@ class Tier1Qwen:
         needs several arguments (e.g. calendar free/busy's ``start`` + ``end``)
         can be filled in one shot. Which keys to use is taught in the dispatch
         prompt; ``handle()`` drops unknown keys and degrades on missing ones.
+
+        ``speaker`` scopes the offered names so operator_only skills are never
+        even nameable by the far party.
         """
-        names = list(self.skills.names()) if self.skills else []
+        names = list(self.skills.names(speaker)) if self.skills else []
         skill_choices = " | ".join(f'"{n}"' for n in names) or '"none"'
         return "\n".join([
             'root         ::= "{" ws "\\"skill\\"" ws ":" ws "\\"" skill-choice "\\"" ws "," ws "\\"args\\"" ws ":" ws args-obj ws "}"',
@@ -168,10 +174,10 @@ class Tier1Qwen:
             'ws           ::= [ \\t\\n]*',
         ])
 
-    def _dispatch_prompt(self, text: str) -> str:
+    def _dispatch_prompt(self, text: str, speaker: str = "") -> str:
         skills = self.skills
         lines = []
-        for e in (skills.manifest() if skills else []):
+        for e in (skills.manifest(speaker) if skills else []):
             params = e.get("params") or []
             if params:
                 arg_desc = ", ".join(
@@ -200,12 +206,23 @@ class Tier1Qwen:
             f"<|im_start|>user\n{text}<|im_end|>\n<|im_start|>assistant\n"
         )
 
-    def handle(self, text: str, *, allow_skills: bool = True, context_hint: str = "") -> LaneResult:
-        if allow_skills and self.skills and self.skills.names():
-            if self.skills.grammar_dirty or self._grammar_cache is None:
-                self._grammar_cache = self._build_grammar()
+    def handle(
+        self,
+        text: str,
+        *,
+        allow_skills: bool = True,
+        context_hint: str = "",
+        speaker: str = "",
+    ) -> LaneResult:
+        if allow_skills and self.skills and self.skills.names(speaker):
+            if self.skills.grammar_dirty:
+                self._grammar_cache.clear()
                 self.skills.grammar_dirty = False
-            raw = self._complete(self._dispatch_prompt(text), 96, grammar=self._grammar_cache)
+            grammar = self._grammar_cache.get(speaker)
+            if grammar is None:
+                grammar = self._build_grammar(speaker)
+                self._grammar_cache[speaker] = grammar
+            raw = self._complete(self._dispatch_prompt(text, speaker), 96, grammar=grammar)
             try:
                 dispatch = json.loads(raw)
                 skill_name = dispatch.get("skill", "none")
@@ -215,12 +232,24 @@ class Tier1Qwen:
                 args = {}
             if skill_name != "none":
                 skill = self.skills.get(skill_name)
+                # Defence in depth: a privileged skill must never run for a
+                # non-operator speaker, even if it somehow got named. The grammar
+                # already hides it, so reaching here would be a model/grammar
+                # bug — fall through to chat rather than execute it.
+                if skill is not None and is_operator_only(skill) and speaker and speaker != "operator":
+                    skill = None
                 if skill is not None:
                     known = {p.name for p in getattr(skill, "params", [])}
                     call_args = (
                         {k: v for k, v in args.items() if k in known}
                         if isinstance(args, dict) else {}
                     )
+                    # Skills that declare a ``speaker`` param get the real channel
+                    # so their own operator-gate (e.g. WebSearchSkill, the dial
+                    # skill) sees who is calling on the dispatch path too — not
+                    # just on direct calls.
+                    if "speaker" in known:
+                        call_args["speaker"] = speaker or "operator"
                     try:
                         result = skill.run(**call_args)
                     except TypeError:
