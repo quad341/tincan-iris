@@ -15,6 +15,8 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
+from .assets import resolve_asset
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _STREAM_SCRIPT = Path(__file__).resolve().parent / "_whisper_stream.py"
 _DEFAULT_SIZE = os.environ.get("IRIS_WHISPER_MODEL_SIZE", "small.en")
@@ -43,11 +45,11 @@ class StreamingTranscriber:
         self.source = source
         self.backend = backend
         self.label = label
-        self.python = python or os.environ.get(
-            "IRIS_WHISPER_PYTHON", str(_REPO_ROOT / ".venv-whisper" / "bin" / "python")
+        self.python = python or resolve_asset(
+            "IRIS_WHISPER_PYTHON", ".venv-whisper/bin/python", _REPO_ROOT
         )
-        self.model = model or os.environ.get(
-            "IRIS_WHISPER_DIR", str(_REPO_ROOT / "models" / "whisper" / _DEFAULT_SIZE)
+        self.model = model or resolve_asset(
+            "IRIS_WHISPER_DIR", f"models/whisper/{_DEFAULT_SIZE}", _REPO_ROOT
         )
         self.isolate = isolate
         self.min_silence_ms = min_silence_ms

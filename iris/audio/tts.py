@@ -16,6 +16,8 @@ import urllib.request
 from pathlib import Path
 from typing import Protocol
 
+from .assets import resolve_asset
+
 
 class TTSError(Exception):
     """Raised when a server-mode TTS call fails."""
@@ -24,8 +26,9 @@ class TTSError(Exception):
 _DEFAULT_TTS_SERVER_URL = "http://127.0.0.1:8083"
 
 # Kokoro runs in a dedicated 3.12 venv (onnxruntime has no 3.14 wheels) and is
-# shelled out network-isolated. Paths resolve relative to the repo so the code
-# is portable; override with the IRIS_KOKORO_* env vars.
+# shelled out network-isolated. Paths resolve via assets.resolve_asset (env
+# override -> repo-local -> shared XDG home) so any clone works without per-clone
+# setup; override explicitly with the IRIS_KOKORO_* env vars.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SYNTH_SCRIPT = Path(__file__).resolve().parent / "_kokoro_synth.py"
 
@@ -80,12 +83,10 @@ class KokoroTTS:
     ) -> None:
         self.voice = os.environ.get("IRIS_KOKORO_VOICE", voice)
         self.speed = speed
-        self.python = python or os.environ.get(
-            "IRIS_KOKORO_PYTHON", str(_REPO_ROOT / ".venv-kokoro" / "bin" / "python")
+        self.python = python or resolve_asset(
+            "IRIS_KOKORO_PYTHON", ".venv-kokoro/bin/python", _REPO_ROOT
         )
-        model_dir = Path(
-            os.environ.get("IRIS_KOKORO_DIR", str(_REPO_ROOT / "models" / "kokoro"))
-        )
+        model_dir = Path(resolve_asset("IRIS_KOKORO_DIR", "models/kokoro", _REPO_ROOT))
         self.model = model or str(model_dir / "kokoro-v1.0.onnx")
         self.voices = voices or str(model_dir / "voices-v1.0.bin")
         self.isolate = isolate
