@@ -110,7 +110,7 @@ def test_daemon_refuses_operator_only_for_far():
     _propose(b, "dial", {"number": "555"})
     r = _dispatch(b, speaker="far")
     assert dial.called_with is None                 # NEVER executed for the far party
-    assert "can't" in r.text.lower() or "sorry" in r.text.lower()
+    assert "can only do" in r.text.lower() or "operator" in r.text.lower()
 
 
 def test_daemon_runs_operator_only_for_operator():
@@ -178,7 +178,7 @@ def test_attack_soft_layer_leak_is_caught_by_the_hard_gate():
     _propose(b, "dial", {"number": "555"})          # the 'leaked' proposal
     r = _dispatch(b, speaker="far")
     assert dial.called_with is None                 # blocked at execution
-    assert "sorry" in r.text.lower() or "can't" in r.text.lower()
+    assert "can only do" in r.text.lower() or "operator" in r.text.lower()
 
 
 def test_attack_unthreaded_speaker_in_a_call_defaults_closed():
@@ -190,7 +190,7 @@ def test_attack_unthreaded_speaker_in_a_call_defaults_closed():
     _propose(b, "dial", {"number": "555"})
     r = _dispatch(b, speaker="")                    # tag missing
     assert dial.called_with is None
-    assert "sorry" in r.text.lower() or "can't" in r.text.lower()
+    assert "operator" in r.text.lower() or "confirm" in r.text.lower()
 
 
 def test_attack_far_cannot_even_name_operator_only_skill():

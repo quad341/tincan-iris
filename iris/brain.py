@@ -14,7 +14,7 @@ from .latency import Timeline
 from .masking import run_with_masking
 from .notes import NotesStore
 from .prefs import PreferencesStore
-from .skills import SkillRegistry, default_registry
+from .skills import SkillRegistry, default_registry, is_operator_only
 from .trust import TrustMode
 
 
@@ -157,6 +157,29 @@ class Brain:
             return False
         return not self.call_context   # speaker == "": operator iff not in a call
 
+    def _denial_phrase(self, skill: object, speaker: str) -> str | None:
+        """Return the Iris response when the permission gate denies a skill.
+
+        Returns None for scenario 2 with no active call (silence — don't
+        confirm Iris heard an unrecognized voice outside a call context).
+        See design doc ti-6pwl.1 for phrase rationale and voice guidelines.
+        """
+        if is_operator_only(skill):
+            if speaker == "far":
+                # Scenario 1: far party requests an operator_only skill
+                name = self.cfg.operator_name or "the operator"
+                return f"That's something I can only do at {name}'s request."
+            if speaker not in {"operator", "far"}:
+                # Scenario 2: unrecognized speaker requests a privileged skill
+                if self.call_context:
+                    return "I need the operator to confirm that one."
+                return None  # silence outside a call — don't confirm an unrecognized voice was heard
+            # Scenario 3 (future): operator assurance too low — phrase locked now; not yet triggered
+            # TODO: wire when assurance gate lands (ADR-0005 v2)
+            return "I'm not set up to do that right now."
+        # Scenario 4: generic catch-all
+        return "Sorry, I can't help with that one."
+
     def _dispatch(
         self, text: str, *, speaker: str, hint: str, demo_mode: bool,
     ) -> LaneResult:
@@ -173,7 +196,8 @@ class Brain:
             return LaneResult("Sorry — I can't do that right now.", lr.lane, skill=lr.proposal.skill)
         ctx = AuthzContext(is_operator=self._resolve_is_operator(speaker))
         if not self.authz.authorize(skill, ctx).allowed:
-            return LaneResult("Sorry — I can't help with that one.", lr.lane, skill=lr.proposal.skill)
+            phrase = self._denial_phrase(skill, speaker)
+            return LaneResult(phrase or "", lr.lane, skill=lr.proposal.skill)
         try:
             result = skill.run(**lr.proposal.args)
         except TypeError:
