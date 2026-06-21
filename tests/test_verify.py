@@ -25,6 +25,24 @@ import pytest
 from iris.verify import CheckResult, VerifyReport, run
 
 
+@pytest.fixture(autouse=True)
+def _stub_web_search_network():
+    """Stub WebSearchSkill's network (example.com fetch + llama QA) module-wide so
+    Tier-D tests never touch the network. Without this, the calendar/skip tests
+    that run the full Tier-D block hit example.com + the llama server (~30s each
+    when the server is under load). The web_search-specific tests override these
+    inside their own bodies.
+    """
+    with patch(
+        "iris.web_search.WebSearchSkill._fetch",
+        lambda url: ("Sample page content.", []),
+    ), patch(
+        "iris.web_search.WebSearchSkill._qa",
+        lambda content, q: ("stub answer", False),
+    ):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
@@ -296,8 +314,16 @@ def test_tier_b_latency_recorded_on_pass():
 # ---------------------------------------------------------------------------
 
 def _mock_calendar_client():
+    # free_busy is keyword-only (def free_busy(self, *, start, end)). Give the
+    # mock that exact signature via side_effect so a positional call — the #79
+    # bug — raises TypeError instead of silently passing. (Full autospec of
+    # CalendarClient works too but costs ~30s per call.)
     client = MagicMock()
-    client.free_busy.return_value = {"busy": []}
+
+    def _free_busy(*, start, end):
+        return {"busy": []}
+
+    client.free_busy = MagicMock(side_effect=_free_busy)
     return client
 
 
