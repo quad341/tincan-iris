@@ -33,3 +33,19 @@ def test_not_addressed_returns_none():
 
 def test_stray_iris_midsentence_does_not_trigger():
     assert address("I told Iris about it") is None
+
+
+def test_wake_word_anywhere_triggers():
+    # The prefix ("hey/ok/hi" + iris) doesn't occur in natural speech, so wherever
+    # it appears it's an invocation — even after filler or deep in an utterance
+    # (ti-nir1). Everything after the wake phrase is the command.
+    assert address("um, hey iris, introduce yourself") == "introduce yourself"
+    assert address("so anyway hey iris call mom") == "call mom"
+    assert address("uh hey Iris stop") == "stop"
+    assert address("and then I said hey iris call mom") == "call mom"
+
+
+def test_prefix_substring_does_not_falsely_trigger():
+    # \b word-boundary guard: "they"/"this" must not match "hey"/"hi".
+    assert address("they iris around all day") is None
+    assert address("this iris is pretty") is None
