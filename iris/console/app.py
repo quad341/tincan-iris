@@ -46,6 +46,7 @@ from ..audio.streaming import StreamingTranscriber
 from ..audio.stt import default_stt
 from ..audio.tts import default_tts
 from ..brain import Brain
+from ..call_control import TincanCallControl
 from ..fillers import filler_picker
 from ..proactive_delivery import ProactiveDelivery, SilenceTracker
 from ..proactive_store import ProactiveStore
@@ -262,7 +263,14 @@ class IrisConsole(App):
         self.events: queue.Queue = queue.Queue()
         self.stt = default_stt()
         self.tts = default_tts()
-        self.brain = Brain()
+        # Call control: subscribes to tincan's im.tincan.Calls signals and places
+        # outgoing dials. Emitting into self.events surfaces incoming_call /
+        # call_connected / call_ended in _drain (already handled there); passing it
+        # to the Brain registers the operator-only dial skills ("Iris, call <name>").
+        # auto_answer=False = supervised: the operator answers; Iris just picks up
+        # the SCO audio endpoint on CallConnected.
+        self.ctrl = TincanCallControl(auto_answer=False, emit=self.events.put)
+        self.brain = Brain(ctrl=self.ctrl)
         self.mic = default_endpoint()
         self.conductor = Conductor(
             self.stt, self.brain, self.tts, self.mic,
@@ -311,6 +319,7 @@ class IrisConsole(App):
         if not self.stt.available():
             self._w("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
         self.set_interval(0.05, self._drain)
+        self.ctrl.start()  # listen for tincan call signals (daemon thread; safe if bus down)
 
         def _current_mode() -> str:
             if self._far_stream is not None:
