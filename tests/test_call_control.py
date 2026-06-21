@@ -93,7 +93,7 @@ def test_audio_restored_emits_event():
 def test_answer_calls_dbus_method():
     c, events = _ctrl()
     c._answer("call-1")
-    c._bus.get_object.assert_called_once_with("im.tincan", "/im/tincan/Calls")
+    c._bus.get_object.assert_called_once_with("im.tincan.Daemon", "/im/tincan")
     proxy = c._bus.get_object.return_value
     proxy.get_dbus_method.assert_called_once_with("Answer", "im.tincan.Calls")
     method = proxy.get_dbus_method.return_value
@@ -130,7 +130,7 @@ def test_start_emits_bus_unavailable_when_dbus_missing():
 def test_dial_calls_dbus_method():
     c, events = _ctrl()
     result = c.dial("+15555550199")
-    c._bus.get_object.assert_called_once_with("im.tincan", "/im/tincan/Calls")
+    c._bus.get_object.assert_called_once_with("im.tincan.Daemon", "/im/tincan")
     proxy = c._bus.get_object.return_value
     proxy.get_dbus_method.assert_called_once_with("Dial", "im.tincan.Calls")
     method = proxy.get_dbus_method.return_value

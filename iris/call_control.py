@@ -27,8 +27,13 @@ from typing import Any
 
 from .audio.endpoint import TincanSCOAudio, discover_sco_nodes
 
-_BUS_NAME = "im.tincan"
-_OBJECT_PATH = "/im/tincan/Calls"
+# Authoritative addresses, confirmed by introspecting the live daemon:
+#   busctl --user introspect im.tincan.Daemon /im/tincan
+# The im.tincan.Calls interface (Answer/Dial; CallConnected/CallEnded/IncomingCall)
+# is exported at bus name im.tincan.Daemon, object path /im/tincan — NOT a
+# dedicated /im/tincan/Calls path. (Same shape as the messages fix in #81.)
+_BUS_NAME = "im.tincan.Daemon"
+_OBJECT_PATH = "/im/tincan"
 _INTERFACE = "im.tincan.Calls"
 
 
