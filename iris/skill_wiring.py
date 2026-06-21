@@ -11,18 +11,20 @@ Lanes:
   * roster     — local sqlite contacts store, always on
   * web_search — no credentials, always on
   * email      — only when host+user+password are configured (env or secrets.toml)
+  * dial       — only when a TincanCallControl is provided (D-Bus + tincand required)
 
 (messages/calendar register elsewhere once their daemon/token is present.)
 """
 from __future__ import annotations
 
 
-def optional_skills(notes_store=None, roster=None) -> list:
+def optional_skills(notes_store=None, roster=None, ctrl=None) -> list:
     """Return the optional skill instances available in this environment.
 
     ``notes_store`` / ``roster`` may be injected (tests); otherwise the default
     local stores are used. Imports are lazy so the Brain only pulls in a lane's
-    deps when this is called.
+    deps when this is called. Pass ``ctrl`` (a ``TincanCallControl``) to also
+    register the dial skills (operator_only, requires tincand D-Bus).
     """
     skills: list = []
 
@@ -48,5 +50,10 @@ def optional_skills(notes_store=None, roster=None) -> list:
     # Calendar — only when a Google OAuth token exists (run `iris auth gcal`).
     from .calendar import configured_calendar_skills
     skills += configured_calendar_skills()
+
+    # Dial — only when a TincanCallControl is provided (D-Bus + tincand required).
+    if ctrl is not None:
+        from .dial_skill import DialVoiceSkills
+        skills += DialVoiceSkills(ctrl, roster).skills()
 
     return skills
