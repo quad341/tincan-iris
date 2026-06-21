@@ -256,7 +256,7 @@ def _run_tier_d() -> list[CheckResult]:
         try:
             now = datetime.datetime.now(datetime.timezone.utc)
             end = now + datetime.timedelta(hours=1)
-            result = client.free_busy(now.isoformat(), end.isoformat())
+            result = client.free_busy(start=now.isoformat(), end=end.isoformat())
             ms = (time.perf_counter() - t0) * 1000
             busy_count = len(result.get("busy", []))
             checks.append(
