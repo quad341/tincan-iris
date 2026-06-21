@@ -9,12 +9,17 @@ from __future__ import annotations
 
 import re
 
-# "hey Iris …" / "ok Iris …" / "hi Iris …" at the start, then the command. A
-# prefix (hey/ok/okay/hi/hello) is REQUIRED, so a bare "Iris" — or "iris" spoken
-# mid-conversation ("I told Iris …", "ask Iris about it") — does NOT trigger her.
-# Tolerant of the comma/pause after the name.
+# A prefix (hey/ok/okay/hi/hello) + "iris" is REQUIRED. That phrase doesn't occur
+# in natural speech, so WHEREVER it appears it's an intended invocation — we scan
+# the whole utterance for it (``search``), not just the start. This fixes the
+# fragile turn-timing where STT prepends filler ("um", "so anyway") or the tail of
+# the previous phrase and a strict start-anchor silently dropped the command.
+# Everything after the wake phrase is the command. The ``\b`` keeps "they"/"this"
+# from matching "hey"/"hi"; a bare "Iris" (no prefix) still never triggers. The
+# dial skill's two-phase "shall I dial?" backstops the rare narrated invocation.
 _ADDRESS = re.compile(
-    r"^\s*(?:hey|ok|okay|hi|hello)\s+iris\b[\s,.:;!?-]*(.*)", re.IGNORECASE
+    r"\b(?:hey|ok|okay|hi|hello)[\s,]+iris\b[\s,.:;!?-]*(.*)",
+    re.IGNORECASE,
 )
 
 
@@ -22,7 +27,7 @@ def address(text: str) -> str | None:
     """If ``text`` is addressed to Iris (a required prefix + "Iris", e.g.
     "hey Iris …"), return the command with the wake word stripped; otherwise
     return None — including a bare "Iris" with no prefix (not for her)."""
-    m = _ADDRESS.match(text or "")
+    m = _ADDRESS.search(text or "")
     if m is None:
         return None
     return m.group(1).strip()
