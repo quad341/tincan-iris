@@ -8,12 +8,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from .config import DEFAULT, Config
-from .lanes import LaneResult, Tier0Rules, Tier1Qwen, Tier2RawHaiku
+from .authz import Authorizer, AuthzContext
+from .lanes import LaneResult, Tier0Rules, Tier1Qwen, Tier2RawHaiku, _reply_text
 from .latency import Timeline
 from .masking import run_with_masking
 from .notes import NotesStore
 from .prefs import PreferencesStore
-from .skills import SkillRegistry, default_registry
+from .skills import SkillRegistry, default_registry, is_operator_only
 from .trust import TrustMode
 
 
@@ -62,6 +63,7 @@ class Brain:
         self.tier0 = Tier0Rules(self.skills)
         self.tier1 = Tier1Qwen(cfg, skills=self.skills)
         self.tier2 = Tier2RawHaiku(cfg)
+        self.authz = Authorizer()   # daemon-owned permission gate (ADR-0005)
 
     def is_reachable(self) -> bool:
         """True if the local qwen server (Tier-1 backend) is responding.
@@ -135,7 +137,7 @@ class Brain:
         hint = self.prefs.hint(self.call_context) if self.call_context else ""
         try:
             r1 = self._masked(
-                lambda: self.tier1.handle(text, allow_skills=not demo_mode, context_hint=hint),
+                lambda: self._dispatch(text, speaker=speaker, hint=hint, demo_mode=demo_mode),
                 "tier1-qwen", on_filler,
             )
             tl.mark("tier1-qwen")
@@ -143,6 +145,68 @@ class Brain:
         except Exception as exc:  # noqa: BLE001 — local model hiccup: degrade, don't crash
             tl.mark("tier1-qwen(failed)")
             return Reply(f"(the local model didn't answer: {exc})", "tier1-qwen", tl, speaker=speaker)
+
+    def _resolve_is_operator(self, speaker: str) -> bool:
+        """Resolve the principal **default-closed**: the speaker is the operator
+        only when we're sure. A far speaker is never the operator; an *unknown*
+        speaker is the operator only outside a call (where the operator is the
+        sole party) — inside a call, default closed (treat as far)."""
+        if speaker == "operator":
+            return True
+        if speaker == "far":
+            return False
+        return not self.call_context   # speaker == "": operator iff not in a call
+
+    def _denial_phrase(self, skill: object, speaker: str) -> str | None:
+        """Return the Iris response when the permission gate denies a skill.
+
+        Returns None for scenario 2 with no active call (silence — don't
+        confirm Iris heard an unrecognized voice outside a call context).
+        See design doc ti-6pwl.1 for phrase rationale and voice guidelines.
+        """
+        if is_operator_only(skill):
+            if speaker == "far":
+                # Scenario 1: far party requests an operator_only skill
+                name = self.cfg.operator_name or "the operator"
+                return f"That's something I can only do at {name}'s request."
+            if speaker not in {"operator", "far"}:
+                # Scenario 2: unrecognized speaker requests a privileged skill
+                if self.call_context:
+                    return "I need the operator to confirm that one."
+                return None  # silence outside a call — don't confirm an unrecognized voice was heard
+            # Scenario 3 (future): operator assurance too low — phrase locked now; not yet triggered
+            # TODO: wire when assurance gate lands (ADR-0005 v2)
+            return "I'm not set up to do that right now."
+        # Scenario 4: generic catch-all
+        return "Sorry, I can't help with that one."
+
+    def _dispatch(
+        self, text: str, *, speaker: str, hint: str, demo_mode: bool,
+    ) -> LaneResult:
+        """Propose → authorize → execute (ADR-0005 §4). The lane proposes a skill;
+        the daemon gate authorizes it; only then is it run. The model is never the
+        trust boundary, so a coaxed model can't get past a proposal."""
+        lr = self.tier1.handle(
+            text, allow_skills=not demo_mode, context_hint=hint, speaker=speaker,
+        )
+        if lr.proposal is None:
+            return lr  # chat / no-skill — already a final result
+        skill = self.skills.get(lr.proposal.skill)
+        if skill is None:
+            return LaneResult("Sorry — I can't do that right now.", lr.lane, skill=lr.proposal.skill)
+        ctx = AuthzContext(is_operator=self._resolve_is_operator(speaker))
+        if not self.authz.authorize(skill, ctx).allowed:
+            phrase = self._denial_phrase(skill, speaker)
+            return LaneResult(phrase or "", lr.lane, skill=lr.proposal.skill)
+        try:
+            result = skill.run(**lr.proposal.args)
+        except TypeError:
+            # proposed a skill without a required arg — ask, don't error out
+            return LaneResult(
+                "Sorry — I didn't catch the details for that. Could you say it another way?",
+                lr.lane, skill=lr.proposal.skill,
+            )
+        return LaneResult(_reply_text(result), lr.lane, skill=lr.proposal.skill)
 
     def set_pref(self, key: str, value: str, *, context: str | None = None) -> None:
         """Write a caller preference.  Falls back to ``self.call_context`` when no

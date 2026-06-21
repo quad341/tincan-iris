@@ -32,9 +32,22 @@ class Skill(Protocol):
     name: str
     description: str
     params: list[SkillParam]    # empty list = skill takes no args
+    # operator_only marks a *privileged* skill: the daemon permission gate
+    # (ADR-0005) authorizes it only for the operator principal. Optional — skills
+    # that don't set it are treated as False (see ``is_operator_only``). This is
+    # the coarse v1 capability; the full capability/assurance/grant model layers
+    # onto the same marker without changing skills.
+    operator_only: bool
 
     def run(self, **kwargs: object) -> str:
         ...
+
+
+def is_operator_only(skill: object) -> bool:
+    """True if ``skill`` is marked operator-only (privileged).
+
+    Tolerant of skills that predate the attribute — defaults to ``False``."""
+    return bool(getattr(skill, "operator_only", False))
 
 
 class TimeSkill:
@@ -73,11 +86,27 @@ class SkillRegistry:
     def get(self, name: str) -> Skill | None:
         return self._skills.get(name)
 
-    def names(self) -> list[str]:
-        return list(self._skills)
+    def _visible_to(self, speaker: str) -> list[Skill]:
+        """Skills the given speaker may be *offered* — the soft, coaxing-reduction
+        layer, NOT the security boundary (the daemon authorizer is, per ADR-0005).
 
-    def manifest(self) -> list[dict]:
-        """Return [{name, description, params}] for all registered skills.
+        The far party never sees operator_only skills, so a privileged action is
+        never even nameable to them. ``speaker=""``/``"operator"`` see everything;
+        any other speaker (e.g. ``"far"``) has operator_only skills filtered out.
+        A ``""`` default staying open is safe: the hard daemon gate is
+        default-closed, so a leak here is best-effort only.
+        """
+        if not speaker or speaker == "operator":
+            return list(self._skills.values())
+        return [s for s in self._skills.values() if not is_operator_only(s)]
+
+    def names(self, speaker: str = "") -> list[str]:
+        """Registered skill names, optionally scoped to ``speaker`` (see ``_visible_to``)."""
+        return [s.name for s in self._visible_to(speaker)]
+
+    def manifest(self, speaker: str = "") -> list[dict]:
+        """Return [{name, description, params}] for the registered skills, scoped to
+        ``speaker`` (operator_only skills are hidden from the far party).
 
         Used by Tier1Qwen to build the dispatch grammar and inject into the system
         prompt. ``params`` is a list of param dicts so the caller can serialize
@@ -99,7 +128,7 @@ class SkillRegistry:
                     for p in s.params
                 ],
             }
-            for s in self._skills.values()
+            for s in self._visible_to(speaker)
         ]
 
 

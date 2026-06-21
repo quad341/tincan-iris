@@ -81,52 +81,32 @@ def test_dispatch_prompt_lists_params_and_current_time():
     assert str(_dt.datetime.now().year) in prompt
 
 
-def test_dispatch_passes_multiple_args_to_skill():
+def test_handle_proposes_skill_with_filtered_args():
+    """The lane PROPOSES — it does NOT execute. The daemon runs it (ADR-0005 §4).
+    Skill execution + the gate live in test_permission_gate.py."""
     tier, skill = _tier_with_book()
     raw = '{"skill":"book","args":{"start":"2026-06-19T15:00:00","end":"2026-06-19T16:00:00"}}'
     with patch.object(tier, "_complete", return_value=raw):
         r = tier.handle("am I free at 3pm?")
-    assert skill.called_with == {"start": "2026-06-19T15:00:00", "end": "2026-06-19T16:00:00"}
-    assert r.skill == "book"
-    assert "booked" in r.text
+    assert skill.called_with is None                    # the lane must NOT run it
+    assert r.proposal is not None
+    assert r.proposal.skill == "book"
+    assert r.proposal.args == {"start": "2026-06-19T15:00:00", "end": "2026-06-19T16:00:00"}
 
 
-def test_dispatch_drops_unknown_args():
+def test_handle_proposal_drops_unknown_args():
     tier, skill = _tier_with_book()
     raw = '{"skill":"book","args":{"start":"S","end":"E","bogus":"x"}}'
     with patch.object(tier, "_complete", return_value=raw):
         r = tier.handle("book it")
-    # unknown key filtered -> no TypeError, skill still called with its declared params
-    assert skill.called_with == {"start": "S", "end": "E"}
-    assert r.skill == "book"
+    assert skill.called_with is None
+    assert r.proposal.args == {"start": "S", "end": "E"}    # unknown key filtered out
 
 
-def test_dispatch_missing_required_arg_degrades_gracefully():
-    tier, skill = _tier_with_book()
-    with patch.object(tier, "_complete", return_value='{"skill":"book","args":{}}'):
-        r = tier.handle("book something")
-    assert skill.called_with is None                    # not run with bad args
-    assert r.skill == "book"
-    assert "another way" in r.text.lower() or "didn't catch" in r.text.lower()
-
-
-class _TupleSkill:
-    """A skill that returns (spoken_reply, console_annotation) like the calendar
-    skills do — the spoken half must reach the user, the annotation must not."""
-
-    name = "checkcal"
-    description = "Check the calendar."
-    params = [SkillParam(name="when", type="string", description="ISO time")]
-
-    def run(self, *, when):
-        return ("That time looks free.", f"[calendar: free/busy — {when}]")
-
-
-def test_dispatch_collapses_tuple_reply_to_spoken_half():
-    tier = Tier1Qwen(Config(), skills=SkillRegistry([_TupleSkill()]))
-    raw = '{"skill":"checkcal","args":{"when":"2026-06-19T15:00:00"}}'
-    with patch.object(tier, "_complete", return_value=raw):
-        r = tier.handle("am I free at 3pm?")
-    assert r.text == "That time looks free."            # annotation dropped, not spoken
-    assert "[calendar" not in r.text                    # console annotation never leaks to TTS
-    assert r.skill == "checkcal"
+def test_handle_no_skill_falls_through_to_chat():
+    tier, _ = _tier_with_book()
+    with patch.object(tier, "_complete",
+                      side_effect=['{"skill":"none","args":{}}', "just chatting"]):
+        r = tier.handle("hello there")
+    assert r.proposal is None
+    assert r.text == "just chatting"
