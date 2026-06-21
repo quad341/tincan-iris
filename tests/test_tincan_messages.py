@@ -60,7 +60,7 @@ def test_list_conversations_calls_dbus():
         {"id": "c1", "display_name": "Alice", "unread_count": 2},
     ]
     result = m.list_conversations()
-    m._bus.get_object.assert_called_with("im.tincan", "/im/tincan/Messages")
+    m._bus.get_object.assert_called_with("im.tincan.Daemon", "/im/tincan")
     proxy = m._bus.get_object.return_value
     proxy.get_dbus_method.assert_called_with("ListConversations", "im.tincan.Messages")
     assert len(result) == 1
