@@ -21,8 +21,8 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-_BUS_NAME = "im.tincan"
-_OBJECT_PATH = "/im/tincan/Messages"
+_BUS_NAME = "im.tincan.Daemon"
+_OBJECT_PATH = "/im/tincan"
 _INTERFACE = "im.tincan.Messages"
 _DAEMON_PATH = "/im/tincan"
 _DAEMON_IFACE = "im.tincan.Daemon"

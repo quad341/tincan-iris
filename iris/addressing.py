@@ -9,17 +9,19 @@ from __future__ import annotations
 
 import re
 
-# "Iris …" / "hey Iris …" / "ok Iris …" at the start, then the command. Tolerant
-# of the comma/pause after the name. Anchored at the start so a stray "iris" mid-
-# sentence ("I told Iris …") doesn't trigger her.
+# "hey Iris …" / "ok Iris …" / "hi Iris …" at the start, then the command. A
+# prefix (hey/ok/okay/hi/hello) is REQUIRED, so a bare "Iris" — or "iris" spoken
+# mid-conversation ("I told Iris …", "ask Iris about it") — does NOT trigger her.
+# Tolerant of the comma/pause after the name.
 _ADDRESS = re.compile(
-    r"^\s*(?:hey|ok|okay|hi|hello)?\s*iris\b[\s,.:;!?-]*(.*)", re.IGNORECASE
+    r"^\s*(?:hey|ok|okay|hi|hello)\s+iris\b[\s,.:;!?-]*(.*)", re.IGNORECASE
 )
 
 
 def address(text: str) -> str | None:
-    """If ``text`` is addressed to Iris, return the command with the wake word
-    stripped (a bare "Iris" returns ""); otherwise return None (not for her)."""
+    """If ``text`` is addressed to Iris (a required prefix + "Iris", e.g.
+    "hey Iris …"), return the command with the wake word stripped; otherwise
+    return None — including a bare "Iris" with no prefix (not for her)."""
     m = _ADDRESS.match(text or "")
     if m is None:
         return None
