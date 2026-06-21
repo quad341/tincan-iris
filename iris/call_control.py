@@ -97,6 +97,24 @@ class TincanCallControl:
         except Exception:  # noqa: BLE001 — D-Bus hiccup: log and move on
             self.emit(("answer_error", call_id))
 
+    def _dial(self, number: str) -> str | None:
+        """Send ``Dial(number)`` on the D-Bus interface. Fire-and-continue: does not
+        wait for CallConnected. 15-second timeout handling belongs in DialSkill."""
+        if self._bus is None:
+            return None
+        try:
+            proxy = self._bus.get_object(_BUS_NAME, _OBJECT_PATH)
+            proxy.get_dbus_method("Dial", _INTERFACE)(number)
+            return None
+        except Exception as exc:  # noqa: BLE001 — D-Bus hiccup: log and surface to caller
+            self.emit(("dial_error", number, str(exc)))
+            return str(exc)
+
+    def dial(self, number: str) -> str | None:
+        """Place an outgoing call to ``number``. Returns None on success, error
+        string on ``DBusException``."""
+        return self._dial(number)
+
     # --- lifecycle ---
 
     def start(self) -> None:

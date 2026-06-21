@@ -43,7 +43,8 @@ class Brain:
 
     def __init__(self, cfg: Config = DEFAULT, skills: SkillRegistry | None = None,
                  notes_store: NotesStore | None = None,
-                 prefs: PreferencesStore | None = None) -> None:
+                 prefs: PreferencesStore | None = None,
+                 ctrl: object = None) -> None:
         self.cfg = cfg
         self.prefs = prefs or PreferencesStore()
         self.call_context: str = ""   # set to a contact ID before each call
@@ -56,7 +57,7 @@ class Brain:
             # qwen — and the HomeApp that drives this Brain — get exactly the
             # skills that work.
             from .skill_wiring import optional_skills
-            for s in optional_skills(notes_store=notes_store):
+            for s in optional_skills(notes_store=notes_store, ctrl=ctrl):
                 self.skills.register(s)
         else:
             self.skills = skills

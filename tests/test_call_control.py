@@ -125,6 +125,35 @@ def test_start_emits_bus_unavailable_when_dbus_missing():
     assert "bus_unavailable" in kinds
 
 
+# --- dial helper ---
+
+def test_dial_calls_dbus_method():
+    c, events = _ctrl()
+    result = c.dial("+15555550199")
+    c._bus.get_object.assert_called_once_with("im.tincan", "/im/tincan/Calls")
+    proxy = c._bus.get_object.return_value
+    proxy.get_dbus_method.assert_called_once_with("Dial", "im.tincan.Calls")
+    method = proxy.get_dbus_method.return_value
+    method.assert_called_once_with("+15555550199")
+    assert result is None
+
+
+def test_dial_emits_error_and_returns_error_string():
+    c, events = _ctrl()
+    c._bus.get_object.side_effect = RuntimeError("no service")
+    result = c.dial("+15555550199")
+    assert ("dial_error", "+15555550199", "no service") in events
+    assert result == "no service"
+
+
+def test_dial_no_op_without_bus():
+    events: list = []
+    c = TincanCallControl(emit=events.append, _bus=None)
+    result = c.dial("+15555550199")
+    assert result is None
+    assert events == []
+
+
 # --- rebind on reconnect ---
 
 def test_reconnect_replaces_endpoint():
