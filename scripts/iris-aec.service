@@ -1,0 +1,39 @@
+# Iris always-on WebRTC AEC — makes the echo-cancelled mic + reference sink the
+# system defaults at login, so echo cancellation is ambient and app-agnostic
+# (Discord, Zoom, browser, games all get a clean mic + their output in the
+# reference, with no per-call setup). The SCO `bridge` is still used for native
+# bluez phone-call nodes; this covers ordinary app audio.
+#
+# This is a standalone user unit (NOT installed by `iris install-services`, to
+# keep it clear of that command). Install manually:
+#
+#   cp scripts/iris-aec.service ~/.config/systemd/user/
+#   # edit AEC_SCRIPT below to the absolute path of scripts/aec_audio.sh, then:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now iris-aec
+#   pactl get-default-source   # should report iris_aec_src
+#
+# Disable / restore your previous defaults:
+#   systemctl --user disable --now iris-aec
+#
+# CAVEAT (validate off-call): WirePlumber owns default-target routing and can
+# re-assert its own choice when devices change. If the AEC defaults don't stick,
+# add a WirePlumber rule pinning default.audio.source/sink to iris_aec_src/sink.
+# This unit has not yet been validated across a relogin — do that first.
+
+[Unit]
+Description=Iris always-on WebRTC AEC (ambient echo-cancelled mic + speakers)
+After=pipewire.service wireplumber.service pipewire-pulse.service
+Wants=pipewire.service wireplumber.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Point this at the installed scripts/aec_audio.sh. Tune the canceller via
+# IRIS_AEC_ARGS / IRIS_AEC_MIC / IRIS_AEC_SPK (add more Environment= lines).
+Environment=AEC_SCRIPT=%h/projects/tincan-iris/scripts/aec_audio.sh
+ExecStart=/usr/bin/env bash -c '"$AEC_SCRIPT" up && "$AEC_SCRIPT" default'
+ExecStop=/usr/bin/env bash -c '"$AEC_SCRIPT" down'
+
+[Install]
+WantedBy=default.target
