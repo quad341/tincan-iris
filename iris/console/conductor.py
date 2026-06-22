@@ -179,6 +179,20 @@ class Conductor:
                 self._play = None
         self._set_state(State.IDLE)
 
+    def say(self, text: str) -> None:
+        """Speak a canned phrase directly via TTS — no brain call. Blocking."""
+        if self.muted or not text or self.state is not State.IDLE:
+            return
+        self._set_state(State.SPEAKING)
+        try:
+            self._play = self.mic.start_playback(self.tts.synth(text))
+            self._play.wait()
+        except Exception as exc:  # noqa: BLE001
+            self.emit(("error", f"tts: {exc}"))
+        finally:
+            self._play = None
+            self._set_state(State.IDLE)
+
     def interrupt(self) -> None:
         """Barge-in: cut playback now, discard any in-flight take/turn."""
         self._cancel.set()

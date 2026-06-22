@@ -219,3 +219,35 @@ def test_speaking_false_in_transcribing():
     c, _events, _mic, _play = _make()
     c.state = State.TRANSCRIBING
     assert c.speaking is False
+
+
+# --- say() — canned TTS without brain call (ti-4ll6) -------------------------
+
+def test_say_speaks_without_brain():
+    c, events, mic, play = _make()
+    c.say("Yes?")
+    states = _states(events)
+    assert State.SPEAKING in states
+    assert states[-1] is State.IDLE
+    mic.start_playback.assert_called_once()
+    play.wait.assert_called_once()
+    c.brain.respond.assert_not_called()
+
+
+def test_say_noop_when_muted():
+    c, _events, mic, _ = _make(muted=True)
+    c.say("Yes?")
+    mic.start_playback.assert_not_called()
+
+
+def test_say_noop_when_busy():
+    c, _events, mic, _ = _make()
+    c.state = State.SPEAKING
+    c.say("Yes?")
+    mic.start_playback.assert_not_called()
+
+
+def test_say_noop_for_empty_text():
+    c, _events, mic, _ = _make()
+    c.say("")
+    mic.start_playback.assert_not_called()

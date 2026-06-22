@@ -27,6 +27,7 @@ from __future__ import annotations
 import os
 import queue
 import re
+import time
 from datetime import datetime
 
 from textual.app import App, ComposeResult
@@ -58,6 +59,10 @@ _STOP = re.compile(
     r"^\s*(?:stop|stand[ -]?down|cancel|never ?mind|quiet|enough|shush|hush)\b",
     re.IGNORECASE,
 )
+
+# After a bare wake-word ("Hey Iris"), accept the next utterance without a wake-word
+# for this many seconds.
+_FOLLOW_UP_S = 8.0
 
 # Trust-escalation phrase pattern — kept as a tested constant so regressions are caught.
 # The spoken-grant path that acted on this was removed (ti-qt1i.1.1); trust elevation
@@ -284,6 +289,7 @@ class IrisConsole(App):
         self._call_trust_eligible: bool = False
         self._in_call: bool = False
         self._pre_call_muted: bool = False
+        self._follow_up_until: float = 0.0
         self._messages = MessageStore()
         self._roster = RosterStore()
 
@@ -483,11 +489,25 @@ class IrisConsole(App):
         self._silence_tracker.touch()
         cmd = address(text)
         if cmd is None:
-            self._w(f"[dim]· {text}[/]")  # overheard, not for Iris
+            if time.monotonic() < self._follow_up_until:
+                # Within the active-listening window opened by a bare wake-word:
+                # treat this utterance as a command without requiring "Iris, …".
+                self._follow_up_until = 0.0
+                self._w(f"[bold]you[/] → iris: {text}")
+                self._dispatch(text, speaker)
+            else:
+                self._w(f"[dim]· {text}[/]")  # overheard, not for Iris
             return
         self._w(f"[bold]you[/] → iris: {text}")
         if not cmd:
-            self._w('[dim](yes? — say "Iris, <command>")[/]')
+            # Bare wake-word ("Hey Iris"): speak an ack and open a follow-up window.
+            self._follow_up_until = time.monotonic() + _FOLLOW_UP_S
+            if self.conductor.state is State.IDLE:
+                self.run_worker(
+                    lambda: self.conductor.say("Yes?"), thread=True, exclusive=True,
+                )
+            else:
+                self._w('[dim](yes? — say your request)[/]')
         elif _STOP.match(cmd):
             self.conductor.interrupt()  # cut her off now; no spoken reply
             self._w("[yellow](stopped)[/]")
