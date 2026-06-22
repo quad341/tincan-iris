@@ -2,7 +2,7 @@
 
 Covers: _DelegateState, DelegateSkill, ConfirmDelegateSkill, CancelDelegateSkill.
 No real gc binary — subprocess.run is mocked. No SSE listener.
-Timeout tests use tiny _REPLY_TIMEOUT_S patch to avoid 30-minute waits.
+Timeout tests patch _read_timeout_s() to return 0.02s to avoid 30-minute waits.
 ADR-0005: confirm is required before mail is sent (no silent dispatch).
 """
 from __future__ import annotations
@@ -362,7 +362,7 @@ def test_cancel_is_operator_only():
 def test_timeout_dequeues_entry():
     timed_out: list[str] = []
     s = _DelegateState()
-    with patch("iris.delegate_skill._REPLY_TIMEOUT_S", 0.02):
+    with patch("iris.delegate_skill._read_timeout_s", return_value=0.02):
         s.enqueue(_ENTRY, "S", "B", on_timeout=lambda eid: timed_out.append(eid))
     time.sleep(0.1)
     assert s.queue_count == 0
@@ -371,7 +371,7 @@ def test_timeout_dequeues_entry():
 def test_timeout_calls_on_timeout_callback():
     cb = MagicMock()
     s = _DelegateState()
-    with patch("iris.delegate_skill._REPLY_TIMEOUT_S", 0.02):
+    with patch("iris.delegate_skill._read_timeout_s", return_value=0.02):
         s.enqueue(_ENTRY, "S", "B", on_timeout=cb)
     time.sleep(0.1)
     cb.assert_called_once_with(_ENTRY)
@@ -384,16 +384,15 @@ def test_timeout_fires_voice_line_via_callback():
         spoken.append("I haven't heard back from the mayor yet.")
 
     s = _DelegateState()
-    with patch("iris.delegate_skill._REPLY_TIMEOUT_S", 0.02):
+    with patch("iris.delegate_skill._read_timeout_s", return_value=0.02):
         s.enqueue(_ENTRY, "S", "B", on_timeout=on_timeout)
     time.sleep(0.1)
     assert spoken and "mayor" in spoken[0].lower()
 
 
 def test_timeout_config_env_override(tmp_path, monkeypatch):
-    """settings.toml delegation.reply_timeout_minutes override is honored."""
+    """settings.toml delegation.reply_timeout_minutes feeds _read_timeout_s() and the timer."""
     import iris.settings as _settings
-    import tomllib
 
     cfg = tmp_path / "config.toml"
     cfg.write_text("[delegation]\nreply_timeout_minutes = 1\n")
@@ -404,6 +403,11 @@ def test_timeout_config_env_override(tmp_path, monkeypatch):
 
     try:
         assert _read_timeout_s() == pytest.approx(60.0)
+        # Verify enqueue() actually calls _read_timeout_s (not the dead constant).
+        s = _DelegateState()
+        with patch("iris.delegate_skill._read_timeout_s", return_value=0.02) as mock_fn:
+            s.enqueue(_ENTRY, "S", "B", on_timeout=lambda eid: None)
+        mock_fn.assert_called_once()
     finally:
         monkeypatch.delenv("IRIS_CONFIG", raising=False)
         _settings.reload()

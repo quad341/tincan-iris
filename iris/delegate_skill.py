@@ -11,6 +11,7 @@ ADR-0005 compliance: confirm required before mail is sent — no silent dispatch
 """
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import threading
 from typing import Callable
@@ -78,7 +79,7 @@ class _DelegateState:
                 self.dequeue(entry_id)
                 on_timeout(entry_id)
 
-            timer = threading.Timer(_REPLY_TIMEOUT_S, _fire)
+            timer = threading.Timer(_read_timeout_s(), _fire)
             timer.daemon = True
             timer.start()
             self._timers[entry_id] = timer
@@ -143,7 +144,7 @@ class ConfirmDelegateSkill:
         for attempt in range(2):
             try:
                 subprocess.run(cmd, check=True)
-                entry_id = f"del-{hash(body) & 0xFFFFFFFF:08x}"
+                entry_id = f"del-{hashlib.sha256(body.encode()).hexdigest()[:8]}"
                 self._state.enqueue(entry_id, subject, body)
                 return "Message sent to the mayor."
             except subprocess.CalledProcessError:
