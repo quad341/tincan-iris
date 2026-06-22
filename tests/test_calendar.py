@@ -57,7 +57,8 @@ FIXTURE_CALENDAR = {
 @pytest.fixture
 def mock_client():
     client = MagicMock(spec=CalendarClient)
-    client.free_busy.return_value = {"busy": []}
+    # free_busy: side_effect enforces keyword-only signature; positional call raises TypeError
+    client.free_busy.side_effect = lambda *, start, end: {"busy": []}
     client.create_event.return_value = {
         "id": "new-evt",
         "title": "Call with Alex",
@@ -107,10 +108,11 @@ def test_free_busy_annotation_shows_time_range(mock_client):
 # Free/busy — busy (act-without-disclose compliance)
 # ---------------------------------------------------------------------------
 
+_BUSY_SLOT = [{"start": "2026-06-19T14:00:00", "end": "2026-06-19T15:00:00"}]
+
+
 def test_free_busy_busy_reply_is_hedged(mock_client):
-    mock_client.free_busy.return_value = {
-        "busy": [{"start": "2026-06-19T14:00:00", "end": "2026-06-19T15:00:00"}]
-    }
+    mock_client.free_busy.side_effect = lambda *, start, end: {"busy": _BUSY_SLOT}
     skill = CalendarFreeBusySkill(mock_client)
     reply, _ann = skill.run(start="2026-06-19T14:00:00", end="2026-06-19T15:00:00")
     hedged_phrases = [
@@ -122,9 +124,7 @@ def test_free_busy_busy_reply_is_hedged(mock_client):
 
 def test_free_busy_busy_reply_has_no_event_title(mock_client):
     """Critical: event title must never appear in spoken reply."""
-    mock_client.free_busy.return_value = {
-        "busy": [{"start": "2026-06-19T14:00:00", "end": "2026-06-19T15:00:00"}]
-    }
+    mock_client.free_busy.side_effect = lambda *, start, end: {"busy": _BUSY_SLOT}
     mock_client.list_events.return_value = FIXTURE_CALENDAR["events"]
     skill = CalendarFreeBusySkill(mock_client)
     reply, _ann = skill.run(start="2026-06-19T14:00:00", end="2026-06-19T15:00:00")
@@ -134,9 +134,7 @@ def test_free_busy_busy_reply_has_no_event_title(mock_client):
 
 def test_free_busy_busy_reply_has_no_attendee(mock_client):
     """Critical: attendees must never appear in spoken reply."""
-    mock_client.free_busy.return_value = {
-        "busy": [{"start": "2026-06-19T14:00:00", "end": "2026-06-19T15:00:00"}]
-    }
+    mock_client.free_busy.side_effect = lambda *, start, end: {"busy": _BUSY_SLOT}
     skill = CalendarFreeBusySkill(mock_client)
     reply, _ann = skill.run(start="2026-06-19T14:00:00", end="2026-06-19T15:00:00")
     assert "dr.smith@hospital.org" not in reply
@@ -145,9 +143,7 @@ def test_free_busy_busy_reply_has_no_attendee(mock_client):
 
 def test_free_busy_busy_reply_has_no_exact_conflict_time(mock_client):
     """Conflict slot ISO timestamp must not appear in spoken reply."""
-    mock_client.free_busy.return_value = {
-        "busy": [{"start": "2026-06-19T14:00:00", "end": "2026-06-19T15:00:00"}]
-    }
+    mock_client.free_busy.side_effect = lambda *, start, end: {"busy": _BUSY_SLOT}
     skill = CalendarFreeBusySkill(mock_client)
     reply, _ann = skill.run(start="2026-06-19T14:00:00", end="2026-06-19T15:00:00")
     assert "2026-06-19T14:00:00" not in reply
@@ -155,9 +151,7 @@ def test_free_busy_busy_reply_has_no_exact_conflict_time(mock_client):
 
 
 def test_free_busy_busy_annotation_marks_act_without_disclose(mock_client):
-    mock_client.free_busy.return_value = {
-        "busy": [{"start": "2026-06-19T14:00:00", "end": "2026-06-19T15:00:00"}]
-    }
+    mock_client.free_busy.side_effect = lambda *, start, end: {"busy": _BUSY_SLOT}
     skill = CalendarFreeBusySkill(mock_client)
     _reply, ann = skill.run(start="2026-06-19T14:00:00", end="2026-06-19T15:00:00")
     assert "act-without-disclose" in ann.lower() or "hidden" in ann.lower() or "details" in ann.lower()

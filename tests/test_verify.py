@@ -297,7 +297,8 @@ def test_tier_b_latency_recorded_on_pass():
 
 def _mock_calendar_client():
     client = MagicMock()
-    client.free_busy.return_value = {"busy": []}
+    # Keyword-only side_effect mirrors the real signature; positional calls raise TypeError
+    client.free_busy.side_effect = lambda *, start, end: {"busy": []}
     return client
 
 
