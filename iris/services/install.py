@@ -28,6 +28,41 @@ UNITS: list[UnitSpec] = [
 ]
 
 
+def _python_main() -> Path:
+    return _REPO_PATH / ".venv" / "bin" / "python"
+
+
+def _validate_exec_starts() -> list[str]:
+    """Return a list of error strings; empty means all checks passed."""
+    errors: list[str] = []
+    py_main = _python_main()
+    py_whisper = _REPO_PATH / ".venv-whisper" / "bin" / "python"
+    py_kokoro = _REPO_PATH / ".venv-kokoro" / "bin" / "python"
+
+    for label, path in [
+        ("brain .venv python", py_main),
+        ("whisper .venv-whisper python", py_whisper),
+        ("kokoro .venv-kokoro python", py_kokoro),
+    ]:
+        if not path.exists():
+            errors.append(f"  ✗ {label} not found: {path}")
+
+    if py_main.exists():
+        try:
+            result = subprocess.run(
+                [str(py_main), "-c", "import iris"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode != 0:
+                errors.append(
+                    f"  ✗ brain python cannot import iris: {result.stderr.strip()}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"  ✗ brain python import check failed: {exc}")
+
+    return errors
+
+
 def _render(template: str) -> str:
     home = str(Path.home())
     return (
@@ -58,6 +93,19 @@ def _linger_enabled() -> bool:
 
 def install(dry_run: bool = False) -> int:
     """Install or update Iris systemd user services. Returns 0 on success, 1 on any failure."""
+    if not dry_run:
+        errors = _validate_exec_starts()
+        if errors:
+            print("\nPre-flight check FAILED — aborting install (no files written):\n", file=sys.stderr)
+            for e in errors:
+                print(e, file=sys.stderr)
+            print(
+                "\nRun scripts/setup_whisper.sh, scripts/setup_kokoro.sh, and "
+                "pip install -e . in a .venv first.\n",
+                file=sys.stderr,
+            )
+            return 1
+
     prefix = "[dry-run] " if dry_run else ""
     print(f"\n{prefix}Installing Iris systemd user services…\n")
 
