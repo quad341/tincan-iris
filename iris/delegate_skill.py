@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import subprocess
 import threading
-from typing import Callable
+from typing import Callable, Optional
 
 import iris.settings as _settings
 
@@ -132,9 +132,15 @@ class ConfirmDelegateSkill:
     description = "Confirm and send the staged mayor delegation."
     operator_only = True
 
-    def __init__(self, state: _DelegateState, gc_bin: str = "gc") -> None:
+    def __init__(
+        self,
+        state: _DelegateState,
+        gc_bin: str = "gc",
+        on_sent: Optional[Callable[[str], None]] = None,
+    ) -> None:
         self._state = state
         self._gc_bin = gc_bin
+        self._on_sent = on_sent
 
     def run(self, **_: object) -> str:
         if not self._state.has_staged:
@@ -146,6 +152,8 @@ class ConfirmDelegateSkill:
                 subprocess.run(cmd, check=True)
                 entry_id = f"del-{hashlib.sha256(body.encode()).hexdigest()[:8]}"
                 self._state.enqueue(entry_id, subject, body)
+                if self._on_sent is not None:
+                    self._on_sent(entry_id)
                 return "Message sent to the mayor."
             except subprocess.CalledProcessError:
                 if attempt == 1:
