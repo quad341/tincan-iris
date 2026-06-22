@@ -61,7 +61,8 @@
 # discovered fresh each call and never persisted.
 set -euo pipefail
 
-STATE="${XDG_RUNTIME_DIR:-/tmp}/iris_aec.module"   # holds: <module_id> <mic> <spk>
+STATE="${XDG_RUNTIME_DIR:-/tmp}/iris_aec.module"     # holds: <module_id> <mic> <spk>
+DEFAULTS="${XDG_RUNTIME_DIR:-/tmp}/iris_aec.defaults" # saved pre-AEC default source/sink
 AEC_SRC="iris_aec_src"
 AEC_SINK="iris_aec_sink"
 
@@ -239,8 +240,37 @@ PY
     echo "  (raw/cleaned measured over the trailing ${tailsec}s, after the filter converges.)"
 }
 
+# --- always-on mode: make the cancelled devices the system defaults ---
+# After `up`, this points every app at the echo-cancelled mic + the reference
+# sink, so echo cancellation is ambient and app-agnostic (no per-call bridge for
+# app audio like Discord/Zoom — they just use the defaults). The SCO `bridge` is
+# still needed for native bluez phone-call nodes. Trade-off: ALL audio routes
+# through the canceller (music, videos too) and picks up a little latency.
+# Intended to be run at login via a user service (see scripts/iris-aec.service).
+default() {
+    [[ -s "$STATE" ]] || { echo "AEC not loaded — run '$0 up' first." >&2; exit 1; }
+    if [[ ! -s "$DEFAULTS" ]]; then          # save the pre-AEC defaults once
+        { pactl get-default-source; pactl get-default-sink; } > "$DEFAULTS"
+    fi
+    pactl set-default-source "$AEC_SRC"
+    pactl set-default-sink   "$AEC_SINK"
+    echo "==> $AEC_SRC / $AEC_SINK are now the system defaults."
+    echo "    Every app captures the echo-cancelled mic and plays into the AEC"
+    echo "    reference — ambient, app-agnostic echo cancellation. '$0 down' restores."
+}
+
+_restore_defaults() {
+    [[ -s "$DEFAULTS" ]] || return 0
+    local src sink; { read -r src; read -r sink; } < "$DEFAULTS"
+    [[ -n "$src"  ]] && pactl set-default-source "$src"  2>/dev/null || true
+    [[ -n "$sink" ]] && pactl set-default-sink   "$sink" 2>/dev/null || true
+    rm -f "$DEFAULTS"
+    echo "==> restored previous default source/sink."
+}
+
 down() {
     unbridge || true
+    _restore_defaults
     if [[ ! -s "$STATE" ]]; then
         echo "No saved AEC module." >&2
         pactl list short modules | grep -q module-echo-cancel \
@@ -259,6 +289,7 @@ case "${1:-}" in
     unbridge) unbridge ;;
     status)   status   ;;
     selftest) selftest ;;
+    default)  default  ;;
     down)     down     ;;
-    *) echo "usage: $0 {up|bridge|status|selftest|unbridge|down}" >&2; exit 2 ;;
+    *) echo "usage: $0 {up|bridge|status|selftest|default|unbridge|down}" >&2; exit 2 ;;
 esac
