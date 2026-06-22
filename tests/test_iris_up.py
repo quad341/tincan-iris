@@ -1,0 +1,158 @@
+"""Tests for iris/up.py (ti-2fiv).
+
+All subprocess and network calls are mocked — no real services required.
+"""
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from iris.up import bring_up, _is_active, _start_service
+
+
+def _active_proc():
+    return MagicMock(returncode=0, stdout="active", stderr="")
+
+
+def _inactive_proc():
+    return MagicMock(returncode=3, stdout="inactive", stderr="")
+
+
+# ---------------------------------------------------------------------------
+# _is_active
+# ---------------------------------------------------------------------------
+
+def test_is_active_true_on_exit_zero():
+    with patch("iris.up.subprocess.run", return_value=_active_proc()):
+        assert _is_active("iris-whisper") is True
+
+
+def test_is_active_false_on_nonzero():
+    with patch("iris.up.subprocess.run", return_value=_inactive_proc()):
+        assert _is_active("iris-whisper") is False
+
+
+def test_is_active_false_on_oserror():
+    with patch("iris.up.subprocess.run", side_effect=OSError):
+        assert _is_active("iris-whisper") is False
+
+
+# ---------------------------------------------------------------------------
+# bring_up: managed services
+# ---------------------------------------------------------------------------
+
+def test_bring_up_skips_start_when_already_active(capsys):
+    with patch("iris.up._is_active", return_value=True), \
+         patch("iris.up._health_ok", return_value=True):
+        rc = bring_up(launch_console=False)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "already active" in out
+
+
+def test_bring_up_starts_service_when_inactive(capsys):
+    call_log: list[str] = []
+
+    def _run(cmd, **kwargs):
+        call_log.append(cmd[2])  # 'is-active' or 'start'
+        if "is-active" in cmd:
+            return _inactive_proc()
+        return _active_proc()
+
+    with patch("iris.up.subprocess.run", side_effect=_run), \
+         patch("iris.up._health_ok", return_value=True):
+        rc = bring_up(launch_console=False)
+    assert rc == 0
+    assert "start" in call_log
+
+
+def test_bring_up_returns_1_when_start_fails(capsys):
+    def _run(cmd, **kwargs):
+        if "is-active" in cmd:
+            return _inactive_proc()
+        return MagicMock(returncode=1, stdout="", stderr="failed")
+
+    with patch("iris.up.subprocess.run", side_effect=_run), \
+         patch("iris.up._health_ok", return_value=True):
+        rc = bring_up(launch_console=False)
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "FAILED" in out or "failed" in out.lower()
+
+
+# ---------------------------------------------------------------------------
+# bring_up: llama and tincand (warn-but-don't-block)
+# ---------------------------------------------------------------------------
+
+def test_bring_up_warns_when_llama_unreachable(capsys):
+    with patch("iris.up._is_active", return_value=True), \
+         patch("iris.up._health_ok", side_effect=lambda url, **_: "9001" in url):
+        rc = bring_up(launch_console=False)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "llama" in out.lower() or "8080" in out
+
+
+def test_bring_up_succeeds_when_tincand_absent(capsys):
+    with patch("iris.up._is_active", return_value=True), \
+         patch("iris.up._health_ok", side_effect=lambda url, **_: "8080" in url):
+        rc = bring_up(launch_console=False)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "tincand" in out.lower() or "9001" in out
+
+
+def test_bring_up_all_healthy_returns_0(capsys):
+    with patch("iris.up._is_active", return_value=True), \
+         patch("iris.up._health_ok", return_value=True):
+        rc = bring_up(launch_console=False)
+    assert rc == 0
+
+
+# ---------------------------------------------------------------------------
+# install.py: iris-brain retired + removed from UNITS
+# ---------------------------------------------------------------------------
+
+def test_iris_brain_not_in_install_units():
+    from iris.services.install import UNITS
+    names = {spec.name for spec in UNITS}
+    assert "iris-brain" not in names
+
+
+def test_iris_brain_not_in_doctor_services():
+    from iris.doctor import EXPECTED_SERVICES
+    names = {svc.name for svc in EXPECTED_SERVICES}
+    assert "iris-brain" not in names
+
+
+def test_install_retires_stale_brain_unit(tmp_path, capsys):
+    from iris.services.install import install
+    brain_unit = tmp_path / "iris-brain.service"
+    brain_unit.write_text("[Unit]\nDescription=old brain\n")
+
+    systemctl_calls: list[list[str]] = []
+
+    def _run(cmd, **kwargs):
+        systemctl_calls.append(list(cmd))
+        if "is-active" in cmd and "iris-brain" in cmd[-1]:
+            return MagicMock(returncode=0)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch("iris.services.install.subprocess.run", side_effect=_run), \
+         patch("iris.services.install._SYSTEMD_USER", tmp_path), \
+         patch("iris.services.install._linger_enabled", return_value=True):
+        install(dry_run=False)
+
+    stop_cmds = [c for c in systemctl_calls if "stop" in c]
+    assert any("iris-brain" in " ".join(c) for c in stop_cmds)
+
+
+# ---------------------------------------------------------------------------
+# __main__: 'iris up' is wired
+# ---------------------------------------------------------------------------
+
+def test_iris_up_registered_in_commands():
+    from iris.__main__ import _COMMANDS
+    assert "up" in _COMMANDS
+    assert "iris.up" in _COMMANDS["up"]

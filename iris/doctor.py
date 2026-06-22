@@ -77,7 +77,6 @@ EXPECTED_SERVICES: list[ServiceDescriptor] = [
     ServiceDescriptor("iris-llama",   "iris-llama.service",   "http://127.0.0.1:8080/health", required=True),
     ServiceDescriptor("iris-whisper", "iris-whisper.service", "http://127.0.0.1:8082/health", required=True),
     ServiceDescriptor("iris-kokoro",  "iris-kokoro.service",  "http://127.0.0.1:8083/health", required=True),
-    ServiceDescriptor("iris-brain",   "iris-brain.service",   None,                            required=True),
     ServiceDescriptor("tincand",      "tincand.service",      "http://127.0.0.1:9001/health",  required=False),
 ]
 
