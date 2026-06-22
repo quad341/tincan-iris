@@ -24,8 +24,12 @@ UNITS: list[UnitSpec] = [
     UnitSpec("iris-llama",   "iris-llama.service.tmpl"),
     UnitSpec("iris-whisper", "iris-whisper.service.tmpl"),
     UnitSpec("iris-kokoro",  "iris-kokoro.service.tmpl"),
-    UnitSpec("iris-brain",   "iris-brain.service.tmpl"),
 ]
+
+# iris-brain.service ran `python -m iris.voice` (interactive REPL) under systemd,
+# which exits immediately on EOF from stdin — crash-loop. Dropped from managed units;
+# the console embeds its own Brain in-process. Stale unit is retired on install.
+_RETIRED_UNITS: list[str] = ["iris-brain"]
 
 
 def _python_main() -> Path:
@@ -93,6 +97,26 @@ def _linger_enabled() -> bool:
 
 def install(dry_run: bool = False) -> int:
     """Install or update Iris systemd user services. Returns 0 on success, 1 on any failure."""
+    # Retire obsolete units FIRST — cleanup is independent of the new-install
+    # preflight, so a stale/crash-looping unit (iris-brain) is dropped even when
+    # the venvs aren't ready to install the new ones yet.
+    if not dry_run:
+        _SYSTEMD_USER.mkdir(parents=True, exist_ok=True)
+        for name in _RETIRED_UNITS:
+            unit = f"{name}.service"
+            proc = subprocess.run(
+                ["systemctl", "--user", "is-active", unit],
+                capture_output=True, text=True,
+            )
+            if proc.returncode == 0:
+                print(f"  Retiring stale unit {unit}…")
+                subprocess.run(["systemctl", "--user", "stop", unit], capture_output=True)
+                subprocess.run(["systemctl", "--user", "disable", unit], capture_output=True)
+                unit_path = _SYSTEMD_USER / unit
+                if unit_path.exists():
+                    unit_path.unlink()
+                    print(f"    removed {unit_path} ✓")
+
     if not dry_run:
         errors = _validate_exec_starts()
         if errors:
@@ -108,9 +132,6 @@ def install(dry_run: bool = False) -> int:
 
     prefix = "[dry-run] " if dry_run else ""
     print(f"\n{prefix}Installing Iris systemd user services…\n")
-
-    if not dry_run:
-        _SYSTEMD_USER.mkdir(parents=True, exist_ok=True)
 
     changed: list[str] = []
     failed: list[str] = []

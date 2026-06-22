@@ -12,6 +12,7 @@ import sys
 
 # command -> "module:function".  Order here is the order shown in --help.
 _COMMANDS: dict[str, str] = {
+    "up": "iris.up:main",
     "doctor": "iris.doctor:main",
     "home": "iris.console.home:main",
     "console": "iris.console.app:main",
