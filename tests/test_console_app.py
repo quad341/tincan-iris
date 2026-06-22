@@ -282,3 +282,123 @@ def test_call_ended_hides_active_call_card():
             await pilot.press("q")
 
     asyncio.run(scenario())
+
+
+# --- call mic mute + far-party downlink gate (ti-gbz4.1, ti-gbz4.2) --------
+
+
+def test_call_connected_auto_mutes_unmuted_conductor():
+    """call_connected mutes an unmuted conductor and records _pre_call_muted=False."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            assert app.conductor.muted is False
+            app.events.put(("call_connected",))
+            app._drain()
+            assert app._in_call is True
+            assert app._pre_call_muted is False
+            assert app.conductor.muted is True
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_call_connected_preserves_already_muted_state():
+    """call_connected records _pre_call_muted=True and does not double-toggle when already muted."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app.conductor.toggle_mute()
+            assert app.conductor.muted is True
+            app.events.put(("call_connected",))
+            app._drain()
+            assert app._pre_call_muted is True
+            assert app.conductor.muted is True
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_call_ended_restores_unmuted_pre_call_state():
+    """call_ended unmutes the conductor when the operator was not muted before the call."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            assert app.conductor.muted is False
+            app.events.put(("call_connected",))
+            app._drain()
+            assert app.conductor.muted is True  # auto-muted at call start
+
+            app.events.put(("call_ended", "session-x"))
+            app._drain()
+            assert app.conductor.muted is False  # restored to pre-call state
+            assert app._in_call is False
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_call_ended_preserves_muted_state_when_pre_call_was_muted():
+    """call_ended does not unmute when the operator was already muted before the call."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app.conductor.toggle_mute()
+            assert app.conductor.muted is True
+            app.events.put(("call_connected",))
+            app._drain()
+            assert app._pre_call_muted is True
+
+            app.events.put(("call_ended", "session-y"))
+            app._drain()
+            assert app.conductor.muted is True  # stays muted — was muted before call
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_call_connected_stops_active_far_stream():
+    """call_connected stops and clears an active far-party stream (ti-gbz4.2)."""
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            mock_stream = MagicMock()
+            app._far_stream = mock_stream
+            app.events.put(("call_connected",))
+            app._drain()
+            mock_stream.stop.assert_called_once()
+            assert app._far_stream is None
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_on_heard_far_main_suppressed_during_call():
+    """_on_heard_far_main returns early during an active call — far commands are not dispatched."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            dispatched = []
+            app._dispatch = lambda cmd, speaker="": dispatched.append((cmd, speaker)) or True
+            app._in_call = True
+            app._on_heard_far_main("Iris, what time is it?", "far")
+            assert dispatched == []
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_action_far_blocked_during_call():
+    """[f] is a no-op during a call — does not start a far stream."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._in_call = True
+            assert app._far_stream is None
+            await pilot.press("f")
+            assert app._far_stream is None
+            await pilot.press("q")
+
+    asyncio.run(scenario())
