@@ -101,6 +101,16 @@ _unlink() {  # _unlink <out_node> <in_node> — best-effort disconnect
     done < <(pw-link -o 2>/dev/null | grep "^${out}:")
 }
 
+# RMS amplitude (0..1) of a WAV via sox; optional 2nd arg = measure only the
+# trailing N seconds (the post-convergence window of the adaptive filter).
+_rms() {  # _rms <wav> [tail_seconds]
+    local f="$1" tailsec="${2:-}"
+    if [[ -n "$tailsec" ]] && sox "$f" /tmp/iris_aec_tail.wav trim "-${tailsec}" 2>/dev/null; then
+        f=/tmp/iris_aec_tail.wav
+    fi
+    sox "$f" -n stat 2>&1 | awk '/RMS +amplitude/{print $3}'
+}
+
 up() {
     if [[ -s "$STATE" ]]; then
         echo "AEC already loaded (module $(awk '{print $1}' "$STATE")). Run '$0 down' first." >&2
@@ -182,6 +192,53 @@ status() {
     [[ -n "$up_node" ]] && pw-link -l 2>/dev/null | grep -B3 "^${up_node}" | sed 's/^/  /' || echo "  (no live uplink)"
 }
 
+selftest() {
+    # Acoustic-loopback ERLE measurement — validates the canceller WITHOUT a call.
+    # Plays telephony-band noise out the speakers (through iris_aec_sink, so it is
+    # the AEC reference) and compares the residual in the cleaned mic (iris_aec_src)
+    # to the raw mic. ERLE = 20*log10(raw/cleaned) dB = how much echo was removed.
+    # Run with AGC OFF (webrtc.gain_control=0) and NO other audio playing, or the
+    # numbers are muddied (AGC changes the gain; un-referenced audio like music is
+    # not in the reference, so it shows up as uncancelled residual).
+    [[ -s "$STATE" ]] || { echo "AEC not loaded — run '$0 up' first." >&2; exit 1; }
+    command -v ffmpeg >/dev/null && command -v sox >/dev/null \
+        || { echo "selftest needs ffmpeg + sox." >&2; exit 1; }
+    local id mic spk; read -r id mic spk < "$STATE"
+    local dur=8 tailsec=4 sig=/tmp/iris_aec_test.wav
+    local raw=/tmp/iris_aec_raw.wav clean=/tmp/iris_aec_clean.wav floor=/tmp/iris_aec_floor.wav
+    echo "AEC self-test (acoustic loopback ERLE) — mic=$mic  spk=$spk"
+    echo "  Plays ~${dur}s of test noise out the speakers. AGC should be off; pause other audio."
+    sox -n -r 48000 -c 2 "$sig" synth "$dur" pinknoise sinc 300-3400 gain -3 2>/dev/null
+    echo "==> [1/2] noise floor — cleaned mic with no playback (${tailsec}s)…"
+    ffmpeg -hide_banner -loglevel error -f pulse -i iris_aec_src -t "$tailsec" -ac 1 -ar 48000 -y "$floor" </dev/null
+    local f_floor; f_floor=$(_rms "$floor")
+    echo "==> [2/2] echo run — playing noise, capturing raw + cleaned mic (${dur}s)…"
+    ffmpeg -hide_banner -loglevel error -f pulse -i "$mic"       -t "$dur" -ac 1 -ar 48000 -y "$raw"   </dev/null &
+    ffmpeg -hide_banner -loglevel error -f pulse -i iris_aec_src -t "$dur" -ac 1 -ar 48000 -y "$clean" </dev/null &
+    paplay --device="$AEC_SINK" "$sig"
+    wait
+    local f_raw f_clean; f_raw=$(_rms "$raw" "$tailsec"); f_clean=$(_rms "$clean" "$tailsec")
+    python3 - "$f_raw" "$f_clean" "$f_floor" <<'PY'
+import sys, math
+raw, clean, floor = (float(x) if x else 0.0 for x in sys.argv[1:4])
+db = lambda a, b: 20*math.log10(a/b) if a > 0 and b > 0 else float('nan')
+print(f"  raw mic (echo present) : RMS {raw:.5f}")
+print(f"  cleaned (residual)     : RMS {clean:.5f}")
+print(f"  noise floor (silence)  : RMS {floor:.5f}")
+erle = db(raw, clean)
+over = db(clean, floor)
+print(f"  ERLE (echo removed)    : {erle:5.1f} dB")
+print(f"  residual above floor   : {over:5.1f} dB")
+if erle >= 20 and (math.isnan(over) or over < 6):
+    print("  VERDICT: strong — residual at/near the noise floor (eliminating ≈everything).")
+elif erle >= 12:
+    print("  VERDICT: decent — some residual above floor; tune (AGC off, check routing/delay).")
+else:
+    print("  VERDICT: weak — echo largely uncancelled. Check the reference routing first.")
+PY
+    echo "  (raw/cleaned measured over the trailing ${tailsec}s, after the filter converges.)"
+}
+
 down() {
     unbridge || true
     if [[ ! -s "$STATE" ]]; then
@@ -201,6 +258,7 @@ case "${1:-}" in
     bridge)   bridge   ;;
     unbridge) unbridge ;;
     status)   status   ;;
+    selftest) selftest ;;
     down)     down     ;;
-    *) echo "usage: $0 {up|bridge|status|unbridge|down}" >&2; exit 2 ;;
+    *) echo "usage: $0 {up|bridge|status|selftest|unbridge|down}" >&2; exit 2 ;;
 esac
