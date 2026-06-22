@@ -260,12 +260,9 @@ def discover_sco_nodes() -> tuple[str | None, str | None]:
     return sink, source
 
 
-# SCO (HFP phone-call) AEC nodes — see TincanSCOAudio.
-_AEC_SINK = "iris_aec_sink"
-_AEC_SRC = "iris_aec_src"
-
-# PulseAudio source created by module-echo-cancel for the virtual-audio (Discord/Zoom) path.
-# Set up via scripts/virtual_audio.sh aec-up; enabled via IRIS_VA_AEC=1.
+# PulseAudio sink/source created by module-echo-cancel (scripts/aec_audio.sh up).
+# Shared by both the SCO and virtual-audio paths; enabled via IRIS_VA_AEC=1.
+_VA_AEC_SINK = "iris_va_aec_sink"
 _VA_AEC_SRC = "iris_va_aec_src"
 
 
@@ -284,11 +281,11 @@ class TincanSCOAudio(VirtualDeviceAudio):
 
     AEC (headphone-free speakerphone):
     Set ``aec=True`` after running ``scripts/aec_audio.sh up``.  The monitor no
-    longer plays through the default sink — it routes through ``iris_aec_sink``
+    longer plays through the default sink — it routes through ``iris_va_aec_sink``
     instead, which is the reference input for PipeWire's WebRTC echo-canceller.
-    Push-to-talk then captures from ``iris_aec_src`` (the cleaned mic: Iris's voice
-    subtracted).  Result: the operator can address Iris over open speakers without
-    echo.  Enabled via ``IRIS_AEC=1`` in the environment.
+    Push-to-talk then captures from ``iris_va_aec_src`` (the cleaned mic: Iris's
+    voice subtracted).  Result: the operator can address Iris over open speakers
+    without echo.  Enabled via ``IRIS_VA_AEC=1`` in the environment.
 
     This is **media only** — it knows nothing about ringing, answering, or call
     state. Signaling lives in tincan's ``im.tincan.Calls`` D-Bus interface
@@ -311,9 +308,9 @@ class TincanSCOAudio(VirtualDeviceAudio):
         rate: int = 16000,
         channels: int = 1,
     ) -> None:
-        # With AEC: push-to-talk captures from iris_aec_src (cleaned mic).
+        # With AEC: push-to-talk captures from iris_va_aec_src (cleaned mic).
         # Without AEC: capture_target=None → default mic.
-        capture = _AEC_SRC if aec else None
+        capture = _VA_AEC_SRC if aec else None
         super().__init__(sink, capture_target=capture, rate=rate, channels=channels)
         self.far_source = source  # the SCO downlink — the far party, for _far_stream
         self.far_backend = "pw"   # SCO source is a native PipeWire node -> pw-record
@@ -332,7 +329,7 @@ class TincanSCOAudio(VirtualDeviceAudio):
         if self.aec:
             # Route monitor through the AEC sink so it becomes the echo reference;
             # module-echo-cancel then subtracts it from the mic before capture.
-            return ["paplay", f"--device={_AEC_SINK}", wav]
+            return ["paplay", f"--device={_VA_AEC_SINK}", wav]
         # Default: local speakers, no --target.
         return ["pw-cat", "-p", wav]
 
@@ -399,7 +396,7 @@ def default_endpoint() -> AudioEndpoint:
                 "tincan-sco: no HFP/SCO sink found — is a call active on the dongle? "
                 "Set IRIS_SCO_SINK / IRIS_SCO_SOURCE to override."
             )
-        aec = settings.get_bool("IRIS_AEC")
+        aec = settings.get_bool("IRIS_VA_AEC")
         return TincanSCOAudio(sink, source, aec=aec)
     target = settings.get("IRIS_PLAYBACK_TARGET")
     if target:

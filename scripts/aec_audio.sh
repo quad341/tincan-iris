@@ -9,14 +9,14 @@
 # operator does not need a manual volume boost on the mic.
 #
 # Graph:
-#   Iris voice ──► iris_aec_sink ──► your speakers
-#                       │ (AEC reference)
-#   your mic ──────► [module-echo-cancel] ──► iris_aec_src  ──► push-to-talk
-#                        uses_agc=true
-#                        use_ns=true
+#   Iris voice ──► iris_va_aec_sink ──► your speakers
+#                        │ (AEC reference)
+#   your mic ──────► [module-echo-cancel] ──► iris_va_aec_src  ──► push-to-talk
+#                         uses_agc=true
+#                         use_ns=true
 #
-# iris_aec_sink replaces the default sink for the operator monitor.
-# iris_aec_src  replaces the default mic for push-to-talk capture.
+# iris_va_aec_sink replaces the default sink for the operator monitor.
+# iris_va_aec_src  replaces the default mic for push-to-talk capture.
 # AGC and NS mean no manual pactl volume boost needed on the mic (ti-ccc.10).
 #
 # Usage:
@@ -24,7 +24,7 @@
 #   scripts/aec_audio.sh down   # unload and restore
 #
 # Then launch Iris with:
-#   IRIS_AUDIO=tincan-sco IRIS_AEC=1 python -m iris.console
+#   IRIS_AUDIO=tincan-sco IRIS_VA_AEC=1 python -m iris.console
 #
 # Verification (operator-gated — requires live HFP call + speakers):
 #   1. Run scripts/aec_audio.sh up
@@ -43,13 +43,18 @@ up() {
         echo "Run '$0 down' first if you want to reload." >&2
         exit 1
     fi
-    echo "==> loading WebRTC AEC + AGC + NS (iris_aec_sink / iris_aec_src)"
+    # Unload any stale module loaded under the old iris_aec_src name.
+    if pactl list short modules | grep -q "iris_aec_src"; then
+        echo "==> unloading stale iris_aec_src module" >&2
+        pactl unload-module module-echo-cancel 2>/dev/null || true
+    fi
+    echo "==> loading WebRTC AEC + AGC + NS (iris_va_aec_sink / iris_va_aec_src)"
     pactl load-module module-echo-cancel \
         aec_method=webrtc \
         use_agc=true \
         use_ns=true \
-        source_name="${IRIS_AEC_SRC:-iris_aec_src}" \
-        sink_name="${IRIS_AEC_SINK:-iris_aec_sink}" \
+        source_name="${IRIS_VA_AEC_SRC:-iris_va_aec_src}" \
+        sink_name="${IRIS_VA_AEC_SINK:-iris_va_aec_sink}" \
         source_properties=device.description=Iris_AEC_Mic \
         sink_properties=device.description=Iris_AEC_Speaker \
         > "$STATE"
@@ -57,10 +62,10 @@ up() {
     cat <<'EOF'
 
 Ready.  Launch Iris with:
-  IRIS_AUDIO=tincan-sco IRIS_AEC=1 python -m iris.console
+  IRIS_AUDIO=tincan-sco IRIS_VA_AEC=1 python -m iris.console
 
-Iris's monitor routes through iris_aec_sink (the AEC reference sink).
-Push-to-talk captures from iris_aec_src (echo-cancelled, AGC-normalised, denoised mic).
+Iris's monitor routes through iris_va_aec_sink (the AEC reference sink).
+Push-to-talk captures from iris_va_aec_src (echo-cancelled, AGC-normalised, denoised mic).
 The far party hears a clean microphone — no Iris echo, no manual boost needed.
 
 Tear down:  scripts/aec_audio.sh down

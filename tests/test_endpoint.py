@@ -198,6 +198,29 @@ def test_default_endpoint_sco_raises_when_no_call(monkeypatch):
             default_endpoint()
 
 
+# --- TincanSCOAudio AEC mode (ti-gbz4.3) -------------------------------------
+
+def test_tincan_sco_aec_ptt_capture_uses_va_aec_src():
+    sco = TincanSCOAudio("bluez_output.AA_BB.1", "bluez_input.AA_BB.0", aec=True)
+    assert sco.capture_target == "iris_va_aec_src"
+
+
+def test_tincan_sco_aec_monitor_routes_through_va_aec_sink():
+    sco = TincanSCOAudio("bluez_output.AA_BB.1", "bluez_input.AA_BB.0", aec=True)
+    assert sco._monitor_cmd("/tmp/a.wav") == ["paplay", "--device=iris_va_aec_sink", "/tmp/a.wav"]
+
+
+def test_default_endpoint_sco_va_aec_sets_capture_target(monkeypatch):
+    monkeypatch.setenv("IRIS_AUDIO", "tincan-sco")
+    monkeypatch.setenv("IRIS_SCO_SINK", "bluez_output.AA_BB.1")
+    monkeypatch.setenv("IRIS_SCO_SOURCE", "bluez_input.AA_BB.0")
+    monkeypatch.setenv("IRIS_VA_AEC", "1")
+    ep = default_endpoint()
+    assert isinstance(ep, TincanSCOAudio)
+    assert ep.capture_target == "iris_va_aec_src"
+    assert ep.aec is True
+
+
 # --- IRIS_VA_AEC branching (ti-lfp) ------------------------------------------
 
 def test_default_endpoint_va_aec_sets_iris_va_aec_src(monkeypatch):
