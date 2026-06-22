@@ -5,7 +5,7 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory={REPO_PATH}
-ExecStart={PYTHON_KOKORO} {REPO_PATH}/iris/_kokoro_server.py \
+ExecStart={PYTHON_KOKORO} -m iris._kokoro_server \
     --model {REPO_PATH}/models/kokoro/kokoro-v1.0.onnx \
     --voices {REPO_PATH}/models/kokoro/voices-v1.0.bin
 Restart=on-failure

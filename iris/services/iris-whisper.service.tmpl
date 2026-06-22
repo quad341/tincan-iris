@@ -5,7 +5,7 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory={REPO_PATH}
-ExecStart={PYTHON_WHISPER} {REPO_PATH}/iris/_whisper_server.py \
+ExecStart={PYTHON_WHISPER} -m iris._whisper_server \
     --model {REPO_PATH}/models/whisper/small.en
 Restart=on-failure
 RestartSec=5
