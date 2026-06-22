@@ -283,6 +283,7 @@ class IrisConsole(App):
         self._call_contact_number: str = ""
         self._call_trust_eligible: bool = False
         self._in_call: bool = False
+        self._pre_call_muted: bool = False
         self._messages = MessageStore()
         self._roster = RosterStore()
 
@@ -370,6 +371,15 @@ class IrisConsole(App):
                     )
                 elif kind == "call_connected":
                     self._in_call = True
+                    # ti-gbz4.1: mute mic by default at call start (push-to-talk model)
+                    self._pre_call_muted = self.conductor.muted
+                    if not self.conductor.muted:
+                        self.conductor.toggle_mute()
+                    self._w("[yellow]call connected — mic muted (press [m] to unmute / push-to-talk)[/]")
+                    # ti-gbz4.2: stop far-party transcription gate
+                    if self._far_stream is not None:
+                        self._far_stream.stop()
+                        self._far_stream = None
                     if self._call_trust_eligible and self._call_contact_name:
                         self.query_one(ActiveCallCard).show_card(
                             self._call_contact_name
@@ -389,6 +399,9 @@ class IrisConsole(App):
                     self._call_trust_eligible = False
                     self._call_contact_name = ""
                     self._call_contact_number = ""
+                    # ti-gbz4.1: restore pre-call mute state
+                    if self.conductor.muted and not self._pre_call_muted:
+                        self.conductor.toggle_mute()
                     self.query_one(ActiveCallCard).hide_card()
                     session_id = ev[1] if len(ev) > 1 else ""
                     self._maybe_show_post_call_list(str(session_id))
@@ -492,6 +505,8 @@ class IrisConsole(App):
         iris-arm CLI (the spoken-grant path was removed — ti-qt1i.1.1). The far
         party can never self-escalate (this path has no grant branch). See ADR-0002.
         """
+        if self._in_call:
+            return  # ti-gbz4.2: downlink suppressed during SCO/HFP calls
         cmd = address(text)
         if cmd is None:
             self._w(f"[dim]them: {text}[/]")  # respondent, not addressing Iris
@@ -570,6 +585,10 @@ class IrisConsole(App):
         self._refresh_status()
 
     def action_far(self) -> None:
+        if self._in_call:
+            # ti-gbz4.2: far-party downlink is suppressed during SCO/HFP calls
+            self._w("[yellow]respondent mode blocked during call — far-party audio suppressed for privacy[/]")
+            return
         if self._far_stream is not None:
             self._far_stream.stop()
             self._far_stream = None
