@@ -1,4 +1,4 @@
-# ADR-0006 — Call handling model: an autonomous verb ladder, DND as a one-rung degrade, promote-don't-gate
+# ADR-0006 — Call handling & promotion/demotion: an autonomous verb ladder, DND degrade, and a single-attention control surface
 
 - **Status:** proposed (2026-06-24)
 - **Related:** [ADR-0002](0002-capability-gating-by-speaker-channel.md) (speaker identity = the audio channel — the *who*); [ADR-0004](0004-inbound-events-and-interrupt-handling.md) (the inbound-event source this layer reacts to); [ADR-0005](0005-trust-permission-and-assurance-model.md) (trust/permission/assurance — *what may be done*; this ADR is the policy layer that decides *what Iris does with an inbound call*, above that gate)
@@ -28,11 +28,12 @@ primitives); **iris owns policy** (which rule fires, the screening conversation,
 the notifications). `iris dial` is a thin client over `tincand.Dial`; an iris
 *screen* rule is policy that drives tincand primitives.
 
-This ADR specifies **the handling layer** — what Iris autonomously does with an
-inbound call. It deliberately defers *promotion* (how the operator is looped in /
-upgrades an outcome across the Linux notification fabric) and the *sources* that
-drive DND. Handling is specified first because, by the core invariant, handling
-must be complete **without** any human — so it stands alone.
+This ADR specifies **the handling layer** (what Iris autonomously does with an
+inbound call) *and* the **promotion/demotion layer** (how the operator steers a
+live call, plus the busy/DND posture). Handling is specified first because, by the
+core invariant, it must be complete **without** any human — so it stands alone;
+promotion/demotion is the optional control surface layered on top. Only the
+*implementation* (the always-on daemon, `ti-s9mm`) is deferred.
 
 ## The core invariant — promote, don't gate
 
@@ -68,6 +69,24 @@ Three corollaries shape everything below:
    talks to your caller. (An AI that picks up, is pleasant, then fobs an
    important caller off to a message is *insulting* — so a missed VIP gets plain
    voicemail, never an Iris-mediated message.)
+
+### The spine — Iris never infers what she can't know
+
+A rule the invariant keeps generating: **Iris must not act on intent or state she
+cannot actually observe.** It recurs everywhere —
+- she never **discloses your availability** to a caller (she can't know *why*
+  you're unavailable, and guessing leaks it) — every non-available outcome is a
+  plain, reason-free `take_message`;
+- **DND is reason-opaque** (she won't infer or expose *why* you don't want to
+  answer);
+- low-confidence STT **falls back to audio**, never a confidently-wrong (and, in
+  another language, insulting) transcript;
+- a **one-time action never writes standing** — "decline this call" could mean
+  "I'm in the bathroom" or "I can't stand them," and she can't tell, so changing a
+  contact's `handling_rule` is always a separate, deliberate edit.
+
+When in doubt she does the safe, non-presumptuous thing and leaves the inference
+to the human.
 
 ## The handling verbs
 
@@ -117,6 +136,26 @@ always a conscious operator decision (bottom). The autonomous machinery only
 moves a caller within the safe middle band `ring_through ↔ screen ↔
 take_message`, and **the worst it can ever do on its own is take a message.**
 
+### The catch-line — where Iris starts catching calls for you
+
+The ladder reads two ways at once: by **intrusiveness** (downward = bothers you
+less) and by **Iris-service** (downward = Iris catches more). They are the same
+order inverted, which is why the degrade `ring → screen` is good on both axes —
+less bother *and* Iris starts catching it. The fallback-on-ignore makes the
+service reading concrete and draws a line:
+
+```text
+VIP → ring_through   │   screen → take_message → ignore
+  ignore → voicemail  │   ignore → take a message
+  (Iris uninvolved)   │   (Iris catches it for you)
+```
+
+The divider between `ring_through` and `screen` **is** the commitment line
+(invariant #2): above it Iris catches nothing (a miss → voicemail); at/below it
+she catches your call as a message. That is *why* `ring → screen` is the
+meaningful DND degrade — it carries you across the line, turning "missed →
+voicemail" into "Iris took a message."
+
 ## Resolution
 
 For an inbound call, the effective verb is computed in two steps:
@@ -155,6 +194,92 @@ Other existing pieces this layer reuses: `ScreenCallFlow` (already implements
 rule editor, and tincand's `Dial`/`Answer`/`Hangup`/`CallState` + `IncomingCall`/
 `CallConnected`/ANCS surface.
 
+## Promotion & demotion — the operator's control surface
+
+Handling resolves every call on its own. **Promotion/demotion is the optional
+layer by which the operator steers a live call** — up toward engagement
+(*promote*) or down toward protection (*demote*) — always one-shot, always
+overridable, never required (the autonomous baseline still resolves if the
+operator does nothing). Demotion is also the **sanctioned conscious path to the
+bottom**: automatic machinery stops at `take_message`, so a deliberate demote is
+the only way a live call reaches `decline`.
+
+### It is a PC concern, not cross-device
+
+The phone is the *controlled device*, not a notification target: if the operator
+is going to use the phone, they use the phone. Iris's whole value is a **PC
+surface** so they *don't* have to. So promotion is PC-local — there is no
+cross-device/mobile fabric (no ntfy). "Cross-platform" means only PC desktops —
+Linux (GNOME/KDE/WMs), Mac, WSL — each a client of the daemon, hitting its local
+API. (No native Windows.)
+
+### The daemon is the floor; every UI is a client
+
+The **floor is the daemon deciding autonomously** (it works with zero clients).
+The CLI, a GUI, native desktop notifications, the TUI — all are **interchangeable,
+optional adjustment surfaces** over it. The desktop/TUI is *just one client*;
+logic lives in the daemon. There is no universal native renderer for notification
+*actions* (it is fragmented across GNOME/KDE/WMs/Mac/web), which is *why* the
+daemon owns a neutral choice-set and each client renders it however it can.
+
+### Three posture states (internal — never disclosed to a caller)
+
+- **available** — default; neither below active.
+- **busy** — **auto-detected, never set by hand:** a live conversation is in
+  progress. Detectors: **SCO active** (on a cell call, from tincand) or **desktop
+  mic-active** (on Discord/Zoom — the `ti-iznt` PipeWire signal). Internal
+  corollary: Iris's own **single-attention** gate (below) also forces degrade
+  while she is mid-engagement.
+- **DND** — a **chosen, reason-opaque** "treat me as unavailable" posture, and the
+  **catch-all for every non-call reason you're unavailable.** Set by a **manual
+  toggle**, a **schedule** (quiet hours), the **calendar** (auto during events),
+  or **desktop state** (fullscreen/presentation focus). One state, many sources.
+  It tracks *which* source **internally** — for the operator's own view and for
+  **auto-expiry** (night ends → off, meeting ends → off) — but **never discloses
+  the source** to a caller. DND degrades the ladder one rung (VIP-immune).
+
+busy and DND may both be active; available = neither. Neither is ever narrated to
+a caller (the spine): every non-available outcome is a plain `take_message`.
+
+### Single attention, and Iris controls SCO only
+
+**Iris engages exactly one live conversation at a time** (ride-along, screen,
+take_message, respond) — practically, not technically. And she can only *act on*
+the **SCO** path (via tincand); desktop audio she only *observes*. So for a second
+call:
+
+- **SCO-during-SCO** (a call during a call): one SCO link — Iris cannot engage the
+  second caller (no audio path), and today is not even notified of the `waiting`
+  call (`tincan-6t7ym`). She **stays out**; the carrier handles
+  call-waiting/voicemail. A future *swap* (hold #1, take #2) depends on that bead.
+- **desktop-during-SCO** (on Discord, a cell call arrives): paths are separate, so
+  Iris can take the cell caller's **message in the background, your desktop call
+  undisturbed** — the one non-disruptive direction. The only cost is her attention
+  (she pauses the ride-along, which your call never needed).
+
+### The action surface (a neutral, state-aware choice-set)
+
+The daemon emits, per decision point, a **neutral choice-set**; any client renders
+it and returns the pick over the daemon's **local API** (127.0.0.1 / D-Bus). The
+client stays dumb; the daemon decides which actions are valid and resolves the
+chosen one, scoped to the call.
+
+- **Per-call (ephemeral — this call only, never touches standing):**
+  `promote → put-through` ("take it"), or `swap` (only SCO-on-SCO, via
+  `tincan-6t7ym`); `demote → take_message` or `decline`.
+- **Global posture:** `DND on/off` (available ⇄ DND), and `DND until <end>`.
+  `busy` is auto, not an action.
+- **State-aware:** the valid set depends on current posture — e.g. `busy` offers
+  `swap` in place of `take it`.
+- **Contract:** daemon → `[{action_id, label, kind: promote|demote|toggle}]`;
+  client → chosen `action_id` + call ref. (Same shape as the external-LLM↔session
+  channel.)
+
+**Standing is separate and deliberate.** A per-call action *never* writes a
+contact's `handling_rule`; changing standing is an explicit edit (the contact
+editor). A one-time decline carries no information about whether it's a preference
+(the spine: never infer what you can't know).
+
 ## Consequences
 
 - Handling is **complete and autonomous**: with zero rules and no human, every
@@ -168,21 +293,18 @@ rule editor, and tincand's `Dial`/`Answer`/`Hangup`/`CallState` + `IncomingCall`
 
 ## Open questions (deliberately deferred)
 
-- **Promotion (the next pass).** *How* the operator is looped in and upgrades an
-  outcome, across the full Linux fabric: actionable desktop notifications, D-Bus,
-  Discord/ntfy, voice, the external-LLM↔session channel. Includes the one
-  handling↔promotion seam noted above: whether a DND-degraded `ring_through` (now
+- **Implementation — the always-on daemon (`ti-s9mm`).** This ADR is the policy;
+  building the headless daemon that enforces it — subscribing to tincand, owning
+  the posture state, exposing the local control API + the neutral choice-set, and
+  lifting orchestration out of `IrisConsole` — is the work. TUI / CLI / native
+  notifications become its clients.
+- **The handling↔promotion seam.** Whether a DND-degraded `ring_through` (now
   `screen`) still **announces the screened result to you** so you can grab it, vs.
-  silently messaging.
-- **DND/busy *sources*.** The condition is one state with many inputs: a
-  **schedule** (night mode), the **calendar** (Iris already reads gcal —
-  `calendar.py` — so auto-busy during events), a **manual toggle** (`iris busy` /
-  a notification action), and **desktop state** (a fullscreen/presentation app
-  focused, or mic-active — the same PipeWire signal as `ti-iznt`). What feeds the
-  state, and the precedence among sources.
+  silently messaging. (A promotion-surface detail; default to announce.)
 - **Representation & storage.** Per-contact verbs live in the roster today; where
-  the *conditional* layer (schedules, time-windows) and the busy-state live, and
-  the authoring surface (`iris rule …`? config? the contacts editor?).
+  the *conditional* layer (schedules, time-windows) and the **DND posture + its
+  source/expiry** live, and the authoring surface (`iris rule …`? config? the
+  contacts editor?).
 - **Caller-side STT robustness & i18n (roadmap — "enable others," not today).**
   Today STT is faster-whisper `small.en` with `language="en"` pinned — tuned for
   clean American English; weak on heavy accents and unable to do other languages
