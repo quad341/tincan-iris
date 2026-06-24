@@ -72,6 +72,131 @@ def test_ride_along_bridges_aec_when_endpoint_is_aec():
     asyncio.run(scenario())
 
 
+def test_far_gate_announces_before_listening_on_call():
+    """ti-rqhn: on a call, the first [f] auto-announces (consent) and does NOT yet
+    open far-party transcription — the gate opens only after the announcement."""
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._in_call = True
+            app._far_announced = False
+            app._announce_then_hear_far = MagicMock()
+            app._start_far_stream = MagicMock()
+            app.action_far()
+            app._announce_then_hear_far.assert_called_once()
+            app._start_far_stream.assert_not_called()
+            assert app._far_stream is None
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_far_announced_event_opens_gate():
+    """ti-rqhn: when the announcement actually played, far_announced(ok=True) opens
+    the gate (far-party transcription starts) and records consent."""
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._start_far_stream = MagicMock()
+            app._log_consent = MagicMock()
+            app._far_announced = False
+            app.events.put(("far_announced", True, "Hi, this is Iris."))
+            app._drain()
+            assert app._far_announced is True
+            app._start_far_stream.assert_called_once()
+            app._log_consent.assert_called_once()
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_far_announced_failure_keeps_gate_closed():
+    """ti-rqhn FAIL-CLOSED: if the announcement did NOT play (ok=False), Iris does
+    not listen and no consent is recorded."""
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._start_far_stream = MagicMock()
+            app._log_consent = MagicMock()
+            app._far_announced = False
+            app.events.put(("far_announced", False, "Hi, this is Iris."))
+            app._drain()
+            assert app._far_announced is False
+            app._start_far_stream.assert_not_called()
+            app._log_consent.assert_not_called()
+            assert app._far_stream is None
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_far_gate_no_call_endpoint_fails_closed():
+    """ti-rqhn FAIL-CLOSED: with no call audio endpoint (far_source is None),
+    enabling far listening neither announces nor opens the gate."""
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._in_call = True
+            app._far_announced = False
+            app.mic = MagicMock(far_source=None)   # no SCO downlink to announce into
+            app._start_far_stream = MagicMock()
+            app.action_far()
+            app._start_far_stream.assert_not_called()
+            assert app._far_announced is False
+            assert app._far_stream is None
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_far_gate_already_announced_starts_directly():
+    """ti-rqhn: after consent is announced this call, [f] toggles listening directly
+    (no re-announce)."""
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._in_call = True
+            app._far_announced = True
+            app._announce_then_hear_far = MagicMock()
+            app._start_far_stream = MagicMock()
+            app.action_far()
+            app._start_far_stream.assert_called_once()
+            app._announce_then_hear_far.assert_not_called()
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_consent_log_records_announcement(tmp_path, monkeypatch):
+    """ti-rqhn: every announcement is written to an append-only consent record."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._call_contact_number = "+15555550123"
+            app._log_consent("Hi, this is Iris.")
+            log = tmp_path / "iris" / "consent.log"
+            assert log.exists()
+            content = log.read_text()
+            assert "+15555550123" in content
+            assert "supervised" in content
+            assert "Hi, this is Iris." in content
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
 def test_console_mounts_and_mute_key_toggles():
     async def scenario():
         app = IrisConsole()
