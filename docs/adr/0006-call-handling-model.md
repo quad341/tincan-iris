@@ -183,9 +183,42 @@ rule editor, and tincand's `Dial`/`Answer`/`Hangup`/`CallState` + `IncomingCall`
 - **Representation & storage.** Per-contact verbs live in the roster today; where
   the *conditional* layer (schedules, time-windows) and the busy-state live, and
   the authoring surface (`iris rule …`? config? the contacts editor?).
-- **Caller-side STT robustness.** `screen` and `take_message` engage the caller
-  through whisper STT; accent/language coverage there is an accessibility concern
-  for non-operator callers (tracked separately).
+- **Caller-side STT robustness & i18n (roadmap — "enable others," not today).**
+  Today STT is faster-whisper `small.en` with `language="en"` pinned — tuned for
+  clean American English; weak on heavy accents and unable to do other languages
+  at all. `screen`/`take_message` are the caller-facing paths, over narrowband
+  telephony SCO (the hardest STT input). Agreed direction:
+  - **Audio is the retained source of truth.** `take_message` captures and keeps
+    the recording; the transcript is a *derived, regenerable* artifact. This is
+    the universal inclusive floor — anyone can leave a message in any
+    language/accent, and a better model (or a newly-added language) can
+    re-transcribe the backlog later because the audio was kept. (`message_store`
+    is transcript-only today — keeping audio is the gap.)
+  - **Split STT by latency.** Live paths (operator commands, `screen`,
+    ride-along) stay on a fast/small model. `take_message` is asynchronous, so it
+    transcribes **offline with a bigger/better multilingual model** — no live
+    latency cost. A natural background-queue job for the always-on daemon.
+  - **Per-operator language set (1–2).** Transcribe the operator's chosen
+    languages well; out-of-set → keep **audio only** (never a false transcript).
+    Infra v1 can wire a single language (English), mechanism extensible; consult a
+    real multilingual user before building the multi-language UX.
+  - **Minimum-confidence transcript gate (dignity, not just accuracy).** Below a
+    confidence floor — faster-whisper exposes `avg_logprob` and a language-detection
+    probability, but iris surfaces only `no_speech_prob` (used today to *silently
+    drop*) — **suppress the transcript and fall back to audio** (async
+    `take_message`) or re-ask once, then take-message-with-audio (live `screen`). A
+    confidently-wrong transcript of another language isn't just useless, it's
+    *insulting*; the audio is the respectful, truthful fallback. Never display a
+    sub-threshold transcript, and never degrade to silence.
+  - **Language vs locale.** Whisper selects by *language* (`en`) — bare language
+    is correct *for Whisper's API* (it doesn't accept locales), so all English
+    accents collapse to `en`. Accent/dialect is a *locale* concern (`en_US` vs
+    `en_SG`): carry locale (operator's, per-contact) as metadata *above* the
+    Whisper param — to drive model/threshold/expectations and the command-surface
+    i18n — and never pass a locale into Whisper's `language`.
+  - **i18n for the command/response surface** (localizing Iris's own vocabulary
+    and replies, plus locale-correct dates/numbers/spelling) is a separate, later
+    track.
 - **Beyond calls.** Inbound **messages** (SMS/iMessage via ANCS/MAP) are the same
   pattern with a smaller verb set (notify/ignore); designed later.
 - **The command CLI surface.** Exact verbs/outputs for the imperative plane
