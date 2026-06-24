@@ -17,6 +17,61 @@ from iris.console.conductor import State  # noqa: E402
 from iris.trust import TrustMode  # noqa: E402
 
 
+def test_ride_along_attaches_and_restores_endpoint():
+    """ti-veyx: call_connected adopts TincanCallControl's SCO endpoint for Iris's
+    audio (so this session rides the call); call_ended restores the local one."""
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            local = app._local_mic
+            assert app.mic is local and app.conductor.mic is local
+            sco_ep = MagicMock(aec=False)          # aec=False → no AEC shell-out
+            app.ctrl.endpoint = sco_ep
+            app._attach_call_audio()
+            assert app.mic is sco_ep
+            assert app.conductor.mic is sco_ep
+            app._detach_call_audio()
+            assert app.mic is local
+            assert app.conductor.mic is local
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_ride_along_no_sco_endpoint_stays_local():
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            local = app._local_mic
+            app.ctrl.endpoint = None               # discovery found no SCO nodes
+            app._attach_call_audio()
+            assert app.mic is local                # unchanged
+            app._detach_call_audio()               # no-op, must not raise
+            assert app.mic is local
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_ride_along_bridges_aec_when_endpoint_is_aec():
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._aec = MagicMock(return_value=True)   # don't shell out in tests
+            app.ctrl.endpoint = MagicMock(aec=True)
+            app._attach_call_audio()
+            app._aec.assert_any_call("bridge")
+            app._detach_call_audio()
+            app._aec.assert_any_call("unbridge")
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
 def test_console_mounts_and_mute_key_toggles():
     async def scenario():
         app = IrisConsole()

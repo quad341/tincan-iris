@@ -27,8 +27,10 @@ from __future__ import annotations
 import os
 import queue
 import re
+import subprocess
 import time
 from datetime import datetime
+from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -54,6 +56,9 @@ from ..proactive_store import ProactiveStore
 from ..roster import RosterStore
 from ..trust import TrustMode
 from .conductor import Conductor, State
+
+# ti-veyx: WebRTC AEC bring-up / SCO bridge for the seamless phone-call ride-along.
+_AEC_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "aec_audio.sh"
 
 # Addressed stop words -> a hard interrupt (cut her off now, no spoken reply).
 _STOP = re.compile(
@@ -277,6 +282,7 @@ class IrisConsole(App):
         self.ctrl = TincanCallControl(auto_answer=False, emit=self.events.put)
         self.brain = Brain(ctrl=self.ctrl)
         self.mic = default_endpoint()
+        self._local_mic = self.mic  # ti-veyx: endpoint to restore when a call ends
         self.conductor = Conductor(
             self.stt, self.brain, self.tts, self.mic,
             emit=self.events.put, pick=filler_picker(),
@@ -327,6 +333,7 @@ class IrisConsole(App):
             self._w("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
         self.set_interval(0.05, self._drain)
         self.ctrl.start()  # listen for tincan call signals (daemon thread; safe if bus down)
+        self._ensure_aec_up()  # ti-veyx: load the WebRTC AEC once (idempotent) for feedback-free call audio
 
         def _current_mode() -> str:
             if self._far_stream is not None:
@@ -399,6 +406,9 @@ class IrisConsole(App):
                         self.query_one(ActiveCallCard).show_card(
                             self._call_contact_name
                         )
+                    # ti-veyx: ride along on THIS console session — adopt the live
+                    # SCO endpoint instead of relaunching with IRIS_AUDIO=tincan-sco.
+                    self._attach_call_audio()
                 elif kind in ("far_trust", "trust"):
                     card = self.query_one(ActiveCallCard)
                     if "visible" in card.classes:
@@ -418,6 +428,7 @@ class IrisConsole(App):
                     if self.conductor.muted and not self._pre_call_muted:
                         self.conductor.toggle_mute()
                     self.query_one(ActiveCallCard).hide_card()
+                    self._detach_call_audio()  # ti-veyx: restore local audio
                     session_id = ev[1] if len(ev) > 1 else ""
                     self._maybe_show_post_call_list(str(session_id))
                 elif kind == "take_message_done":
@@ -457,6 +468,66 @@ class IrisConsole(App):
                     self._refresh_status()
         except queue.Empty:
             pass
+
+    # --- ti-veyx: seamless phone-call ride-along (adopt the live SCO endpoint) ---
+
+    def _aec(self, action: str) -> bool:
+        """Run ``scripts/aec_audio.sh <action>`` (up / bridge / unbridge).
+
+        Best-effort: the AEC is opt-in (``IRIS_AEC``) and ``up`` deliberately exits
+        non-zero when already loaded, so a failure here is never fatal — the call
+        still works, just without echo cancellation. Returns True on rc==0.
+        """
+        if not _AEC_SCRIPT.exists():
+            return False
+        try:
+            proc = subprocess.run(
+                ["bash", str(_AEC_SCRIPT), action],
+                capture_output=True, text=True, timeout=15,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            self._w(f"[dim]aec {action} failed: {exc}[/]")
+            return False
+        return proc.returncode == 0
+
+    def _ensure_aec_up(self) -> None:
+        """Load the WebRTC AEC once at startup when ``IRIS_AEC`` is set.
+
+        Keeping it always-loaded (not per-call) is the ti-veyx design: the
+        canceller is harmless when idle / on a headset and avoids a module load on
+        every call. A second ``up`` just no-ops.
+        """
+        if settings.get_bool("IRIS_AEC"):
+            self._aec("up")
+
+    def _attach_call_audio(self) -> None:
+        """On CallConnected, adopt the live SCO endpoint that TincanCallControl
+        built so THIS console session rides the call — Iris's replies go to the
+        call uplink (the far party hears her) and push-to-talk captures the
+        echo-cancelled mic — without relaunching under ``IRIS_AUDIO=tincan-sco``.
+
+        Bridging the SCO into the AEC also routes the far-party downlink to the
+        operator's speakers feedback-free. Far-party *transcription* stays gated by
+        ti-gbz4.2 (see ``action_far``) until the ti-rqhn consent gate lands.
+        """
+        ep = getattr(self.ctrl, "endpoint", None)
+        if ep is None:  # SCO nodes not discoverable (no live call) — stay on local audio
+            return
+        self.mic = ep
+        self.conductor.mic = ep
+        if getattr(ep, "aec", False):
+            self._aec("bridge")
+        self._w("[dim]ride-along: on call audio — Iris speaks to the call[/]")
+
+    def _detach_call_audio(self) -> None:
+        """On CallEnded, drop the SCO bridge and restore the local audio endpoint."""
+        if self.mic is self._local_mic:
+            return  # never attached (e.g. no SCO nodes) — nothing to restore
+        if getattr(self.mic, "aec", False):
+            self._aec("unbridge")
+        self.mic = self._local_mic
+        self.conductor.mic = self._local_mic
+        self._w("[dim]ride-along: call ended — restored local audio[/]")
 
     def _on_list_event(self, ev: tuple) -> None:
         """Handle list-related events from ListSkill background threads."""

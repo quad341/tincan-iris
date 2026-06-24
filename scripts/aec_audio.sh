@@ -161,6 +161,13 @@ bridge() {
     done < <(pw-link -i 2>/dev/null | sed 's/:.*//' | sort -u)
     _link "$down_node" "$AEC_SINK"
     # Invariant 2: cleaned mic -> SCO uplink (what the far party hears).
+    # First drop any RAW source -> uplink (e.g. a stale mic->uplink link the session
+    # manager restored): only the echo-cancelled mic may reach the far party, else
+    # they get the raw, echo-laden mic and a feedback path back through the speakers.
+    while read -r src; do
+        [[ "$src" == "$AEC_SRC" ]] && continue
+        _unlink "$src" "$up_node"
+    done < <(pw-link -o 2>/dev/null | sed 's/:.*//' | sort -u)
     echo "==> routing the cleaned mic (iris_aec_src) onto the SCO uplink"
     _link "$AEC_SRC" "$up_node"
     echo "==> bridged. Verify with: $0 status"
