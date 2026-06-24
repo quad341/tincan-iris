@@ -60,6 +60,15 @@ from .conductor import Conductor, State
 # ti-veyx: WebRTC AEC bring-up / SCO bridge for the seamless phone-call ride-along.
 _AEC_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "aec_audio.sh"
 
+# ti-rqhn: consent gate. Iris ALWAYS announces itself before transcribing the far
+# party on a call — assume listening = recording (WA is all-party consent), never
+# silently capture. The phrase is configurable via IRIS_CALL_ANNOUNCE; we always
+# announce regardless.
+_DEFAULT_ANNOUNCE = (
+    "Hi, this is Iris, an A.I. assistant on this call. "
+    "I'll be listening and may respond."
+)
+
 # Addressed stop words -> a hard interrupt (cut her off now, no spoken reply).
 _STOP = re.compile(
     r"^\s*(?:stop|stand[ -]?down|cancel|never ?mind|quiet|enough|shush|hush)\b",
@@ -303,6 +312,7 @@ class IrisConsole(App):
         self._call_trust_eligible: bool = False
         self._in_call: bool = False
         self._pre_call_muted: bool = False
+        self._far_announced: bool = False  # ti-rqhn: announced consent to the far party this call?
         self._follow_up_until: float = 0.0
         self._messages = MessageStore()
         self._roster = RosterStore()
@@ -409,6 +419,11 @@ class IrisConsole(App):
                     # ti-veyx: ride along on THIS console session — adopt the live
                     # SCO endpoint instead of relaunching with IRIS_AUDIO=tincan-sco.
                     self._attach_call_audio()
+                    # ti-rqhn: re-announce every call — never assume prior consent.
+                    self._far_announced = False
+                    # ti-rqhn screening seam (D2, not built): when auto_answer
+                    # screening lands, auto-announce here on pickup BEFORE enabling
+                    # far-party transcription (the gate stays the same).
                 elif kind in ("far_trust", "trust"):
                     card = self.query_one(ActiveCallCard)
                     if "visible" in card.classes:
@@ -419,6 +434,15 @@ class IrisConsole(App):
                     self._refresh_status()
                 elif kind == "armed":
                     self._refresh_status()
+                elif kind == "far_announced":
+                    # ti-rqhn: open the gate ONLY if the announcement actually played
+                    # (fail-closed). Record consent only for announcements that happened.
+                    if len(ev) > 1 and ev[1]:
+                        self._far_announced = True
+                        self._log_consent(ev[2] if len(ev) > 2 else "")
+                        self._start_far_stream()
+                    else:
+                        self._w("[red]announcement did not play — NOT listening (consent not established)[/]")
                 elif kind == "call_ended":
                     self._in_call = False
                     self._call_trust_eligible = False
@@ -429,6 +453,7 @@ class IrisConsole(App):
                         self.conductor.toggle_mute()
                     self.query_one(ActiveCallCard).hide_card()
                     self._detach_call_audio()  # ti-veyx: restore local audio
+                    self._far_announced = False  # ti-rqhn: reset consent gate for next call
                     session_id = ev[1] if len(ev) > 1 else ""
                     self._maybe_show_post_call_list(str(session_id))
                 elif kind == "take_message_done":
@@ -685,10 +710,7 @@ class IrisConsole(App):
         self._refresh_status()
 
     def action_far(self) -> None:
-        if self._in_call:
-            # ti-gbz4.2: far-party downlink is suppressed during SCO/HFP calls
-            self._w("[yellow]respondent mode blocked during call — far-party audio suppressed for privacy[/]")
-            return
+        # Toggle OFF (either mode).
         if self._far_stream is not None:
             self._far_stream.stop()
             self._far_stream = None
@@ -696,6 +718,17 @@ class IrisConsole(App):
             self._w("[yellow]no longer hearing the respondent[/]")
             self._refresh_status()
             return
+        # ti-rqhn consent gate: on a call, Iris must ANNOUNCE itself before it may
+        # transcribe the far party (WA all-party consent — never silently capture).
+        # The announcement auto-fires on the first enable; the gate opens only after
+        # it has played (see _announce_then_hear_far -> the "far_announced" event).
+        if self._in_call and not self._far_announced:
+            self._announce_then_hear_far()
+            return
+        self._start_far_stream()
+
+    def _start_far_stream(self) -> None:
+        """Open far-party transcription on the current endpoint's far source."""
         src = self.mic.far_source or "iris_ear.monitor"
         stream = StreamingTranscriber(
             self._on_heard_far, source=src, backend=self.mic.far_backend, label="far"
@@ -709,6 +742,41 @@ class IrisConsole(App):
         if src == "iris_ear.monitor":
             self._w("[dim]set the app's OUTPUT to Iris_Ear[/]")
         self._refresh_status()
+
+    def _announce_then_hear_far(self) -> None:
+        """ti-rqhn: play the consent announcement into the call uplink, then — ONLY
+        if it actually played — open far-party transcription. FAIL-CLOSED: if the
+        announcement can't be delivered (no call endpoint, or a TTS/playback error),
+        Iris does NOT listen. The far party is never captured without an announcement."""
+        if not getattr(self.mic, "far_source", None):
+            # No live call audio endpoint to announce into / hear from -> fail closed.
+            self._w("[red]no call audio endpoint — not announcing or listening (consent gate fail-closed)[/]")
+            return
+        phrase = settings.get("IRIS_CALL_ANNOUNCE", "") or _DEFAULT_ANNOUNCE
+        self._w(f"[yellow]announcing to the call (consent): {phrase}[/]")
+
+        def _play() -> None:
+            ok = False
+            try:
+                self.mic.start_playback(self.tts.synth(phrase)).wait()
+                ok = True
+            except Exception:  # noqa: BLE001 — any failure => fail closed (do not listen)
+                ok = False
+            self.events.put(("far_announced", ok, phrase))
+
+        self.run_worker(_play, thread=True)
+
+    def _log_consent(self, phrase: str) -> None:
+        """Append an append-only consent record (the all-party-consent artifact):
+        timestamp, far-party number, mode, and the announced phrase."""
+        base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+        num = self._call_contact_number or self._call_contact_name or "unknown"
+        try:
+            os.makedirs(os.path.join(base, "iris"), exist_ok=True)
+            with open(os.path.join(base, "iris", "consent.log"), "a", buffering=1) as f:
+                f.write(f"{datetime.now().isoformat()}\tsupervised\t{num}\t{phrase}\n")
+        except OSError:
+            pass
 
     def action_open_list_view(self) -> None:
         """Open PostCallListView for the most recent active list."""
