@@ -572,3 +572,35 @@ class RosterStore:
             )
             added += 1
         return ImportResult(added=added, skipped=skipped, conflicts=conflicts)
+
+
+class PostureStore:
+    """Thin helper that owns the posture row in the roster DB.
+
+    The daemon calls ``ensure_defaults()`` at first start to insert posture
+    id=1 if it doesn't already exist.  All runtime state is kept in-memory
+    by ``PostureManager``; this class is DB-only.
+    """
+
+    def __init__(self, path: str | Path | None = None) -> None:
+        self.path = Path(path) if path else _DEFAULT_PATH
+
+    def _connect(self) -> sqlite3.Connection:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        # Trigger roster migration so the posture table exists.
+        RosterStore(self.path)._connect().close()
+        return conn
+
+    def ensure_defaults(self) -> None:
+        """Insert posture row id=1 with dnd=0 if absent (idempotent)."""
+        conn = self._connect()
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO posture (id, dnd, dnd_source, dnd_expires,"
+                " busy, busy_source, updated_at) VALUES (1, 0, 'manual', NULL, 0, 'sco', 0)"
+            )
+            conn.commit()
+        finally:
+            conn.close()
