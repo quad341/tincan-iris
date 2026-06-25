@@ -29,6 +29,14 @@ def rule_badge(rule: str) -> str:
     return _map.get(rule, rule)
 
 
+VERB_DESCRIPTION: dict[str, str] = {
+    "ring_with_announcement": "Iris announced caller by voice. Phone is ringing — Iris has NOT answered.",
+    "ring_through":           "Phone is ringing. Iris has NOT answered.",
+    "screen":                 "Iris answered and is screening the caller.",
+    "take_message":           "Iris answered and is taking a message.",
+}
+
+
 def char_counter_text(n: int) -> str:
     """Return counter markup with optional near-limit warning."""
     if n >= _NOTES_MAX:
