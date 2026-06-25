@@ -482,6 +482,17 @@ class IrisConsole(App):
                     self._w(
                         f"[b yellow]🔔[/] {ev[1] if len(ev) > 1 else ''}  [dim](proactive)[/]"
                     )
+                elif kind == "mayor_reply":
+                    # ti-h9di.3: mayor reply delivered via SSE listener.
+                    # Display in transcript (no-audio path); also speak if unmuted.
+                    reply_text = ev[1] if len(ev) > 1 else ""
+                    if reply_text:
+                        self._w(f"[b magenta]mayor[/] → iris: {reply_text}")
+                        if self.conductor.state is State.IDLE:
+                            self.run_worker(
+                                lambda t=reply_text: self.conductor.say(t),
+                                thread=True, exclusive=True,
+                            )
                 elif kind == "filler":
                     self._note = f"… {ev[1]}"
                     self._refresh_status()

@@ -43,6 +43,12 @@ def test_local_lanes_always_present(stores):
     assert "roster_add_contact" in names         # roster
 
 
+def test_delegate_lane_always_present(stores):
+    # Operator-only iris→mayor delegation is always registered (gc handles the send).
+    names = {s.name for s in optional_skills(**stores)}
+    assert {"delegate_to_mayor", "delegate_confirm", "delegate_cancel"} <= names
+
+
 def test_email_absent_when_unconfigured(stores):
     names = {s.name for s in optional_skills(**stores)}
     assert "read_email" not in names
