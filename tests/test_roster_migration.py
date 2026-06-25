@@ -105,7 +105,7 @@ def test_migration_schema_version_set_to_1(tmp_path):
     conn = sqlite3.connect(str(db))
     row = conn.execute("SELECT version FROM _schema_version WHERE id=1").fetchone()
     conn.close()
-    assert row[0] == 1
+    assert row[0] == 2  # v0→v1→v2 migrations both run
 
 
 def test_migration_existing_contacts_preserved(tmp_path):
@@ -119,12 +119,12 @@ def test_migration_existing_contacts_preserved(tmp_path):
 
 def test_migration_idempotent_second_open_does_not_re_migrate(tmp_path):
     db = _v0_db(tmp_path / "roster.db")
-    RosterStore(db).all()   # first open — migrates
+    RosterStore(db).all()   # first open — migrates v0→v1→v2
     RosterStore(db).all()   # second open — should not corrupt anything
     conn = sqlite3.connect(str(db))
     version = conn.execute("SELECT version FROM _schema_version WHERE id=1").fetchone()[0]
     conn.close()
-    assert version == 1
+    assert version == 2
 
 
 # ---------------------------------------------------------------------------

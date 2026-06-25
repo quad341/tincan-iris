@@ -1,4 +1,4 @@
-"""Contact roster — ADR-0005 data model and storage.
+"""Contact roster — ADR-0005/ADR-0006 data model and storage.
 
 Each contact has: display_name, phone_e164 (nullable after v1), handling_rule,
 trust_tier, relationship_notes, and summary.  Multi-channel addresses live in
@@ -8,17 +8,26 @@ Schema versioning: _schema_version tracks the migration level. _connect() runs
 versioned migrations once on each connection. Migration is forward-only and
 transactional; the version counter updates only on commit.
 
+handling_rule values (v2+): ring_through, ring_with_announcement, screen,
+take_message, ignore  (v1 names: normal, vip, block — renamed in migration v2)
+
 Import semantics: additive only — contacts already on the roster by phone
 number are skipped. The caller receives a conflict summary so the console
 can display 'N contacts skipped — different display names, review in Contacts'.
+
+Posture table (v2+): owned by this module; row id=1 is auto-inserted at daemon
+first-start (not here). handling_schedules is a v2 stub table (empty, v1 placeholder).
 """
 from __future__ import annotations
 
+import logging
 import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+_log = logging.getLogger(__name__)
 
 _DEFAULT_PATH = Path.home() / ".local" / "share" / "iris" / "roster.db"
 
@@ -56,7 +65,14 @@ CREATE INDEX IF NOT EXISTS ca_by_channel_value ON contact_addresses(channel, val
 CREATE INDEX IF NOT EXISTS ca_by_contact       ON contact_addresses(contact_id);
 """
 
-_HANDLING_RULES = ("normal", "vip", "screen", "take_message", "block")
+# v2 enum renames: old name → new name
+_V2_ENUM_RENAMES = {
+    "normal": "ring_through",
+    "vip":    "ring_with_announcement",
+    "block":  "ignore",
+}
+
+_HANDLING_RULES = ("ring_through", "ring_with_announcement", "screen", "take_message", "ignore")
 _TRUST_TIERS = ("demo", "full")
 
 # Reserved contact id for the "unknown / private" sentinel.  id=0 is never
@@ -69,7 +85,7 @@ class Contact:
     id: int
     display_name: str
     phone_e164: str | None  # nullable after v1; may be None for non-phone contacts
-    handling_rule: str  # 'normal' | 'vip' | 'screen' | 'take_message' | 'block'
+    handling_rule: str  # ring_through | ring_with_announcement | screen | take_message | ignore
     trust_tier: str     # 'demo' | 'full'
     relationship_notes: str
     created_at: float
@@ -117,7 +133,7 @@ class RosterProvider(Protocol):
         self,
         display_name: str,
         phone_e164: str = "",
-        handling_rule: str = "normal",
+        handling_rule: str = "ring_through",
         trust_tier: str = "demo",
         relationship_notes: str = "",
         addresses: list[tuple[str, str]] | None = None,
@@ -149,10 +165,15 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         "INSERT OR IGNORE INTO _schema_version (id, version) VALUES (1, 0)"
     )
     conn.commit()
-    row = conn.execute("SELECT version FROM _schema_version WHERE id=1").fetchone()
-    version = row[0] if row else 0
-    if version < 1:
+
+    def _version() -> int:
+        row = conn.execute("SELECT version FROM _schema_version WHERE id=1").fetchone()
+        return row[0] if row else 0
+
+    if _version() < 1:
         _migrate_v0_to_v1(conn)
+    if _version() < 2:
+        _migrate_v1_to_v2(conn)
 
 
 def _migrate_v0_to_v1(conn: sqlite3.Connection) -> None:
@@ -236,6 +257,67 @@ def _migrate_v0_to_v1(conn: sqlite3.Connection) -> None:
 
     # Mark migration complete.
     conn.execute("UPDATE _schema_version SET version=1 WHERE id=1")
+    conn.commit()
+
+
+def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
+    """v1 → v2: rename handling_rule enums; add posture + handling_schedules tables."""
+    # Read contacts before the transaction (safe read-only).
+    contacts = conn.execute("SELECT id, handling_rule FROM contacts").fetchall()
+
+    known_new = set(_HANDLING_RULES)
+    updates: list[tuple[str, int]] = []
+    for contact_id, rule in contacts:
+        if rule in known_new:
+            continue  # unchanged: screen / take_message carry over as-is
+        new_rule = _V2_ENUM_RENAMES.get(rule)
+        if new_rule is None:
+            _log.warning(
+                "roster migration v2: unknown handling_rule %r on contact id=%d "
+                "— falling back to ring_through",
+                rule,
+                contact_id,
+            )
+            new_rule = "ring_through"
+        updates.append((new_rule, contact_id))
+
+    # All three enum renames + new tables + version bump in one transaction.
+    conn.execute("BEGIN")
+    for new_rule, contact_id in updates:
+        conn.execute(
+            "UPDATE contacts SET handling_rule=? WHERE id=?",
+            (new_rule, contact_id),
+        )
+
+    # posture: id=1 row is NOT inserted here — daemon first-start does that.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS posture (
+            id          INTEGER PRIMARY KEY CHECK (id = 1),
+            dnd         INTEGER NOT NULL DEFAULT 0,
+            dnd_source  TEXT    NOT NULL DEFAULT 'manual',
+            dnd_expires REAL,
+            busy        INTEGER NOT NULL DEFAULT 0,
+            busy_source TEXT    NOT NULL DEFAULT 'sco',
+            updated_at  REAL    NOT NULL DEFAULT 0
+        )
+    """)
+
+    # handling_schedules: v1 stub — empty, no rows inserted.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS handling_schedules (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            name          TEXT    NOT NULL,
+            schedule_type TEXT    NOT NULL,
+            days_of_week  TEXT    NOT NULL,
+            start_time    TEXT    NOT NULL,
+            end_time      TEXT    NOT NULL,
+            action        TEXT    NOT NULL,
+            enabled       INTEGER NOT NULL DEFAULT 1,
+            created_at    REAL    NOT NULL
+        )
+    """)
+
+    conn.execute("UPDATE _schema_version SET version=2 WHERE id=1")
     conn.commit()
 
 
@@ -355,7 +437,7 @@ class RosterStore:
         self,
         display_name: str,
         phone_e164: str = "",
-        handling_rule: str = "normal",
+        handling_rule: str = "ring_through",
         trust_tier: str = "demo",
         relationship_notes: str = "",
         addresses: list[tuple[str, str]] | None = None,
@@ -484,7 +566,7 @@ class RosterStore:
             self.add(
                 display_name=name,
                 phone_e164=phone,
-                handling_rule=entry.get("handling_rule", "normal"),
+                handling_rule=entry.get("handling_rule", "ring_through"),
                 trust_tier=entry.get("trust_tier", "demo"),
                 relationship_notes=entry.get("relationship_notes", ""),
             )
