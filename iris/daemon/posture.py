@@ -57,9 +57,25 @@ class PostureManager:
         return conn
 
     def _ensure_row(self) -> None:
-        """Insert posture singleton row at first-start if absent."""
+        """Ensure the posture singleton row exists.
+
+        The posture table is created by roster migration v2.  If called before any
+        RosterStore method has triggered the migration (e.g. in tests), we create
+        the table here so PostureManager is self-sufficient.
+        """
         now = time.time()
         with self._connect() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS posture (
+                    id          INTEGER PRIMARY KEY CHECK (id = 1),
+                    dnd         INTEGER NOT NULL DEFAULT 0,
+                    dnd_source  TEXT    NOT NULL DEFAULT 'manual',
+                    dnd_expires REAL,
+                    busy        INTEGER NOT NULL DEFAULT 0,
+                    busy_source TEXT    NOT NULL DEFAULT 'sco',
+                    updated_at  REAL    NOT NULL DEFAULT 0
+                )
+            """)
             conn.execute(
                 "INSERT OR IGNORE INTO posture"
                 " (id, dnd, dnd_source, dnd_expires, busy, busy_source, updated_at)"
