@@ -1,9 +1,9 @@
 # Voice-call architecture (mp6v.1)
 
-> **Status:** Design. The Pipecat adoption (OQ-1) is *argued and partly prototyped*
-> (the streaming half is shipped) but **not yet validated by an integration spike** —
-> see [Open questions](#open-questions--next). Treat the Pipecat decision as the
-> leading candidate, to be confirmed.
+> **Status:** Design. The Pipecat adoption (OQ-1) is **validated by an integration spike**
+> (2026-06-25) — see [`pipecat-bridge.md`](pipecat-bridge.md) for the spike results and the
+> implementation brief. The streaming half is shipped (#99). Adopt Pipecat for the spine;
+> the brain keeps the gate.
 >
 > **Scope:** Assisted-mode voice secretary over Bluetooth HFP. The human is on the
 > call and iris **discloses** that she is listening; fully-autonomous calling is out
@@ -236,9 +236,11 @@ Built on the existing `AudioEndpoint` seam:
 
 ## Open questions / next
 
-- **Pipecat integration spike (the honest next prototype).** Wrap `Brain` as a Pipecat LLM
-  service and prove *one* load-bearing thing through it — mid-stream barge-in cancel, or two
-  concurrent detectors — the way #99 proved authorize-once-then-stream. Confirms OQ-1.
+- ~~**Pipecat integration spike.**~~ **Done (2026-06-25) — OQ-1 validated.** A `BrainLLMService`
+  wrapping `Brain.respond_stream` was driven through a real Pipecat pipeline: it streamed, an
+  `InterruptionFrame` cancelled mid-stream (barge-in), and the gate authorized once / denied the
+  far party. See [`pipecat-bridge.md`](pipecat-bridge.md) for results + the implementation brief.
+  Remaining spike: the *concurrent-detectors* pattern (language ∥ cadence) for the §5 meta-feature.
 - **Dispatch accuracy** — `ti-dp7p` (in flight): chitchat misroutes to `echo`/`time`; gates the
   chat-streaming win.
 - **Uplink mixer feasibility** on the live SCO stack (mp6v.3/.5).
