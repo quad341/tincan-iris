@@ -4,17 +4,17 @@ from __future__ import annotations
 import re
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 from .config import DEFAULT, Config
 from .authz import Authorizer, AuthzContext
-from .lanes import LaneResult, Tier0Rules, Tier1Qwen, Tier2RawHaiku, _reply_text
+from .lanes import LaneResult, SkillProposal, Tier0Rules, Tier1Qwen, Tier2RawHaiku, _reply_text
 from .latency import Timeline
 from .masking import run_with_masking
 from .notes import NotesStore
 from .prefs import PreferencesStore
-from .skills import SkillRegistry, default_registry, is_operator_only
+from .skills import SkillRegistry, default_registry, is_operator_only, supports_streaming
 from .trust import TrustMode
 
 
@@ -25,6 +25,21 @@ class Reply:
     timeline: Timeline
     skill: str | None = None
     speaker: str = ""  # "operator" | "far" | "" — who spoke; set by brain.respond(speaker=)
+
+
+@dataclass
+class StreamChunk:
+    """One speakable piece of a streamed turn. The conductor synth+plays each as it
+    arrives, so the first sentence reaches the uplink without waiting for the rest.
+
+    ``respond`` returns one ``Reply``; ``respond_stream`` yields these. Tier-0 and
+    non-streaming skills yield a single ``final`` chunk; chat and streaming skills
+    yield several. ``denied`` marks the gate's refusal line (no skill ran)."""
+    text: str
+    lane: str = ""
+    skill: str | None = None
+    final: bool = False     # last chunk of this turn
+    denied: bool = False    # permission gate denied the proposed skill — nothing executed
 
 
 class Brain:
@@ -146,6 +161,80 @@ class Brain:
         except Exception as exc:  # noqa: BLE001 — local model hiccup: degrade, don't crash
             tl.mark("tier1-qwen(failed)")
             return Reply(f"(the local model didn't answer: {exc})", "tier1-qwen", tl, speaker=speaker)
+
+    def respond_stream(
+        self,
+        text: str,
+        *,
+        speaker: str = "",
+        far_trust: TrustMode = TrustMode.FULL,
+        op_trust: TrustMode = TrustMode.FULL,
+    ) -> Iterator[StreamChunk]:
+        """Streaming sibling of ``respond``: yield speakable chunks as they're ready.
+
+        Same routing and — critically — the SAME one-time propose→authorize→execute
+        gate (ADR-0005) as ``respond``. A streaming skill's ``run_stream`` is consumed
+        only *after* authorize allows it, so the trust boundary is unchanged; only the
+        output shape (a stream of chunks vs one blob) differs. Prototype path: Tier-2
+        ("ask Haiku") and latency-masking are not yet wired here — see respond()."""
+        demo_mode = speaker == "far" and far_trust is TrustMode.DEMO
+
+        # Tier 0 — deterministic local commands; always a single complete chunk.
+        r0 = self.tier0.handle(text)
+        if r0 is not None:
+            yield StreamChunk(r0.text, r0.lane, r0.skill, final=True)
+            return
+
+        # Tier 1 — the grammar dispatch IS the routing decision (internal JSON; not
+        # spoken, so it cannot stream). Skills are offered only on FULL-trust turns.
+        proposal = None if demo_mode else self.tier1.dispatch(text, speaker=speaker)
+        if proposal is None:
+            # Chat path — stream the reply sentence-by-sentence (low time-to-first-audio).
+            hint = self.prefs.hint(self.call_context) if self.call_context else ""
+            try:
+                for piece in self.tier1.chat_stream(text, hint):
+                    yield StreamChunk(piece, self.tier1.name)
+            except Exception as exc:  # noqa: BLE001 — degrade, don't crash
+                yield StreamChunk(f"(the local model didn't answer: {exc})", self.tier1.name, final=True)
+                return
+            yield StreamChunk("", self.tier1.name, final=True)
+            return
+
+        # Skill path — propose → authorize → execute, streaming the output.
+        yield from self._stream_proposal(proposal, speaker)
+
+    def _stream_proposal(self, proposal: SkillProposal, speaker: str) -> Iterator[StreamChunk]:
+        """Authorize the proposed skill **once**, then stream (or complete) its output.
+
+        The trust boundary for the streaming path (ADR-0005 §4): the gate fires
+        *before any chunk is produced*; on denial the skill never runs and only a
+        refusal line is spoken. Mirrors ``_dispatch`` — same authorize call, same
+        denial phrasing — so streaming can't reach a skill the non-streaming path
+        wouldn't."""
+        lane = self.tier1.name
+        skill = self.skills.get(proposal.skill)
+        if skill is None:
+            yield StreamChunk("Sorry — I can't do that right now.", lane, proposal.skill, final=True)
+            return
+        ctx = AuthzContext(is_operator=self._resolve_is_operator(speaker))
+        if not self.authz.authorize(skill, ctx).allowed:
+            phrase = self._denial_phrase(skill, speaker)
+            yield StreamChunk(phrase or "", lane, proposal.skill, final=True, denied=True)
+            return
+        # Authorized. Stream the output if the skill supports it; else one complete chunk.
+        try:
+            if supports_streaming(skill):
+                for piece in skill.run_stream(**proposal.args):
+                    yield StreamChunk(_reply_text(piece), lane, proposal.skill)
+                yield StreamChunk("", lane, proposal.skill, final=True)
+            else:
+                yield StreamChunk(_reply_text(skill.run(**proposal.args)), lane, proposal.skill, final=True)
+        except TypeError:
+            # proposed a skill without a required arg — ask, don't error out (matches _dispatch)
+            yield StreamChunk(
+                "Sorry — I didn't catch the details for that. Could you say it another way?",
+                lane, proposal.skill, final=True,
+            )
 
     def _resolve_is_operator(self, speaker: str) -> bool:
         """Resolve the principal **default-closed**: the speaker is the operator

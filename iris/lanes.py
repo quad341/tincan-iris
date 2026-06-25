@@ -12,12 +12,15 @@ import datetime as _dt
 import json
 import re
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 from .config import Config
 from .scope import ScopeManifest
 from .skills import SkillRegistry
+
+# Sentence boundary for streaming chunking — emit a chunk to TTS on . ! ? + space/EOL.
+_SENTENCE_END = re.compile(r"[.!?](?:\s|$)")
 
 
 @dataclass
@@ -160,6 +163,42 @@ class Tier1Qwen:
         with urllib.request.urlopen(req, timeout=self.cfg.qwen_timeout_s) as resp:
             return json.loads(resp.read()).get("content", "").strip()
 
+    def _complete_stream(self, prompt: str, n_predict: int) -> Iterator[str]:
+        """Stream llama-server ``/completion`` (SSE) and yield sentence-sized chunks.
+
+        Same endpoint as ``_complete`` with ``stream=True``; we re-assemble token
+        deltas and emit on sentence boundaries so the conductor can start TTS on the
+        first sentence (TTFT ~17ms warm) instead of waiting for the whole reply.
+        """
+        payload: dict = {
+            "prompt": prompt, "n_predict": n_predict,
+            "stream": True, "cache_prompt": True,
+        }
+        req = urllib.request.Request(
+            self.cfg.qwen_base_url + "/completion",
+            json.dumps(payload).encode(),
+            {"Content-Type": "application/json"},
+        )
+        buf = ""
+        with urllib.request.urlopen(req, timeout=self.cfg.qwen_timeout_s) as resp:
+            for raw in resp:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                try:
+                    ev = json.loads(line[5:].strip())
+                except ValueError:
+                    continue
+                buf += ev.get("content", "")
+                while (m := _SENTENCE_END.search(buf)) is not None:
+                    chunk, buf = buf[: m.end()].strip(), buf[m.end():]
+                    if chunk:
+                        yield chunk
+                if ev.get("stop"):
+                    break
+        if buf.strip():
+            yield buf.strip()
+
     def _build_grammar(self, speaker: str = "") -> str:
         """Generate a GBNF grammar that constrains Qwen to emit a dispatch JSON.
 
@@ -217,6 +256,55 @@ class Tier1Qwen:
             f"<|im_start|>user\n{text}<|im_end|>\n<|im_start|>assistant\n"
         )
 
+    def dispatch(self, text: str, *, speaker: str = "") -> "SkillProposal | None":
+        """Grammar-constrained routing pass: return an *unexecuted* ``SkillProposal``,
+        or ``None`` to fall through to chat.
+
+        The grammar is **speaker-scoped** (``names(speaker)``), so the far party
+        cannot even *name* an operator-only skill. The result is a proposal, never
+        an execution — the Brain authorizes it, then runs it (ADR-0005)."""
+        if not (self.skills and self.skills.names(speaker)):
+            return None
+        if self.skills.grammar_dirty:
+            self._grammar_cache.clear()
+            self.skills.grammar_dirty = False
+        grammar = self._grammar_cache.get(speaker)
+        if grammar is None:
+            grammar = self._build_grammar(speaker)
+            self._grammar_cache[speaker] = grammar
+        raw = self._complete(self._dispatch_prompt(text, speaker), 96, grammar=grammar)
+        try:
+            dispatch = json.loads(raw)
+            skill_name = dispatch.get("skill", "none")
+            args = dispatch.get("args") or {}
+        except (ValueError, AttributeError):
+            return None
+        if skill_name == "none":
+            return None
+        skill = self.skills.get(skill_name)
+        if skill is None:
+            return None
+        known = {p.name for p in getattr(skill, "params", [])}
+        call_args = (
+            {k: v for k, v in args.items() if k in known} if isinstance(args, dict) else {}
+        )
+        # Skills that declare a ``speaker`` param get the real channel so their own
+        # checks see who's calling on the dispatch path.
+        if "speaker" in known:
+            call_args["speaker"] = speaker or "operator"
+        return SkillProposal(skill_name, call_args)
+
+    def chat(self, text: str, context_hint: str = "") -> str:
+        """Plain (non-streaming) chat completion — the full reply text."""
+        return self._complete(self._chat_prompt(text, context_hint), self.cfg.qwen_max_tokens)
+
+    def chat_stream(self, text: str, context_hint: str = "") -> Iterator[str]:
+        """Stream the chat reply as sentence-sized chunks (low time-to-first-audio).
+        Same prompt as ``chat`` — only the wire shape differs."""
+        yield from self._complete_stream(
+            self._chat_prompt(text, context_hint), self.cfg.qwen_max_tokens
+        )
+
     def handle(
         self,
         text: str,
@@ -229,43 +317,13 @@ class Tier1Qwen:
         ``SkillProposal`` — the daemon (Brain) authorizes and runs it. On
         ``"none"`` (or no registry / DEMO) fall through to a chat completion.
         """
-        if allow_skills and self.skills and self.skills.names(speaker):
-            if self.skills.grammar_dirty:
-                self._grammar_cache.clear()
-                self.skills.grammar_dirty = False
-            grammar = self._grammar_cache.get(speaker)
-            if grammar is None:
-                grammar = self._build_grammar(speaker)
-                self._grammar_cache[speaker] = grammar
-            raw = self._complete(self._dispatch_prompt(text, speaker), 96, grammar=grammar)
-            try:
-                dispatch = json.loads(raw)
-                skill_name = dispatch.get("skill", "none")
-                args = dispatch.get("args") or {}
-            except (ValueError, AttributeError):
-                skill_name = "none"
-                args = {}
-            if skill_name != "none":
-                skill = self.skills.get(skill_name)
-                if skill is not None:
-                    known = {p.name for p in getattr(skill, "params", [])}
-                    call_args = (
-                        {k: v for k, v in args.items() if k in known}
-                        if isinstance(args, dict) else {}
-                    )
-                    # Skills that declare a ``speaker`` param get the real channel
-                    # so their own checks see who's calling on the dispatch path.
-                    if "speaker" in known:
-                        call_args["speaker"] = speaker or "operator"
-                    # Propose — do NOT execute. The daemon authorizes, then runs.
-                    return LaneResult(
-                        "", self.name, skill=skill_name, speaker=speaker,
-                        proposal=SkillProposal(skill_name, call_args),
-                    )
-        # no skill selected, DEMO mode, or no registry — regular chat completion
-        return LaneResult(
-            self._complete(self._chat_prompt(text, context_hint), self.cfg.qwen_max_tokens), self.name
-        )
+        if allow_skills:
+            proposal = self.dispatch(text, speaker=speaker)
+            if proposal is not None:
+                return LaneResult(
+                    "", self.name, skill=proposal.skill, speaker=speaker, proposal=proposal,
+                )
+        return LaneResult(self.chat(text, context_hint), self.name)
 
 
 class Tier2RawHaiku:
