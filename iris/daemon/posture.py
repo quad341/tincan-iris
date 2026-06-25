@@ -1,8 +1,9 @@
 """PostureManager — DND state machine + busy auto-detect stub (ADR-0006).
 
-The posture singleton (id=1 row in the posture table) is the single source of
-truth for DND and busy states.  All mutations are written atomically and
-broadcast to registered listeners as posture_changed events.
+The posture singleton (id=1 row in the posture table) is the durable storage for DND
+state across daemon restarts.  In-process state is the authoritative fast path:
+set_dnd / clear_dnd update both memory and DB atomically.  effective() returns
+in-memory state without hitting the DB.
 
 Security invariant: dnd_source is internal metadata and MUST NOT appear in any
 outbound event payload, effective() return value, or any caller-facing text.
@@ -27,15 +28,17 @@ _POLL_INTERVAL_S: float = 60.0
 
 
 @dataclass
-class PostureState:
-    dnd: bool
-    busy: bool
-    dnd_expires: float | None  # internal; drives UI "until HH:MM" display
+class _State:
+    dnd: bool = False
+    dnd_source: str = "manual"
+    dnd_expires: float | None = None
+    busy: bool = False  # v1 stub
 
 
 class PostureManager:
-    """Thread-safe DND state machine backed by the posture table.
+    """Thread-safe DND state machine.
 
+    In-memory _state is the hot path; DB persistence is write-through.
     Callers register with subscribe() to receive posture_changed events:
         {"type": "posture_changed", "dnd": bool, "busy": bool, "dnd_expires": float|None}
 
@@ -46,25 +49,21 @@ class PostureManager:
     def __init__(self, path: str | Path | None = None) -> None:
         self._path = Path(path) if path else _DEFAULT_PATH
         self._lock = threading.Lock()
+        self._state = _State()
         self._listeners: list[Callable[[dict], None]] = []
         self._ensure_row()
+        self._load_state()
 
-    def _connect(self) -> sqlite3.Connection:
+    def _db_connect(self) -> sqlite3.Connection:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self._path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
     def _ensure_row(self) -> None:
-        """Ensure the posture singleton row exists.
-
-        The posture table is created by roster migration v2.  If called before any
-        RosterStore method has triggered the migration (e.g. in tests), we create
-        the table here so PostureManager is self-sufficient.
-        """
+        """Ensure posture table + singleton row exist (idempotent)."""
         now = time.time()
-        with self._connect() as conn:
+        with self._db_connect() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS posture (
                     id          INTEGER PRIMARY KEY CHECK (id = 1),
@@ -83,6 +82,35 @@ class PostureManager:
                 (now,),
             )
 
+    def _load_state(self) -> None:
+        """Restore in-memory state from DB (called once at init)."""
+        with self._db_connect() as conn:
+            row = conn.execute(
+                "SELECT dnd, dnd_source, dnd_expires FROM posture WHERE id=1"
+            ).fetchone()
+        if row:
+            with self._lock:
+                self._state = _State(
+                    dnd=bool(row["dnd"]),
+                    dnd_source=row["dnd_source"] or "manual",
+                    dnd_expires=row["dnd_expires"],
+                    busy=False,
+                )
+
+    def _persist(self, state: _State) -> None:
+        """Write state to DB (best-effort; loss on crash is acceptable)."""
+        now = time.time()
+        try:
+            with self._db_connect() as conn:
+                conn.execute(
+                    "UPDATE posture"
+                    " SET dnd=?, dnd_source=?, dnd_expires=?, updated_at=?"
+                    " WHERE id=1",
+                    (int(state.dnd), state.dnd_source, state.dnd_expires, now),
+                )
+        except Exception:
+            _log.exception("PostureManager: DB persist failed (state held in memory)")
+
     def subscribe(self, listener: Callable[[dict], None]) -> None:
         """Register a listener for posture_changed events (idempotent)."""
         with self._lock:
@@ -93,11 +121,11 @@ class PostureManager:
         with self._lock:
             self._listeners = [l for l in self._listeners if l is not listener]
 
-    def _broadcast(self, state: PostureState) -> None:
+    def _broadcast(self, state: _State) -> None:
         event = {
-            "type": "posture_changed",
-            "dnd": state.dnd,
-            "busy": state.busy,
+            "type":        "posture_changed",
+            "dnd":         state.dnd,
+            "busy":        state.busy,
             "dnd_expires": state.dnd_expires,
             # dnd_source INTENTIONALLY omitted — security invariant
         }
@@ -107,51 +135,33 @@ class PostureManager:
             except Exception:
                 _log.exception("PostureManager: listener raised")
 
-    def _read_state(self, conn: sqlite3.Connection) -> PostureState:
-        row = conn.execute(
-            "SELECT dnd, dnd_expires FROM posture WHERE id=1"
-        ).fetchone()
-        if row is None:
-            return PostureState(dnd=False, busy=False, dnd_expires=None)
-        return PostureState(
-            dnd=bool(row["dnd"]),
-            busy=False,  # v1 stub
-            dnd_expires=row["dnd_expires"],
-        )
-
     def effective(self) -> dict:
-        """Return {dnd: bool, busy: bool}.  dnd_source NEVER included."""
-        with self._connect() as conn:
-            state = self._read_state(conn)
-        return {"dnd": state.dnd, "busy": False}
+        """Return {dnd: bool, busy: bool}.  dnd_source NEVER included.
+
+        Uses in-memory state — no DB access.
+        """
+        with self._lock:
+            return {"dnd": self._state.dnd, "busy": False}
 
     def set_dnd(self, source: str, expires: float | None = None) -> None:
         """Enable DND.  source is internal only; never forwarded to listeners."""
-        now = time.time()
         with self._lock:
-            with self._connect() as conn:
-                conn.execute(
-                    "UPDATE posture"
-                    " SET dnd=1, dnd_source=?, dnd_expires=?, updated_at=?"
-                    " WHERE id=1",
-                    (source, expires, now),
-                )
-            state = PostureState(dnd=True, busy=False, dnd_expires=expires)
-        self._broadcast(state)
+            self._state = _State(
+                dnd=True, dnd_source=source, dnd_expires=expires, busy=False
+            )
+            snapshot = _State(**vars(self._state))
+        self._persist(snapshot)
+        self._broadcast(snapshot)
 
     def clear_dnd(self) -> None:
         """Disable DND unconditionally."""
-        now = time.time()
         with self._lock:
-            with self._connect() as conn:
-                conn.execute(
-                    "UPDATE posture"
-                    " SET dnd=0, dnd_source='manual', dnd_expires=NULL, updated_at=?"
-                    " WHERE id=1",
-                    (now,),
-                )
-            state = PostureState(dnd=False, busy=False, dnd_expires=None)
-        self._broadcast(state)
+            self._state = _State(
+                dnd=False, dnd_source="manual", dnd_expires=None, busy=False
+            )
+            snapshot = _State(**vars(self._state))
+        self._persist(snapshot)
+        self._broadcast(snapshot)
 
     def toggle_dnd(self, source: str) -> None:
         """Flip DND state (on→off, off→on indefinitely)."""
@@ -159,6 +169,11 @@ class PostureManager:
             self.clear_dnd()
         else:
             self.set_dnd(source)
+
+    def dnd_expires(self) -> float | None:
+        """Return current DND expiry timestamp (or None for indefinite)."""
+        with self._lock:
+            return self._state.dnd_expires
 
     # --- busy stubs (v1: desktop detection not implemented) ---
 
@@ -194,11 +209,8 @@ class PostureWatcher:
 
     def _check_expiry(self) -> None:
         now = time.time()
-        with self._manager._connect() as conn:
-            row = conn.execute(
-                "SELECT dnd, dnd_expires FROM posture WHERE id=1"
-            ).fetchone()
-        if row and row["dnd"] and row["dnd_expires"] is not None:
-            if now > row["dnd_expires"]:
-                _log.info("PostureWatcher: timed DND expired — auto-clearing")
-                self._manager.clear_dnd()
+        eff = self._manager.effective()
+        expires = self._manager.dnd_expires()
+        if eff["dnd"] and expires is not None and now > expires:
+            _log.info("PostureWatcher: timed DND expired — auto-clearing")
+            self._manager.clear_dnd()
