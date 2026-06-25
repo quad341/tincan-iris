@@ -12,6 +12,7 @@ to before the real (auth'd) integrations land.
 from __future__ import annotations
 
 import datetime as _dt
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Literal, Protocol, runtime_checkable
 
@@ -42,12 +43,41 @@ class Skill(Protocol):
     def run(self, **kwargs: object) -> str:
         ...
 
+    # Optional: a skill MAY also implement ``run_stream`` (see ``StreamingSkill``)
+    # to emit its result incrementally. It is purely additive — ``run`` stays the
+    # complete-result contract, and the permission gate authorizes the same way.
+
+
+@runtime_checkable
+class StreamingSkill(Protocol):
+    """A skill that can emit its result as a stream of speakable chunks.
+
+    Opt-in and purely additive: a streaming skill still has the full ``Skill``
+    surface (``run`` is the complete-result fallback used by non-streaming
+    callers and tests). The daemon permission gate (ADR-0005) authorizes the
+    skill **once, before the first chunk** — exactly as for ``run`` — so
+    streaming changes only the output *shape*, never the trust boundary. Use it
+    for skills whose result is naturally incremental (agenda read-out, email
+    summaries) where time-to-first-audio matters; short results should stay
+    plain ``run``.
+    """
+
+    def run_stream(self, **kwargs: object) -> Iterator[str]:
+        ...
+
 
 def is_operator_only(skill: object) -> bool:
     """True if ``skill`` is marked operator-only (privileged).
 
     Tolerant of skills that predate the attribute — defaults to ``False``."""
     return bool(getattr(skill, "operator_only", False))
+
+
+def supports_streaming(skill: object) -> bool:
+    """True if ``skill`` can stream its output via ``run_stream``.
+
+    Tolerant of skills that predate the protocol — defaults to ``False``."""
+    return callable(getattr(skill, "run_stream", None))
 
 
 class TimeSkill:
