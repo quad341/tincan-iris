@@ -12,6 +12,7 @@ Lanes:
   * web_search — no credentials, always on
   * email      — only when host+user+password are configured (env or secrets.toml)
   * dial       — only when a TincanCallControl is provided (D-Bus + tincand required)
+  * delegate   — operator-only iris→mayor hand-off ("ask the mayor to …"), always on
 
 (messages/calendar register elsewhere once their daemon/token is present.)
 """
@@ -50,6 +51,14 @@ def optional_skills(notes_store=None, roster=None, ctrl=None) -> list:
     # Calendar — only when a Google OAuth token exists (run `iris auth gcal`).
     from .calendar import configured_calendar_skills
     skills += configured_calendar_skills()
+
+    # Delegate-to-mayor — operator-only two-phase hand-off into the city
+    # ("Iris, ask the mayor to …"). Sends via `gc mail send mayor`; the staged→
+    # confirm handshake, in-flight queue, and timeout all work here. The async
+    # mayor-reply listener (mayor_reply.py) stays dormant until the gascity SSE
+    # endpoint ships, so on_sent is left unwired for now — see ti-x4cn.
+    from .delegate_skill import delegation_skills
+    skills += delegation_skills()
 
     # Dial — only when a TincanCallControl is provided (D-Bus + tincand required).
     if ctrl is not None:

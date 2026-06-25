@@ -174,3 +174,24 @@ class CancelDelegateSkill:
     def run(self, **_: object) -> str:
         self._state.clear_staged()
         return "OK, skipping that."
+
+
+def delegation_skills(
+    gc_bin: str = "gc",
+    on_sent: Optional[Callable[[str], None]] = None,
+) -> list:
+    """Operator-only iris→mayor delegation lane — the two-phase skill set.
+
+    The three skills share one ``_DelegateState`` so the stage→confirm handshake
+    and the in-flight queue line up. ``on_sent`` (optional) fires with the queue
+    entry id after a successful send — the hook ``MayorReplyListener`` uses to
+    begin listening for the mayor's async reply. That listener stays dormant
+    until the gascity SSE endpoint (ga-ty8cfb) ships, so ``on_sent`` is wired
+    only once a reply channel exists.
+    """
+    state = _DelegateState()
+    return [
+        DelegateSkill(state),
+        ConfirmDelegateSkill(state, gc_bin=gc_bin, on_sent=on_sent),
+        CancelDelegateSkill(state),
+    ]
