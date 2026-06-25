@@ -43,5 +43,13 @@ def test_unavailable_when_paths_missing() -> None:
     assert FasterWhisperSTT(python="/no/py", model="/no/m").available() is False
 
 
-def test_default_stt_is_faster_whisper() -> None:
-    assert isinstance(default_stt(), FasterWhisperSTT)
+def test_default_stt_falls_back_when_server_absent() -> None:
+    with patch("iris.audio.stt.FasterWhisperServerSTT.available", return_value=False):
+        assert isinstance(default_stt(), FasterWhisperSTT)
+
+
+def test_default_stt_prefers_server_when_available() -> None:
+    from iris.audio.stt import FasterWhisperServerSTT
+
+    with patch("iris.audio.stt.FasterWhisperServerSTT.available", return_value=True):
+        assert isinstance(default_stt(), FasterWhisperServerSTT)
