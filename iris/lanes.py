@@ -200,12 +200,27 @@ class Tier1Qwen:
                 lines.append(f'"{e["name"]}" — {e["description"]} (no args)')
         skill_list = "; ".join(lines)
         now = _dt.datetime.now().strftime("%A %Y-%m-%dT%H:%M")
+        # Few-shot examples teaching action-vs-conversation distinction.
+        # Chitchat and open-ended Q&A → none; explicit action requests → skill.
+        examples = (
+            '<|im_start|>user\nhow are you doing today?<|im_end|>\n'
+            '<|im_start|>assistant\n{"skill":"none","args":{}}<|im_end|>\n'
+            '<|im_start|>user\ntell me a fun fact about otters<|im_end|>\n'
+            '<|im_start|>assistant\n{"skill":"none","args":{}}<|im_end|>\n'
+            '<|im_start|>user\nwhat do you think about jazz<|im_end|>\n'
+            '<|im_start|>assistant\n{"skill":"none","args":{}}<|im_end|>\n'
+            '<|im_start|>user\ndo you like dogs<|im_end|>\n'
+            '<|im_start|>assistant\n{"skill":"none","args":{}}<|im_end|>\n'
+        )
         return (
-            '<|im_start|>system\nYou are Iris. Choose the best skill to call, or output '
-            '{"skill":"none","args":{}} to reply in natural language.\n'
+            '<|im_start|>system\nYou are Iris. Use a skill ONLY when the user requests '
+            'an action you can perform with the listed skills. For conversation, opinions, '
+            'or questions you can answer directly, output {"skill":"none","args":{}} and '
+            'reply in natural language.\n'
             f'Right now it is {now} (local time); give any datetime arg as ISO 8601. '
             'Fill every required arg the chosen skill needs.\n'
             f'Available skills: {skill_list}<|im_end|>\n'
+            f'{examples}'
             f'<|im_start|>user\n{text}<|im_end|>\n<|im_start|>assistant\n'
         )
 

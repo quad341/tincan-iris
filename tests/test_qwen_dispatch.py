@@ -110,3 +110,64 @@ def test_handle_no_skill_falls_through_to_chat():
         r = tier.handle("hello there")
     assert r.proposal is None
     assert r.text == "just chatting"
+
+
+# ---------------------------------------------------------------------------
+# ti-dp7p — chitchat/Q&A must fall through to 'none'; EchoSkill removed from
+# default registry; dispatch prompt must carry action-vs-conversation bias.
+# ---------------------------------------------------------------------------
+
+import json as _json
+
+from iris.skills import TimeSkill, default_registry
+
+
+def _time_tier() -> "Tier1Qwen":
+    return Tier1Qwen(Config(), skills=SkillRegistry([TimeSkill()]))
+
+
+def test_echo_not_in_default_registry():
+    """EchoSkill must not appear in the default registry (demo-only, not production)."""
+    assert "echo" not in default_registry().names()
+
+
+def test_dispatch_prompt_has_chitchat_bias():
+    """Dispatch prompt must include an action-vs-conversation instruction and chitchat examples."""
+    prompt = _time_tier()._dispatch_prompt("how are you?")
+    lowered = prompt.lower()
+    assert "action" in lowered or "command" in lowered or "conversation" in lowered or "chitchat" in lowered
+    # at least one chitchat-→-none few-shot example must be present
+    assert "none" in prompt and (
+        "how are you" in lowered or "fun fact" in lowered or "otter" in lowered
+    )
+
+
+@pytest.mark.parametrize("utterance", [
+    "how are you doing today?",
+    "tell me a fun fact about otters",
+    "what do you think about jazz",
+    "do you like dogs",
+])
+def test_chitchat_dispatches_to_none(utterance):
+    """Chitchat/Q&A utterances must route to 'none' → fall through to chat reply."""
+    tier = _time_tier()
+    chat_reply = "That sounds fun!"
+    with patch.object(tier, "_complete", side_effect=[
+        '{"skill":"none","args":{}}', chat_reply
+    ]):
+        r = tier.handle(utterance)
+    assert r.proposal is None
+    assert r.text == chat_reply
+
+
+@pytest.mark.parametrize("utterance,expected_skill", [
+    ("what time is it", "time"),
+])
+def test_command_dispatches_to_correct_skill(utterance, expected_skill):
+    """Explicit action utterances must route to the matching skill."""
+    tier = _time_tier()
+    raw = _json.dumps({"skill": expected_skill, "args": {}})
+    with patch.object(tier, "_complete", return_value=raw):
+        r = tier.handle(utterance)
+    assert r.proposal is not None
+    assert r.proposal.skill == expected_skill

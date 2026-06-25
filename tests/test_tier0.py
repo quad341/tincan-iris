@@ -41,12 +41,16 @@ def test_registry_manifest_shape():
     reg = default_registry()
     mf = reg.manifest()
     names = {e["name"] for e in mf}
-    assert names == {"time", "echo"}
-    echo_entry = next(e for e in mf if e["name"] == "echo")
-    assert echo_entry["params"][0]["name"] == "text"
-    assert echo_entry["params"][0]["type"] == "string"
+    assert names == {"time"}
     time_entry = next(e for e in mf if e["name"] == "time")
     assert time_entry["params"] == []
+
+    # EchoSkill class still works; it's just not in the default registry
+    echo_reg = SkillRegistry([EchoSkill()])
+    echo_mf = echo_reg.manifest()
+    echo_entry = next(e for e in echo_mf if e["name"] == "echo")
+    assert echo_entry["params"][0]["name"] == "text"
+    assert echo_entry["params"][0]["type"] == "string"
 
 
 def test_registry_grammar_dirty_flag():
@@ -75,7 +79,8 @@ def _qwen(skills=None) -> Tier1Qwen:
 def test_tier1_proposes_skill_for_the_daemon_to_run():
     # The lane proposes (ADR-0005 §4); the daemon authorizes + runs it. Execution
     # and the permission gate are covered in test_permission_gate.py.
-    reg = default_registry()
+    # Use an explicit registry with EchoSkill — it's no longer in default_registry.
+    reg = SkillRegistry([EchoSkill()])
     t1 = _qwen(skills=reg)
     dispatch_resp = json.dumps({"skill": "echo", "args": {"text": "hello"}})
     with patch("urllib.request.urlopen", return_value=_fake_urlopen(dispatch_resp)):

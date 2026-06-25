@@ -133,4 +133,4 @@ class SkillRegistry:
 
 
 def default_registry() -> SkillRegistry:
-    return SkillRegistry([TimeSkill(), EchoSkill()])
+    return SkillRegistry([TimeSkill()])
