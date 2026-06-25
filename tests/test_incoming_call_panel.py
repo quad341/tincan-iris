@@ -121,12 +121,17 @@ def _make_panel():
         return statics[selector]
 
     panel.query_one = _query_one
-    panel.classes = []
+    # Textual >=8 makes ``classes`` a data descriptor backed by ``_classes`` (a set),
+    # normally initialised in DOMNode.__init__ — which the ``__new__`` above bypasses.
+    # Seed the set and stub add/remove to mutate it directly, so panel state can be
+    # exercised without a running App. ``panel.classes`` then reads back as a frozenset,
+    # so the ``"active" in panel.classes`` assertions below still hold.
+    panel._classes = set()
 
-    def _add_class(c):
-        if c not in panel.classes: panel.classes.append(c)
-    def _remove_class(c):
-        panel.classes = [x for x in panel.classes if x != c]
+    def _add_class(*names):
+        panel._classes.update(names)
+    def _remove_class(*names):
+        panel._classes.difference_update(names)
     panel.add_class = _add_class
     panel.remove_class = _remove_class
     return panel, statics
