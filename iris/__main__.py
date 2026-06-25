@@ -26,6 +26,8 @@ _COMMANDS: dict[str, str] = {
     "install-services": "iris.services._cli:main",
     "whisper-server": "iris._whisper_server:main",
     "kokoro-server": "iris._kokoro_server:main",
+    "daemon": "iris.daemon._cli:daemon_main",  # nested: daemon start|stop|status
+    "dnd": "iris.daemon._cli:dnd_main",        # nested: dnd on|off|until <time>
 }
 
 
