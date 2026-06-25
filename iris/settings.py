@@ -100,6 +100,8 @@ _KEYMAP: dict[tuple[str, str], str] = {
     ("servers", "stt_url"):        "IRIS_STT_SERVER_URL",
     ("servers", "tts_url"):        "IRIS_TTS_SERVER_URL",
     ("storage", "log_file"):       "IRIS_LOG_FILE",
+    # Delegation reply timeout (minutes):
+    ("delegation", "reply_timeout_minutes"): "IRIS_DELEGATION_REPLY_TIMEOUT_MINUTES",
 }
 
 

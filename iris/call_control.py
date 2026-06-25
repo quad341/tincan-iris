@@ -22,9 +22,11 @@ Real usage::
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
+from . import settings
 from .audio.endpoint import TincanSCOAudio, discover_sco_nodes
 
 # Authoritative addresses, confirmed by introspecting the live daemon:
@@ -51,6 +53,8 @@ class TincanCallControl:
         auto_answer: bool = False,
         emit: Callable[[tuple], None] | None = None,
         _bus: Any = None,   # injected in tests; None → real dbus.SessionBus at start()
+        discover_tries: int = 6,
+        discover_delay: float = 0.25,
     ) -> None:
         self.auto_answer = auto_answer
         self.emit = emit or (lambda ev: None)
@@ -58,6 +62,10 @@ class TincanCallControl:
         self._bus = _bus
         self._loop = None
         self._thread: threading.Thread | None = None
+        # SCO PipeWire nodes can lag the CallConnected signal slightly; retry
+        # discovery briefly. Tests pass discover_tries=1, discover_delay=0.
+        self._discover_tries = discover_tries
+        self._discover_delay = discover_delay
 
     # --- signal handlers (public — called directly in tests) ---
 
@@ -72,10 +80,23 @@ class TincanCallControl:
             self._answer("")
 
     def _on_connected(self, call_id: str = "", *args: Any) -> None:
-        """``CallConnected`` — rediscover SCO nodes and bind the new endpoint."""
-        sink, source = discover_sco_nodes()
+        """``CallConnected`` — rediscover SCO nodes and bind the new endpoint.
+
+        The SCO PipeWire nodes appear when the call's audio transport comes up,
+        which can lag the signal slightly, so retry discovery briefly. AEC is
+        enabled per ``IRIS_AEC`` so the console's ride-along is echo-free.
+        """
+        sink = source = None
+        for attempt in range(max(1, self._discover_tries)):
+            sink, source = discover_sco_nodes()
+            if sink:
+                break
+            if attempt + 1 < self._discover_tries:
+                time.sleep(self._discover_delay)
         if sink:
-            self.endpoint = TincanSCOAudio(sink, source)
+            self.endpoint = TincanSCOAudio(
+                sink, source, aec=settings.get_bool("IRIS_AEC")
+            )
         self.emit(("call_connected", sink, source))
 
     def _on_ended(self, call_id: str = "", *args: Any) -> None:

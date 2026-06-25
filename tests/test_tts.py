@@ -67,6 +67,8 @@ def test_default_tts_falls_back_to_kokoro_subprocess_when_server_unavailable() -
         assert isinstance(default_tts(), KokoroTTS)
 
 
-def test_default_tts_uses_kokoro_when_available() -> None:
-    with patch.object(KokoroTTS, "available", return_value=True):
-        assert isinstance(default_tts(), KokoroTTS)
+def test_default_tts_prefers_server_when_available() -> None:
+    from iris.audio.tts import KokoroServerTTS
+
+    with patch.object(KokoroServerTTS, "available", return_value=True):
+        assert isinstance(default_tts(), KokoroServerTTS)

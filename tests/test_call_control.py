@@ -12,7 +12,10 @@ from iris.call_control import TincanCallControl
 def _ctrl(*, auto_answer=False) -> tuple[TincanCallControl, list]:
     events: list = []
     mock_bus = MagicMock()
-    c = TincanCallControl(auto_answer=auto_answer, emit=events.append, _bus=mock_bus)
+    c = TincanCallControl(
+        auto_answer=auto_answer, emit=events.append, _bus=mock_bus,
+        discover_tries=1, discover_delay=0,  # no retry sleeps in tests
+    )
     return c, events
 
 
@@ -167,3 +170,41 @@ def test_reconnect_replaces_endpoint():
         c._on_connected("call-2")
     assert c.endpoint is not first_ep
     assert c.endpoint.playback_target == "sink2"
+
+
+# --- ti-veyx: AEC gating + SCO discovery retry ---
+
+def test_call_connected_enables_aec_when_iris_aec_set():
+    c, events = _ctrl()
+    with patch(
+        "iris.call_control.discover_sco_nodes",
+        return_value=("bluez_output.AA.1", "bluez_input.AA.0"),
+    ), patch("iris.call_control.settings.get_bool", return_value=True):
+        c._on_connected("call-1")
+    assert c.endpoint is not None
+    assert c.endpoint.aec is True
+
+
+def test_call_connected_aec_off_by_default():
+    c, events = _ctrl()
+    with patch(
+        "iris.call_control.discover_sco_nodes",
+        return_value=("bluez_output.AA.1", "bluez_input.AA.0"),
+    ), patch("iris.call_control.settings.get_bool", return_value=False):
+        c._on_connected("call-1")
+    assert c.endpoint is not None
+    assert c.endpoint.aec is False
+
+
+def test_call_connected_retries_until_sco_nodes_appear():
+    """SCO nodes can lag the CallConnected signal — discovery retries first."""
+    events: list = []
+    c = TincanCallControl(
+        emit=events.append, _bus=MagicMock(),
+        discover_tries=4, discover_delay=0,
+    )
+    seq = [(None, None), (None, None), ("bluez_output.AA.1", "bluez_input.AA.0")]
+    with patch("iris.call_control.discover_sco_nodes", side_effect=seq):
+        c._on_connected("call-1")
+    assert c.endpoint is not None
+    assert c.endpoint.playback_target == "bluez_output.AA.1"
