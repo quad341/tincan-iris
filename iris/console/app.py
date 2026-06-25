@@ -20,7 +20,7 @@ Every line shown is also appended (plain text) to a session logfile —
 ~/.local/state/iris/console.log by default, or $IRIS_LOG_FILE — so a session can
 be read back or shared without copying out of the TUI.
 
-Keys: [space] talk · [l] hear you · [L] list panel · [f] hear them · [a] approve them · [i] interrupt · [m] mute · [c] commands · [q] quit
+Keys: [space] talk · [l] hear you · [L] list panel · [f] hear them · [a] approve them · [i] interrupt · [m] mute · [d] DND · [c] commands · [q] quit
 """
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ from textual.widgets import Button, Footer, Header, RichLog, Static
 
 from .. import settings
 from ..addressing import address
+from ..daemon.posture import PostureManager
 from ..message_store import MessageStore, VoiceMessage
 from ..prefs import PreferencesStore
 from .contacts import ContactsScreen
@@ -257,6 +258,7 @@ class IrisConsole(App):
         Binding("a", "approve", "approve"),
         Binding("i", "interrupt", "interrupt", priority=True),
         Binding("m", "mute", "mute"),
+        Binding("d", "toggle_dnd", "dnd", show=False),
         Binding("n", "notification", "next notif", show=False),
         Binding("c", "commands", "commands"),
         Binding("K", "contacts", "contacts"),
@@ -300,6 +302,9 @@ class IrisConsole(App):
         self._follow_up_until: float = 0.0
         self._messages = MessageStore()
         self._roster = RosterStore()
+        self._posture = PostureManager()
+        self._dnd: bool = False
+        self._dnd_expires: float | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -347,6 +352,9 @@ class IrisConsole(App):
             emit=self.events.put,
         )
         self.set_interval(0.5, self._proactive_delivery.tick)
+        self._posture.subscribe(lambda ev: self.events.put(("posture_changed", ev)))
+        eff = self._posture.effective()
+        self._dnd = eff["dnd"]
         self._refresh_status()
 
     def _drain(self) -> None:
@@ -454,6 +462,11 @@ class IrisConsole(App):
                         self._note = ""
                     self._refresh_status()
                 elif kind == "mute":
+                    self._refresh_status()
+                elif kind == "posture_changed":
+                    payload = ev[1]
+                    self._dnd = payload.get("dnd", False)
+                    self._dnd_expires = payload.get("dnd_expires")
                     self._refresh_status()
         except queue.Empty:
             pass
@@ -580,6 +593,13 @@ class IrisConsole(App):
                 )
             else:
                 parts.append(f"[b yellow]🔔 {self._proactive_badge}[/]")
+        if self._dnd:
+            if self._dnd_expires is not None:
+                from datetime import datetime as _dt
+                until = _dt.fromtimestamp(self._dnd_expires).strftime("%H:%M")
+                parts.append(f"[b #f38ba8]■ DND until {until}[/]")
+            else:
+                parts.append("[b #f38ba8]■ DND[/]")
         if self._note:
             parts.append(self._note)
         self.query_one("#status", Static).update(" " + "  ·  ".join(parts))
@@ -718,6 +738,17 @@ class IrisConsole(App):
         self.conductor.toggle_mute()
         self._refresh_status()
 
+    def action_toggle_dnd(self) -> None:
+        """Toggle DND (do not disturb) state via PostureManager."""
+        if self._dnd:
+            self._posture.clear_dnd()
+            self._w("[green]DND OFF.[/]")
+            self.notify("DND off — calls will ring normally.", severity="information")
+        else:
+            self._posture.set_dnd("manual")
+            self._w("[yellow]DND ON — calls will be screened.[/]")
+            self.notify("DND on — calls will be screened.", severity="warning")
+
     def action_commands(self) -> None:
         """Dump what Iris handles: Tier-0 instant commands + the Tier-1 skills."""
         self._w("[b]Known commands[/] [dim](Tier-0 — instant, no model)[/]")
@@ -730,6 +761,7 @@ class IrisConsole(App):
             for s in skills:
                 self._w(f"  [cyan]{s.name:<12}[/] [dim]{s.description}[/]")
         self._w('[dim]Anything else → local model · "ask Haiku about …" → cloud[/]')
+        self._w("  [cyan]d[/]          [dim]toggle DND (do not disturb)[/]")
 
     def action_notification(self) -> None:
         """Cycle to the next pending proactive notification ([n] key)."""
