@@ -16,9 +16,9 @@ from iris.console.contacts_logic import (
 # rule_badge
 # ---------------------------------------------------------------------------
 
-def test_rule_badge_vip():
-    badge = rule_badge("vip")
-    assert "VIP" in badge
+def test_rule_badge_ring_with_announcement():
+    badge = rule_badge("ring_with_announcement")
+    assert "ANNOUNCE" in badge
     assert "magenta" in badge.lower()
 
 
@@ -34,18 +34,19 @@ def test_rule_badge_screen():
     assert "yellow" in badge.lower()
 
 
-def test_rule_badge_block():
-    badge = rule_badge("block")
-    assert "BLOCK" in badge
+def test_rule_badge_ignore():
+    badge = rule_badge("ignore")
+    assert "IGNORE" in badge
     assert "red" in badge.lower()
 
 
-def test_rule_badge_normal():
-    assert rule_badge("normal") == "normal"
+def test_rule_badge_ring_through():
+    badge = rule_badge("ring_through")
+    assert badge == "ring through"
 
 
 def test_rule_badge_unknown_passthrough():
-    assert rule_badge("ring_through") == "ring_through"
+    assert rule_badge("totally_unknown") == "totally_unknown"
 
 
 # ---------------------------------------------------------------------------

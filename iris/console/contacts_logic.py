@@ -8,19 +8,33 @@ from __future__ import annotations
 _NOTES_MAX: int = 600
 _NOTES_WARN: int = 500
 
-_HANDLING_RULES: list[str] = ["normal", "vip", "screen", "take_message", "block"]
+_HANDLING_RULES: list[str] = [
+    "ring_through",
+    "ring_with_announcement",
+    "screen",
+    "take_message",
+    "ignore",
+]
 
 
 def rule_badge(rule: str) -> str:
     """Return Rich markup for a handling-rule badge."""
     _map = {
-        "vip": "[b magenta]VIP[/]",
-        "take_message": "[b blue]MSG[/]",
-        "screen": "[b yellow]SCREEN[/]",
-        "block": "[b red]BLOCK[/]",
-        "normal": "normal",
+        "ring_with_announcement": "[b magenta]ANNOUNCE[/]",
+        "take_message":           "[b blue]MSG[/]",
+        "screen":                 "[b yellow]SCREEN[/]",
+        "ignore":                 "[b red]IGNORE[/]",
+        "ring_through":           "ring through",
     }
     return _map.get(rule, rule)
+
+
+VERB_DESCRIPTION: dict[str, str] = {
+    "ring_with_announcement": "Iris announced caller by voice. Phone is ringing — Iris has NOT answered.",
+    "ring_through":           "Phone is ringing. Iris has NOT answered.",
+    "screen":                 "Iris answered and is screening the caller.",
+    "take_message":           "Iris answered and is taking a message.",
+}
 
 
 def char_counter_text(n: int) -> str:

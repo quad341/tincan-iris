@@ -26,16 +26,16 @@ def test_add_returns_contact(store):
     assert isinstance(c, Contact)
     assert c.display_name == "Mom"
     assert c.phone_e164 == "+12025550100"
-    assert c.handling_rule == "normal"
+    assert c.handling_rule == "ring_through"
     assert c.trust_tier == "demo"
     assert c.relationship_notes == ""
     assert c.id >= 1
 
 
 def test_add_custom_fields(store):
-    c = store.add("VIP Caller", "+12025550200", handling_rule="vip",
+    c = store.add("VIP Caller", "+12025550200", handling_rule="ring_with_announcement",
                   trust_tier="full", relationship_notes="Board member")
-    assert c.handling_rule == "vip"
+    assert c.handling_rule == "ring_with_announcement"
     assert c.trust_tier == "full"
     assert c.relationship_notes == "Board member"
 
@@ -93,8 +93,8 @@ def test_update_display_name(store):
 
 def test_update_handling_rule(store):
     c = store.add("Mom", "+12025550100")
-    store.update(c.id, handling_rule="vip")
-    assert store.get(c.id).handling_rule == "vip"
+    store.update(c.id, handling_rule="ring_with_announcement")
+    assert store.get(c.id).handling_rule == "ring_with_announcement"
 
 
 def test_update_trust_tier(store):
@@ -378,7 +378,7 @@ def test_add_phone_dedup_guard_no_duplicate_row(store):
 
 def _make_contact(name: str = "Alice") -> Contact:
     return Contact(id=1, display_name=name, phone_e164=None,
-                   handling_rule="normal", trust_tier="demo",
+                   handling_rule="ring_through", trust_tier="demo",
                    relationship_notes="", created_at=0.0, updated_at=0.0)
 
 

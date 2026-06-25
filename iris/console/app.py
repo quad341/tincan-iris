@@ -20,7 +20,7 @@ Every line shown is also appended (plain text) to a session logfile —
 ~/.local/state/iris/console.log by default, or $IRIS_LOG_FILE — so a session can
 be read back or shared without copying out of the TUI.
 
-Keys: [space] talk · [l] hear you · [L] list panel · [f] hear them · [a] approve them · [i] interrupt · [m] mute · [c] commands · [q] quit
+Keys: [space] talk · [l] hear you · [L] list panel · [f] hear them · [a] approve them · [i] interrupt · [m] mute · [d] DND · [c] commands · [q] quit
 """
 from __future__ import annotations
 
@@ -40,9 +40,12 @@ from textual.widgets import Button, Footer, Header, RichLog, Static
 
 from .. import settings
 from ..addressing import address
+from ..daemon.posture import PostureManager
+from ..daemon.proxy import DaemonNotRunning, DaemonProxy
 from ..message_store import MessageStore, VoiceMessage
 from ..prefs import PreferencesStore
 from .contacts import ContactsScreen
+from .contacts_logic import VERB_DESCRIPTION
 from .list_view import PostCallListView
 from ..audio.endpoint import default_endpoint
 from ..audio.streaming import StreamingTranscriber
@@ -253,6 +256,104 @@ class ListPanel(Static):
             self.app.query_one("#log", RichLog).focus()
 
 
+class IncomingCallPanel(Widget, can_focus=False):
+    """Shown when an incoming call is pending; hidden otherwise.
+
+    State transitions:
+      hide()                   → hidden (no call)
+      show(verb, ...)          → visible (one of 3 verb states)
+      update_intro(text)       → updates the caller-intro transcript (screen only)
+      update_countdown(s)      → updates the 'Auto-message in Ns' counter (screen)
+    """
+
+    DEFAULT_CSS = """
+    IncomingCallPanel {
+        display: none;
+        height: auto;
+        min-height: 4;
+        background: #1a2a4a;
+        border: round #4040aa;
+        padding: 0 2;
+        margin: 0 0 1 0;
+    }
+    IncomingCallPanel.active {
+        display: block;
+    }
+    IncomingCallPanel #call-header {
+        color: #cdd6f4;
+        text-style: bold;
+    }
+    IncomingCallPanel #call-caller {
+        color: #89b4fa;
+    }
+    IncomingCallPanel #call-body {
+        color: #a6adc8;
+    }
+    IncomingCallPanel #call-intro {
+        color: #a6e3a1;
+    }
+    IncomingCallPanel #call-countdown {
+        color: #fab387;
+    }
+    IncomingCallPanel #call-choices {
+        color: #cdd6f4;
+        text-style: bold;
+        margin-top: 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Static("", id="call-header")
+        yield Static("", id="call-caller")
+        yield Static("", id="call-body")
+        yield Static("", id="call-intro")
+        yield Static("", id="call-countdown")
+        yield Static("", id="call-choices")
+
+    def show(
+        self,
+        verb: str,
+        caller_name: str,
+        caller_number: str,
+        choices: list[dict],
+    ) -> None:
+        """Display the panel for an incoming call."""
+        header = f"📞 INCOMING CALL — {verb}"
+        display_name = caller_name or caller_number or "(unknown)"
+        caller_line = f"{display_name}  [dim]·[/]  {caller_number}" if caller_name else caller_number
+        body = VERB_DESCRIPTION.get(verb, "")
+        choice_keys = "  ".join(
+            f"[b][{c['key']}][/] {c['label']}" for c in choices
+        ) if choices else ""
+
+        self.query_one("#call-header", Static).update(header)
+        self.query_one("#call-caller", Static).update(caller_line)
+        self.query_one("#call-body", Static).update(body)
+        self.query_one("#call-intro", Static).update("")
+        self.query_one("#call-countdown", Static).update("")
+        self.query_one("#call-choices", Static).update(choice_keys)
+        self.add_class("active")
+
+    def update_intro(self, text: str) -> None:
+        """Update the screening intro transcript."""
+        self.query_one("#call-intro", Static).update(f'Caller: "{text}"')
+
+    def update_countdown(self, seconds_remaining: int) -> None:
+        """Update the auto-message countdown (screen verb)."""
+        if seconds_remaining > 0:
+            filled = max(0, min(10, 10 - seconds_remaining // 3))
+            bar = "▓" * filled + "░" * (10 - filled)
+            self.query_one("#call-countdown", Static).update(
+                f"[{bar}]  Auto-message in {seconds_remaining}s"
+            )
+        else:
+            self.query_one("#call-countdown", Static).update("")
+
+    def hide(self) -> None:
+        """Hide the panel (call ended)."""
+        self.remove_class("active")
+
+
 class IrisConsole(App):
     TITLE = "Iris console"
 
@@ -271,10 +372,14 @@ class IrisConsole(App):
         Binding("a", "approve", "approve"),
         Binding("i", "interrupt", "interrupt", priority=True),
         Binding("m", "mute", "mute"),
+        Binding("d", "toggle_dnd", "dnd", show=False),
         Binding("n", "notification", "next notif", show=False),
         Binding("c", "commands", "commands"),
         Binding("K", "contacts", "contacts"),
         Binding("q", "quit", "quit", priority=True),
+        Binding("1", "choose_1", "put through", show=False),
+        Binding("2", "choose_2", "take message", show=False),
+        Binding("3", "choose_3", "decline", show=False),
     ]
 
     def __init__(self) -> None:
@@ -316,10 +421,21 @@ class IrisConsole(App):
         self._follow_up_until: float = 0.0
         self._messages = MessageStore()
         self._roster = RosterStore()
+        self._posture = PostureManager()
+        self._dnd: bool = False
+        self._dnd_expires: float | None = None
+        self._proxy: DaemonProxy | None = None  # set in on_mount if daemon is running
+        self._incoming_call_id: str | None = None
+        self._incoming_verb: str | None = None
+        self._incoming_choices: list[dict] = []
+        self._screen_start: float = 0.0
+        self._screen_auto_s: int = 30   # default auto-message timeout; wired from flow in ti-gxpt.5+
+        self._countdown_last: float = 0.0
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield ActiveCallCard(id="active-call-card")
+        yield IncomingCallPanel(id="incoming-call-panel")
         with Horizontal(id="main-row"):
             yield RichLog(id="log", markup=True, wrap=True)
             yield ListPanel()
@@ -342,8 +458,34 @@ class IrisConsole(App):
         if not self.stt.available():
             self._w("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
         self.set_interval(0.05, self._drain)
-        self.ctrl.start()  # listen for tincan call signals (daemon thread; safe if bus down)
-        self._ensure_aec_up()  # ti-veyx: load the WebRTC AEC once (idempotent) for feedback-free call audio
+
+        # Try to connect to the daemon; fall back to direct TincanCallControl.
+        proxy = DaemonProxy()
+        try:
+            proxy.connect()
+            self._proxy = proxy
+            proxy.start_event_reader(
+                on_event=lambda ev: self.events.put(("daemon_event", ev)),
+                on_disconnect=lambda: self.events.put(("daemon_event", {"event": "disconnected"})),
+            )
+            self._w("[dim]Daemon connected — using daemon mode[/]")
+            eff = self._posture.effective()
+            self._dnd = eff["dnd"]
+            self._refresh_status()
+        except DaemonNotRunning:
+            proxy.close()
+            self._proxy = None
+            self._w("[yellow]Daemon not running — using direct mode (iris daemon start)[/]")
+            self.ctrl.start()  # direct TincanCallControl
+            self._posture.subscribe(lambda ev: self.events.put(("posture_changed", ev)))
+            eff = self._posture.effective()
+            self._dnd = eff["dnd"]
+            self._refresh_status()
+
+        # ti-veyx: load the WebRTC AEC once (idempotent) for feedback-free call
+        # audio. Unconditional so it's ready in direct mode and after a
+        # daemon-disconnect fallback (which calls ctrl.start()).
+        self._ensure_aec_up()
 
         def _current_mode() -> str:
             if self._far_stream is not None:
@@ -364,7 +506,6 @@ class IrisConsole(App):
             emit=self.events.put,
         )
         self.set_interval(0.5, self._proactive_delivery.tick)
-        self._refresh_status()
 
     def _drain(self) -> None:
         """Pump conductor + stream events (posted from worker threads) into the UI."""
@@ -502,8 +643,69 @@ class IrisConsole(App):
                     self._refresh_status()
                 elif kind == "mute":
                     self._refresh_status()
+                elif kind == "posture_changed":
+                    payload = ev[1]
+                    self._dnd = payload.get("dnd", False)
+                    self._dnd_expires = payload.get("dnd_expires")
+                    self._refresh_status()
+                elif kind == "daemon_event":
+                    self._on_daemon_event(ev[1])
         except queue.Empty:
             pass
+        # Update screen countdown once per second (visual-only; flow wired in ti-gxpt.5+)
+        if self._incoming_call_id and self._incoming_verb == "screen":
+            now = time.monotonic()
+            if now - self._countdown_last >= 1.0:
+                self._countdown_last = now
+                elapsed = int(now - self._screen_start)
+                remaining = max(0, self._screen_auto_s - elapsed)
+                self.query_one(IncomingCallPanel).update_countdown(remaining)
+
+    def _on_daemon_event(self, ev: dict) -> None:
+        """Handle a JSON event received from DaemonProxy."""
+        event_type = ev.get("event", "")
+        if event_type == "incoming_call":
+            self._incoming_call_id = ev.get("call_id")
+            self._incoming_verb = ev.get("verb", "")
+            self._incoming_choices = ev.get("choices", [])
+            caller_name = ev.get("caller_name", "")
+            caller_number = ev.get("caller_number", "")
+            if self._incoming_verb == "screen":
+                self._screen_start = time.monotonic()
+                self._countdown_last = 0.0
+            panel = self.query_one(IncomingCallPanel)
+            panel.show(
+                self._incoming_verb,
+                caller_name,
+                caller_number,
+                self._incoming_choices,
+            )
+            self.notify(
+                f"Incoming call: {caller_name or caller_number}",
+                severity="warning",
+            )
+            self.refresh_bindings()
+            self._refresh_status()
+        elif event_type == "screen_intro":
+            if ev.get("call_id") == self._incoming_call_id:
+                self.query_one(IncomingCallPanel).update_intro(ev.get("intro", ""))
+        elif event_type == "call_ended":
+            if ev.get("call_id") == self._incoming_call_id or self._incoming_call_id:
+                self._incoming_call_id = None
+                self._incoming_verb = None
+                self._incoming_choices = []
+                self.query_one(IncomingCallPanel).hide()
+                self.refresh_bindings()
+                self._refresh_status()
+        elif event_type == "posture":
+            self._dnd = ev.get("dnd", False)
+            self._dnd_expires = ev.get("expires_in_s")
+            self._refresh_status()
+        elif event_type == "disconnected":
+            self._w("[yellow]Daemon disconnected — returning to direct mode[/]")
+            self._proxy = None
+            self.ctrl.start()
+            self._posture.subscribe(lambda e: self.events.put(("posture_changed", e)))
 
     # --- ti-veyx: seamless phone-call ride-along (adopt the live SCO endpoint) ---
 
@@ -687,6 +889,13 @@ class IrisConsole(App):
                 )
             else:
                 parts.append(f"[b yellow]🔔 {self._proactive_badge}[/]")
+        if self._dnd:
+            if self._dnd_expires is not None:
+                from datetime import datetime as _dt
+                until = _dt.fromtimestamp(self._dnd_expires).strftime("%H:%M")
+                parts.append(f"[b #f38ba8]■ DND until {until}[/]")
+            else:
+                parts.append("[b #f38ba8]■ DND[/]")
         if self._note:
             parts.append(self._note)
         self.query_one("#status", Static).update(" " + "  ·  ".join(parts))
@@ -868,6 +1077,31 @@ class IrisConsole(App):
         self.conductor.toggle_mute()
         self._refresh_status()
 
+    def action_toggle_dnd(self) -> None:
+        """Toggle DND (do not disturb) via proxy (daemon mode) or PostureManager (direct)."""
+        if self._proxy is not None:
+            action = "off" if self._dnd else "on"
+            try:
+                self._proxy.send({"cmd": "dnd", "action": action})
+            except DaemonNotRunning:
+                self._w("[red]Daemon disconnected — DND not toggled[/]")
+                return
+            if action == "on":
+                self._w("[yellow]DND ON — calls will be screened.[/]")
+                self.notify("DND on — calls will be screened.", severity="warning")
+            else:
+                self._w("[green]DND OFF.[/]")
+                self.notify("DND off — calls will ring normally.", severity="information")
+        else:
+            if self._dnd:
+                self._posture.clear_dnd()
+                self._w("[green]DND OFF.[/]")
+                self.notify("DND off — calls will ring normally.", severity="information")
+            else:
+                self._posture.set_dnd("manual")
+                self._w("[yellow]DND ON — calls will be screened.[/]")
+                self.notify("DND on — calls will be screened.", severity="warning")
+
     def action_commands(self) -> None:
         """Dump what Iris handles: Tier-0 instant commands + the Tier-1 skills."""
         self._w("[b]Known commands[/] [dim](Tier-0 — instant, no model)[/]")
@@ -880,6 +1114,7 @@ class IrisConsole(App):
             for s in skills:
                 self._w(f"  [cyan]{s.name:<12}[/] [dim]{s.description}[/]")
         self._w('[dim]Anything else → local model · "ask Haiku about …" → cloud[/]')
+        self._w("  [cyan]d[/]          [dim]toggle DND (do not disturb)[/]")
 
     def action_notification(self) -> None:
         """Cycle to the next pending proactive notification ([n] key)."""
@@ -903,7 +1138,42 @@ class IrisConsole(App):
     def check_action(self, action: str, parameters: tuple) -> bool:
         if action == "notification":
             return bool(self._proactive_badge)
+        if action in ("choose_1", "choose_2", "choose_3"):
+            return self._incoming_call_id is not None
         return True
+
+    def _send_choose(self, index: int) -> None:
+        """Send a choose command for the Nth choice (1-based)."""
+        if self._incoming_call_id is None:
+            return
+        choices = self._incoming_choices
+        if index < 1 or index > len(choices):
+            self._w(f"[dim](choice {index} not available)[/]")
+            return
+        choice = choices[index - 1]
+        label = choice.get("label", str(index))
+        action_id = choice.get("id", "")
+        if self._proxy is not None:
+            try:
+                self._proxy.send({
+                    "cmd": "choose",
+                    "call_id": self._incoming_call_id,
+                    "action_id": action_id,
+                })
+            except DaemonNotRunning:
+                self._w("[red]Daemon disconnected — choice not sent[/]")
+                return
+        self._w(f"[cyan]→ {label}[/]")
+        self.notify(f"Choice: {label}", severity="information")
+
+    def action_choose_1(self) -> None:
+        self._send_choose(1)
+
+    def action_choose_2(self) -> None:
+        self._send_choose(2)
+
+    def action_choose_3(self) -> None:
+        self._send_choose(3)
 
     def on_unmount(self) -> None:
         for stream in (self._stream, self._far_stream):
@@ -911,6 +1181,8 @@ class IrisConsole(App):
                 stream.stop()
         self.conductor.interrupt()
         self.conductor.close()
+        if self._proxy is not None:
+            self._proxy.close()
         if self._logf is not None:
             self._logf.close()
 
