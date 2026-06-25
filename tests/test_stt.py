@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-from iris.audio.stt import FasterWhisperSTT, default_stt
+from iris.audio.stt import FasterWhisperSTT, FasterWhisperServerSTT, default_stt
 
 
 def _stt() -> FasterWhisperSTT:
