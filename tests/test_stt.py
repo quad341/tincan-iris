@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-from iris.audio.stt import FasterWhisperSTT, default_stt
+from iris.audio.stt import FasterWhisperSTT, FasterWhisperServerSTT, default_stt
 
 
 def _stt() -> FasterWhisperSTT:
@@ -44,4 +44,5 @@ def test_unavailable_when_paths_missing() -> None:
 
 
 def test_default_stt_is_faster_whisper() -> None:
-    assert isinstance(default_stt(), FasterWhisperSTT)
+    with patch.object(FasterWhisperServerSTT, "available", return_value=False):
+        assert isinstance(default_stt(), FasterWhisperSTT)
