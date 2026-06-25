@@ -5,12 +5,12 @@ textarea (600-char cap, 500-char warning) and handling-rule selector.
 
 Open with [K] from the main console; [q] / Escape closes.
 
-Badge palette (from bead ti-9szl notes):
-  vip         → purple
-  take_message → blue
-  screen       → amber
-  block        → red
-  normal       → grey (no badge)
+Badge palette (ADR-0006 enum names):
+  ring_with_announcement → purple (ANNOUNCE)
+  take_message           → blue   (MSG)
+  screen                 → amber  (SCREEN)
+  ignore                 → red    (IGNORE)
+  ring_through           → grey   (no badge)
 """
 from __future__ import annotations
 
@@ -31,13 +31,13 @@ from .contacts_logic import (
 
 _UNKNOWN_ROW_KEY = "__unknown__"
 
-# Visible labels for the Select widget.
+# Visible labels for the Select widget (ADR-0006 enum names).
 _RULE_LABELS: list[tuple[str, str]] = [
-    ("Normal", "normal"),
-    ("VIP", "vip"),
-    ("Screen", "screen"),
-    ("Take message", "take_message"),
-    ("Block", "block"),
+    ("Ring through",   "ring_through"),
+    ("Announce caller","ring_with_announcement"),
+    ("Screen call",    "screen"),
+    ("Take message",   "take_message"),
+    ("Ignore",         "ignore"),
 ]
 
 
@@ -56,7 +56,7 @@ class ContactEditor(Vertical):
     ContactEditor {
         display: none;
         height: auto;
-        max-height: 16;
+        max-height: 18;
         border: round #4040aa;
         padding: 1 2;
         background: #12112a;
@@ -70,9 +70,25 @@ class ContactEditor(Vertical):
         text-style: bold;
         margin-bottom: 1;
     }
+    ContactEditor #rule-row {
+        height: auto;
+        margin-bottom: 1;
+    }
     ContactEditor #rule-select {
         width: 24;
-        margin-bottom: 1;
+    }
+    ContactEditor #ignore-warning {
+        display: none;
+        color: #c8a000;
+        border: solid #c8a000;
+        background: #3a2d00;
+        padding: 0 2;
+        margin-left: 1;
+        height: 3;
+        width: auto;
+    }
+    ContactEditor #ignore-warning.visible {
+        display: block;
     }
     ContactEditor #notes-area {
         height: 5;
@@ -95,12 +111,17 @@ class ContactEditor(Vertical):
 
     def compose(self) -> ComposeResult:
         yield Static("", id="editor-name")
-        yield Select(
-            options=_RULE_LABELS,
-            value="normal",
-            id="rule-select",
-            allow_blank=False,
-        )
+        with Horizontal(id="rule-row"):
+            yield Select(
+                options=_RULE_LABELS,
+                value="ring_through",
+                id="rule-select",
+                allow_blank=False,
+            )
+            yield Static(
+                "⚠  Caller goes to carrier voicemail directly.",
+                id="ignore-warning",
+            )
         yield TextArea("", id="notes-area")
         yield Static("0/600", id="char-counter")
         with Horizontal(classes="editor-buttons"):
@@ -114,7 +135,9 @@ class ContactEditor(Vertical):
             f"[b]Editing:[/] {contact.display_name}  [dim]{contact.phone_e164}[/]"
         )
         select = self.query_one("#rule-select", Select)
-        select.value = contact.handling_rule if contact.handling_rule in _HANDLING_RULES else "normal"
+        rule = contact.handling_rule if contact.handling_rule in _HANDLING_RULES else "ring_through"
+        select.value = rule
+        self._update_ignore_warning(rule)
         ta = self.query_one("#notes-area", TextArea)
         ta.load_text(contact.relationship_notes or "")
         self._update_counter(len(contact.relationship_notes or ""))
@@ -123,14 +146,26 @@ class ContactEditor(Vertical):
         """Prepare editor for a new contact (blank fields)."""
         self._contact_id = None
         self.query_one("#editor-name", Static).update("[b]New contact[/]")
-        self.query_one("#rule-select", Select).value = "normal"
+        self.query_one("#rule-select", Select).value = "ring_through"
+        self._update_ignore_warning("ring_through")
         ta = self.query_one("#notes-area", TextArea)
         ta.load_text("")
         self._update_counter(0)
 
     def current_rule(self) -> str:
         sel = self.query_one("#rule-select", Select)
-        return str(sel.value) if sel.value else "normal"
+        return str(sel.value) if sel.value else "ring_through"
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "rule-select":
+            self._update_ignore_warning(str(event.value))
+
+    def _update_ignore_warning(self, rule: str) -> None:
+        warning = self.query_one("#ignore-warning", Static)
+        if rule == "ignore":
+            warning.add_class("visible")
+        else:
+            warning.remove_class("visible")
 
     def current_notes(self) -> str:
         return self.query_one("#notes-area", TextArea).text
@@ -241,7 +276,7 @@ class ContactsScreen(Screen):
         table.add_row(
             "[dim](unknown callers)[/]",
             "[dim]*[/]",
-            rule_badge("normal"),
+            rule_badge("ring_through"),
             "[dim]—[/]",
             "[dim]demo[/]",
             key=_UNKNOWN_ROW_KEY,
