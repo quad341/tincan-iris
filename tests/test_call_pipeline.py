@@ -21,9 +21,8 @@ import tempfile
 import threading
 import types
 import wave
-from dataclasses import dataclass, field
-from typing import Callable
-from unittest.mock import AsyncMock, MagicMock, patch
+from dataclasses import dataclass
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -310,8 +309,6 @@ def test_stop_cancels_pipeline_task_cleanly():
 
     runner_cls = sys.modules["pipecat.pipeline.runner"].PipelineRunner
     started = threading.Event()
-    stop_allowed = threading.Event()
-
     async def _blocking_run(task):
         started.set()
         await asyncio.sleep(0)  # yield control once

@@ -20,7 +20,6 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
-from unittest.mock import patch
 
 import pytest
 

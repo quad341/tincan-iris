@@ -32,19 +32,12 @@ The calendar and NotesStore are replaced by in-memory stubs.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
-from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 pytest.importorskip("textual")
 
 from iris.console.ride_along import (  # noqa: E402
-    CAPTURE_PATTERN,
-    COMMITMENT_PATTERN,
-    ACTION_ITEM_PATTERN,
-    FLAG_PATTERN,
     CardFeed,
     CardType,
     CaptureCard,
