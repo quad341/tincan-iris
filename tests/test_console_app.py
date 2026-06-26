@@ -640,3 +640,45 @@ def test_far_gate_opens_only_after_consent():
             await pilot.press("q")
 
     asyncio.run(scenario())
+
+
+def test_iris_question_opens_no_wakeword_answer_window():
+    """When Iris asks a question, the operator answers WITHOUT a wake word: a '?'
+    reply arms _await_answer; reaching IDLE opens the follow-up window; the next
+    plain utterance is dispatched."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            dispatched = []
+            app._dispatch = lambda cmd, speaker="": dispatched.append((cmd, speaker)) or True
+            app.events.put(("reply", "Shall I dial?", "tier1", ""))
+            app._drain()
+            assert app._await_answer is True
+            app.events.put(("state", State.IDLE))
+            app._drain()
+            assert app._follow_up_until > 0.0  # window opened on stop-speaking
+            app._on_heard_main("yes please", "")  # no wake word
+            assert dispatched == [("yes please", "")]
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_iris_statement_does_not_open_answer_window():
+    """A non-question reply does NOT open the no-wake-word window — plain chatter
+    stays overheard, not dispatched."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            dispatched = []
+            app._dispatch = lambda cmd, speaker="": dispatched.append(cmd) or True
+            app.events.put(("reply", "Done — I saved that note.", "tier1", ""))
+            app._drain()
+            assert app._await_answer is False
+            app.events.put(("state", State.IDLE))
+            app._drain()
+            app._on_heard_main("okay thanks", "")
+            assert dispatched == []  # no wake word + no window → overheard
+            await pilot.press("q")
+
+    asyncio.run(scenario())

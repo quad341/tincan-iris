@@ -425,6 +425,9 @@ class IrisConsole(App):
         self._pre_call_muted: bool = False
         self._far_announced: bool = False  # ti-rqhn: announced consent to the far party this call?
         self._follow_up_until: float = 0.0
+        # Iris asked a question → listen for the reply without a wake word. Armed when
+        # her reply ends with "?"; the window opens when she stops speaking (→ IDLE).
+        self._await_answer: bool = False
         self._messages = MessageStore()
         self._roster = RosterStore()
         self._posture = PostureManager()
@@ -528,6 +531,9 @@ class IrisConsole(App):
                 elif kind == "reply":
                     self._w(f"[bold cyan]iris[/] › {ev[1]}")
                     self._w(f"        [dim]⟮{ev[2]} · {ev[3]}⟯[/]")
+                    # If Iris asked a question, listen for the answer without a wake
+                    # word — the window opens when she stops speaking (state → IDLE).
+                    self._await_answer = bool(ev[1]) and ev[1].rstrip().endswith("?")
                 elif kind == "heard":
                     self._on_heard_main(ev[1], ev[2] if len(ev) > 2 else "")
                 elif kind == "heard_far":
@@ -653,6 +659,11 @@ class IrisConsole(App):
                 elif kind == "state":
                     if ev[1] is State.IDLE:
                         self._note = ""
+                        if self._await_answer:
+                            # Iris just finished asking a question — open the
+                            # no-wake-word window so the operator can just answer.
+                            self._await_answer = False
+                            self._follow_up_until = time.monotonic() + _FOLLOW_UP_S
                     self._refresh_status()
                 elif kind == "mute":
                     self._refresh_status()
