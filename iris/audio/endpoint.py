@@ -12,6 +12,7 @@ built on it.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import signal
 import subprocess
@@ -352,6 +353,124 @@ class TincanSCOAudio(VirtualDeviceAudio):
         return _MultiPlayback(procs)
 
 
+class _LoopbackRecording:
+    """The 'recording' handed back by :class:`LoopbackAudioEndpoint` — actually the
+    next pre-recorded far-party fixture turn. ``.stop()`` returns its WAV path,
+    mirroring :class:`_Recording`."""
+
+    def __init__(self, wav_path: str) -> None:
+        self.wav_path = wav_path
+
+    def stop(self) -> str:
+        return self.wav_path
+
+
+class _LoopbackPlayback:
+    """The 'playback' handed back by :class:`LoopbackAudioEndpoint`. The WAV is
+    logged to the uplink the instant it starts; ``.wait()`` is a no-op (no real
+    audio to block on) and ``.stop()`` flags the turn ``interrupted`` so a test can
+    assert barge-in happened, mirroring :class:`_Playback`."""
+
+    def __init__(self) -> None:
+        self.interrupted = False
+
+    def wait(self) -> None:
+        return None
+
+    def stop(self) -> None:
+        self.interrupted = True
+
+
+class LoopbackAudioEndpoint:
+    """In-memory ``AudioEndpoint`` for driving Iris with **no Bluetooth and no audio
+    hardware** — the dev/CI seam from ``docs/designs/voice-call-architecture.md`` §7.
+
+    It drops into the exact slot the BT-SCO endpoint uses, so a whole call can be
+    run in a test or a scripted demo:
+
+    - ``capture()`` / ``start_capture()`` replay the next queued **far-party**
+      fixture turn (a pre-recorded WAV — e.g. a synthetic caller, telephone-degraded).
+    - ``playback()`` / ``start_playback()`` record what Iris puts on the **uplink**
+      to :attr:`played` (and, when ``uplink_dir`` is set, copy each WAV there), so a
+      test can assert what she said and in what order.
+
+    Fixtures are consumed front-to-back. When they run out, ``capture`` returns
+    ``silence_wav`` if one was given, otherwise it raises ``IndexError`` — so a test
+    fails loudly instead of hanging on a phantom turn.
+    """
+
+    name = "loopback"
+
+    def __init__(
+        self,
+        fixtures: list[str] | None = None,
+        *,
+        uplink_dir: str | None = None,
+        silence_wav: str | None = None,
+    ) -> None:
+        self._fixtures: list[str] = list(fixtures or [])
+        self._next = 0
+        self._uplink_dir = uplink_dir
+        self._silence_wav = silence_wav
+        # What Iris played onto the uplink, in order (the WAVs the far party heard).
+        self.played: list[str] = []
+        # Copies of each played WAV under ``uplink_dir``, in order ([] if unset).
+        self.uplink_files: list[str] = []
+        # Protocol attrs — loopback has no separate far source/backend.
+        self.far_source: str | None = None
+        self.far_backend: str = "pulse"
+
+    # --- queueing far-party turns -----------------------------------------
+    def queue(self, *wav_paths: str) -> None:
+        """Append one or more far-party turns for later ``capture()`` calls."""
+        self._fixtures.extend(wav_paths)
+
+    @property
+    def remaining(self) -> int:
+        """How many queued far-party turns have not yet been captured."""
+        return max(0, len(self._fixtures) - self._next)
+
+    # --- capture (ears) — replay the next far-party fixture ---------------
+    def _next_fixture(self) -> str:
+        if self._next < len(self._fixtures):
+            wav = self._fixtures[self._next]
+            self._next += 1
+            return wav
+        if self._silence_wav is not None:
+            return self._silence_wav
+        raise IndexError(
+            "LoopbackAudioEndpoint: no more far-party fixtures queued "
+            "(pass silence_wav= to return silence instead of raising)"
+        )
+
+    def start_capture(self) -> _LoopbackRecording:
+        return _LoopbackRecording(self._next_fixture())
+
+    def capture(self, seconds: float) -> str:
+        # ``seconds`` is the listen window; a fixture has its own length, so the
+        # arg is accepted for interface-compatibility and otherwise ignored.
+        return self.start_capture().stop()
+
+    # --- playback (mouth) — record onto the uplink log -------------------
+    def _record_uplink(self, wav_path: str) -> None:
+        self.played.append(wav_path)
+        if self._uplink_dir is not None:
+            os.makedirs(self._uplink_dir, exist_ok=True)
+            dst = os.path.join(
+                self._uplink_dir, f"uplink-{len(self.played):03d}.wav"
+            )
+            shutil.copyfile(wav_path, dst)
+            self.uplink_files.append(dst)
+
+    def start_playback(self, wav_path: str) -> _LoopbackPlayback:
+        # The turn reaches the uplink the instant it starts playing.
+        self._record_uplink(wav_path)
+        return _LoopbackPlayback()
+
+    def playback(self, wav_path: str) -> None:
+        self.start_playback(wav_path).wait()
+
+
 def list_audio_devices() -> dict[str, list[str]]:
     """Return ``{"sinks": [...], "sources": [...]}`` from ``pactl list short``.
 
@@ -380,6 +499,9 @@ def default_endpoint() -> AudioEndpoint:
     - ``IRIS_AUDIO=tincan-sco`` rides tincan's live HFP/SCO call audio: the bluez
       nodes are discovered (``IRIS_SCO_SINK`` / ``IRIS_SCO_SOURCE`` override) — a
       call must be active for them to exist.
+    - ``IRIS_AUDIO=loopback`` drives Iris with no hardware: far-party turns from
+      ``IRIS_LOOPBACK_FIXTURES`` (comma-separated WAV paths) and the uplink logged
+      to ``IRIS_LOOPBACK_UPLINK_DIR`` if set. See voice-call-architecture.md §7.
     - else ``IRIS_PLAYBACK_TARGET`` selects VirtualDeviceAudio (e.g. the
       ``iris_mic`` null-sink routing Iris into Discord/Zoom — see
       scripts/virtual_audio.sh).
@@ -401,6 +523,14 @@ def default_endpoint() -> AudioEndpoint:
             )
         aec = settings.get_bool("IRIS_AEC")
         return TincanSCOAudio(sink, source, aec=aec)
+    if (settings.get("IRIS_AUDIO", "") or "").lower() == "loopback":
+        # No-hardware test/dev seam (§7). Far-party fixtures + the uplink dir come
+        # from the env; fixture paths are comma-separated. Empty is allowed — turns
+        # can also be queued programmatically via LoopbackAudioEndpoint.queue().
+        raw = settings.get("IRIS_LOOPBACK_FIXTURES", "") or ""
+        fixtures = [p for p in (s.strip() for s in raw.split(",")) if p]
+        uplink_dir = settings.get("IRIS_LOOPBACK_UPLINK_DIR") or None
+        return LoopbackAudioEndpoint(fixtures, uplink_dir=uplink_dir)
     target = settings.get("IRIS_PLAYBACK_TARGET")
     if target:
         capture = settings.get("IRIS_CAPTURE_TARGET") or (
