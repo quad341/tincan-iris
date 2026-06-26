@@ -99,7 +99,7 @@ class KokoroTTS:
             for p in (self.python, self.model, self.voices, _SYNTH_SCRIPT)
         )
 
-    def synth(self, text: str) -> str:
+    def synth(self, text: str, *, speed: float = 1.0, lang: str | None = None) -> str:
         wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
         txt = tempfile.NamedTemporaryFile(
             suffix=".txt", delete=False, mode="w", encoding="utf-8"
@@ -113,6 +113,8 @@ class KokoroTTS:
                 "--voice", self.voice, "--speed", str(self.speed),
                 "--text-file", txt.name, "--out", wav,
             ]
+            if lang is not None:
+                cmd += ["--lang", lang]
             if self.isolate:
                 cmd = ["unshare", "-rn", *cmd]  # fresh net namespace -> no egress
             proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -155,12 +157,16 @@ class KokoroServerTTS:
         except (urllib.error.URLError, socket.timeout, json.JSONDecodeError, OSError):
             return False
 
-    def synth(self, text: str, voice: str | None = None, speed: float | None = None) -> str:
-        body = json.dumps({
+    def synth(self, text: str, *, voice: str | None = None, speed: float = 1.0,
+              lang: str | None = None) -> str:
+        payload: dict = {
             "text": text,
             "voice": voice if voice is not None else self.voice,
-            "speed": speed if speed is not None else self.speed,
-        }).encode()
+            "speed": self.speed * speed,
+        }
+        if lang is not None:
+            payload["lang"] = lang
+        body = json.dumps(payload).encode()
         req = urllib.request.Request(
             f"{self._server_url}/synth",
             data=body,

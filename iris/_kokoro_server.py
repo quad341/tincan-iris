@@ -44,9 +44,10 @@ class KokoroServerState:
         self.ready = True
         print(f"{_ts()} kokoro ready", file=sys.stderr, flush=True)
 
-    def synth(self, text: str, voice: str = "af_heart", speed: float = 1.0) -> bytes:
+    def synth(self, text: str, voice: str = "af_heart", speed: float = 1.0,
+              lang: str = "en-us") -> bytes:
         import soundfile as sf
-        samples, sample_rate = self._kokoro.create(text, voice=voice, speed=speed, lang="en-us")
+        samples, sample_rate = self._kokoro.create(text, voice=voice, speed=speed, lang=lang)
         buf = io.BytesIO()
         sf.write(buf, samples, sample_rate, format="WAV")
         return buf.getvalue()
@@ -83,8 +84,9 @@ def _handle_kokoro_post(path: str, body: bytes, state: KokoroServerState) -> _Re
         return _Response(400, b'{"error":"missing text"}')
     voice = data.get("voice", "af_heart")
     speed = float(data.get("speed", 1.0))
+    lang = data.get("lang", "en-us")
     try:
-        wav_bytes = state.synth(text, voice=voice, speed=speed)
+        wav_bytes = state.synth(text, voice=voice, speed=speed, lang=lang)
         return _Response(200, wav_bytes, content_type="audio/wav")
     except Exception as exc:
         return _Response(500, json.dumps({"error": str(exc)}).encode())
