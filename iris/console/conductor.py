@@ -30,6 +30,9 @@ class Conductor:
     """Drives one local voice turn at a time. ``emit`` is a thread-safe sink for
     event tuples; the front-end consumes them to render."""
 
+    CADENCE_SLOW: float = 0.7   # speed multiplier for re-ask turns (will move to cfg.cadence_slow when ti-140k lands)
+    CADENCE_NORMAL: float = 1.0
+
     def __init__(self, stt, brain, tts, mic, emit, *, pick=None) -> None:
         self.stt = stt
         self.brain = brain
@@ -170,8 +173,9 @@ class Conductor:
         self.emit(("reply", reply.text, tag, reply.timeline.summary()))
         if not self.muted:
             self._set_state(State.SPEAKING)
+            speed = self.CADENCE_SLOW if reply.re_ask else self.CADENCE_NORMAL
             try:
-                self._play = self.mic.start_playback(self.tts.synth(reply.text))
+                self._play = self.mic.start_playback(self.tts.synth(reply.text, speed=speed))
                 self._play.wait()
             except Exception as exc:  # noqa: BLE001
                 self.emit(("error", f"tts: {exc}"))

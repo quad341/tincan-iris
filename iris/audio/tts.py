@@ -37,8 +37,11 @@ _SYNTH_SCRIPT = Path(__file__).resolve().parent / "_kokoro_synth.py"
 class TTS(Protocol):
     name: str
 
-    def synth(self, text: str) -> str:
-        """Render ``text`` to a WAV file; return its path."""
+    def synth(self, text: str, *, speed: float = 1.0) -> str:
+        """Render ``text`` to a WAV file; return its path.
+
+        speed is a cadence multiplier (1.0 = normal, 0.7 = slow-mode for re-ask turns).
+        """
         ...
 
 
@@ -51,10 +54,11 @@ class EspeakTTS:
         self.voice = voice
         self.rate_wpm = rate_wpm
 
-    def synth(self, text: str) -> str:
+    def synth(self, text: str, *, speed: float = 1.0) -> str:
         wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
+        effective_wpm = max(1, round(self.rate_wpm * speed))
         subprocess.run(
-            ["espeak-ng", "-v", self.voice, "-s", str(self.rate_wpm), "-w", wav, text],
+            ["espeak-ng", "-v", self.voice, "-s", str(effective_wpm), "-w", wav, text],
             check=True,
         )
         return wav
@@ -99,7 +103,7 @@ class KokoroTTS:
             for p in (self.python, self.model, self.voices, _SYNTH_SCRIPT)
         )
 
-    def synth(self, text: str) -> str:
+    def synth(self, text: str, *, speed: float = 1.0) -> str:
         wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
         txt = tempfile.NamedTemporaryFile(
             suffix=".txt", delete=False, mode="w", encoding="utf-8"
@@ -110,7 +114,7 @@ class KokoroTTS:
             cmd = [
                 self.python, str(_SYNTH_SCRIPT),
                 "--model", self.model, "--voices", self.voices,
-                "--voice", self.voice, "--speed", str(self.speed),
+                "--voice", self.voice, "--speed", str(self.speed * speed),
                 "--text-file", txt.name, "--out", wav,
             ]
             if self.isolate:
@@ -155,11 +159,11 @@ class KokoroServerTTS:
         except (urllib.error.URLError, socket.timeout, json.JSONDecodeError, OSError):
             return False
 
-    def synth(self, text: str, voice: str | None = None, speed: float | None = None) -> str:
+    def synth(self, text: str, *, voice: str | None = None, speed: float = 1.0) -> str:
         body = json.dumps({
             "text": text,
             "voice": voice if voice is not None else self.voice,
-            "speed": speed if speed is not None else self.speed,
+            "speed": self.speed * speed,
         }).encode()
         req = urllib.request.Request(
             f"{self._server_url}/synth",

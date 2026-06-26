@@ -31,13 +31,16 @@ class Voice:
         self.endpoint = endpoint or LocalAudio()
         self._pick = filler_picker()
 
-    def speak(self, text: str) -> None:
-        self.endpoint.playback(self.tts.synth(text))
+    _CADENCE_SLOW: float = 0.7
+
+    def speak(self, text: str, *, speed: float = 1.0) -> None:
+        self.endpoint.playback(self.tts.synth(text, speed=speed))
 
     def say_reply(self, user_text: str):
         # randomized spoken fillers while a lane lags; Ctrl-C stops it
         reply = self.brain.respond(user_text, on_filler=lambda i: self.speak(self._pick()))
-        self.speak(reply.text)
+        speed = self._CADENCE_SLOW if reply.re_ask else 1.0
+        self.speak(reply.text, speed=speed)
         return reply
 
     def close(self) -> None:
