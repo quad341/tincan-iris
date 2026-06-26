@@ -15,8 +15,8 @@ import tempfile
 import threading
 import types
 import wave
-from dataclasses import dataclass
-from unittest.mock import MagicMock
+from dataclasses import dataclass, field
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -59,7 +59,7 @@ def _install_pipecat_stubs() -> None:
 
         async def run_stt(self, audio: bytes):
             return
-            yield  # noqa — makes it an async generator
+            yield  # noqa: unreachable — makes it an async generator
 
     pipecat = types.ModuleType("pipecat")
     frames_pkg = types.ModuleType("pipecat.frames")
