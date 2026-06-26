@@ -95,7 +95,7 @@ class TincanCallControl:
                 time.sleep(self._discover_delay)
         if sink:
             self.endpoint = TincanSCOAudio(
-                sink, source, aec=settings.get_bool("IRIS_AEC", True)
+                sink, source, aec=settings.get_bool("IRIS_AEC")
             )
         self.emit(("call_connected", sink, source))
 

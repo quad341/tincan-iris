@@ -185,8 +185,9 @@ def test_call_connected_enables_aec_when_iris_aec_set():
     assert c.endpoint.aec is True
 
 
-def test_call_connected_aec_off_when_disabled():
-    """AEC honored off when settings say so (IRIS_AEC=0 / [audio] aec = false)."""
+def test_call_connected_aec_off_by_default():
+    """AEC is opt-in (IRIS_AEC / [audio] aec): off unless explicitly enabled —
+    loading it at startup starves the pre-call continuous-listen mic."""
     c, events = _ctrl()
     with patch(
         "iris.call_control.discover_sco_nodes",
@@ -195,22 +196,6 @@ def test_call_connected_aec_off_when_disabled():
         c._on_connected("call-1")
     assert c.endpoint is not None
     assert c.endpoint.aec is False
-
-
-def test_call_connected_aec_on_by_default():
-    """AEC is ON by default — the call site requests default=True from get_bool, so
-    with no IRIS_AEC env / config the canceller is enabled (echo-free speakerphone)."""
-    c, events = _ctrl()
-    with patch(
-        "iris.call_control.discover_sco_nodes",
-        return_value=("bluez_output.AA.1", "bluez_input.AA.0"),
-    ), patch(
-        "iris.call_control.settings.get_bool",
-        side_effect=lambda name, default=False: default,
-    ):
-        c._on_connected("call-1")
-    assert c.endpoint is not None
-    assert c.endpoint.aec is True
 
 
 def test_call_connected_retries_until_sco_nodes_appear():

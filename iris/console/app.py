@@ -753,15 +753,18 @@ class IrisConsole(App):
         return proc.returncode == 0
 
     def _ensure_aec_up(self) -> None:
-        """Load the WebRTC AEC once at startup. ON BY DEFAULT — echo cancellation is
-        almost always what you want on a speakerphone call; disable via config
-        ``[audio] aec = false`` (or ``IRIS_AEC=0``). Best-effort and non-fatal: if the
-        canceller can't load, the call still works without it (see ``_aec``).
+        """Load the WebRTC AEC once at startup when ``IRIS_AEC`` is set.
 
-        Keeping it always-loaded (not per-call) is the ti-veyx design: the canceller
-        is harmless when idle / on a headset and avoids a module load on every call.
+        Opt-in, NOT default-on: loading module-echo-cancel grabs the mic as its
+        ALSA source_master, which starves the pre-call continuous-listen capture
+        (it reads the same default mic) — so AEC must be enabled deliberately, per
+        ``[audio] aec = true`` / ``IRIS_AEC=1``, not forced on at startup.
+
+        Keeping it always-loaded (not per-call) is the ti-veyx design: the
+        canceller is harmless when idle / on a headset and avoids a module load on
+        every call. A second ``up`` just no-ops.
         """
-        if settings.get_bool("IRIS_AEC", True):
+        if settings.get_bool("IRIS_AEC"):
             self._aec("up")
 
     def _attach_call_audio(self) -> None:
