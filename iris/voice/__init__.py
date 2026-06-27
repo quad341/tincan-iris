@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import sys
 
-from .audio.endpoint import AudioEndpoint, LocalAudio
-from .audio.tts import TTS, default_tts
-from .brain import Brain
-from .fillers import filler_picker
+from ..audio.endpoint import AudioEndpoint, LocalAudio
+from ..audio.tts import TTS, default_tts
+from ..brain import Brain
+from ..fillers import filler_picker
 
 
 class Voice:
