@@ -8,7 +8,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from iris.up import bring_up, _is_active, _start_service
+from iris.up import (
+    bring_up,
+    _is_active,
+    _start_service,
+    _bring_up_tincand,
+    _print_tincand_readiness,
+)
 
 
 def _active_proc():
@@ -156,3 +162,125 @@ def test_iris_up_registered_in_commands():
     from iris.__main__ import _COMMANDS
     assert "up" in _COMMANDS
     assert "iris.up" in _COMMANDS["up"]
+
+
+# ---------------------------------------------------------------------------
+# _bring_up_tincand (tincan-m9t6h.1)
+# ---------------------------------------------------------------------------
+
+def test_bring_up_tincand_unit_absent():
+    with patch("iris.up._unit_known", return_value=False):
+        result = _bring_up_tincand()
+    assert result["reason"] == "unit-absent"
+    assert result["health"] is False
+
+
+def test_bring_up_tincand_start_timeout():
+    with patch("iris.up._unit_known", return_value=True), \
+         patch("iris.up._is_active", return_value=False), \
+         patch("iris.up.subprocess.run", return_value=MagicMock(returncode=0)), \
+         patch("iris.up._health_ok", return_value=False), \
+         patch("iris.up.time.sleep"):
+        result = _bring_up_tincand()
+    assert result["reason"] == "start-timeout"
+    assert result["health"] is False
+
+
+def test_bring_up_tincand_dbus_error():
+    with patch("iris.up._unit_known", return_value=True), \
+         patch("iris.up._is_active", return_value=True), \
+         patch("iris.up._health_ok", return_value=True), \
+         patch("iris.up._tincand_dbus_status", side_effect=Exception("no dbus")), \
+         patch("iris.up.time.sleep"):
+        result = _bring_up_tincand()
+    assert result["reason"] == "dbus-error"
+    assert result["health"] is True
+
+
+def test_bring_up_tincand_happy_path():
+    status = {
+        "connected": True,
+        "adapter_warning": "",
+        "call_setup_ready": True,
+        "device_discovered": True,
+    }
+    with patch("iris.up._unit_known", return_value=True), \
+         patch("iris.up._is_active", return_value=True), \
+         patch("iris.up._health_ok", return_value=True), \
+         patch("iris.up._tincand_dbus_status", return_value=status):
+        result = _bring_up_tincand()
+    assert result["reason"] == "ok"
+    assert result["health"] is True
+    assert result["connected"] is True
+    assert result["call_setup_ready"] is True
+    assert result["adapter_warning"] == ""
+
+
+def test_bring_up_tincand_adapter_warning():
+    status = {
+        "connected": False,
+        "adapter_warning": "iPhone on hci0 (built-in)",
+        "call_setup_ready": True,
+        "device_discovered": False,
+    }
+    with patch("iris.up._unit_known", return_value=True), \
+         patch("iris.up._is_active", return_value=True), \
+         patch("iris.up._health_ok", return_value=True), \
+         patch("iris.up._tincand_dbus_status", return_value=status):
+        result = _bring_up_tincand()
+    assert result["reason"] == "ok"
+    assert result["adapter_warning"] == "iPhone on hci0 (built-in)"
+
+
+# ---------------------------------------------------------------------------
+# _print_tincand_readiness (tincan-m9t6h.1)
+# ---------------------------------------------------------------------------
+
+def test_print_tincand_unit_absent(capsys):
+    _print_tincand_readiness({"reason": "unit-absent"})
+    out = capsys.readouterr().out
+    assert "not installed" in out
+    assert "optional" in out
+
+
+def test_print_tincand_start_timeout(capsys):
+    _print_tincand_readiness({"reason": "start-timeout"})
+    out = capsys.readouterr().out
+    assert "did not respond" in out
+    assert "journalctl" in out
+    assert "optional" in out
+
+
+def test_print_tincand_dbus_error(capsys):
+    _print_tincand_readiness({"reason": "dbus-error"})
+    out = capsys.readouterr().out
+    assert "degraded" in out or "D-Bus" in out
+
+
+def test_print_tincand_happy_no_warning(capsys):
+    _print_tincand_readiness({
+        "reason": "ok",
+        "adapter_warning": "",
+        "call_setup_ready": True,
+        "connected": True,
+        "device_discovered": True,
+        "health": True,
+    })
+    out = capsys.readouterr().out
+    assert "HFP daemon" in out
+    assert "SELinux" in out
+    assert "iPhone" in out
+
+
+def test_print_tincand_adapter_mismatch(capsys):
+    _print_tincand_readiness({
+        "reason": "ok",
+        "adapter_warning": "iPhone on hci0 (built-in, no SCO)",
+        "call_setup_ready": True,
+        "connected": False,
+        "device_discovered": False,
+        "health": True,
+    })
+    out = capsys.readouterr().out
+    assert "mismatch" in out.lower() or "hci0" in out
+    assert "iPhone" in out
