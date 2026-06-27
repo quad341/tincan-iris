@@ -113,7 +113,7 @@ def test_migration_sentinel_inserted(tmp_path):
     assert row is not None
 
 
-def test_migration_schema_version_set_to_1(tmp_path):
+def test_migration_schema_version_set_to_2(tmp_path):
     db = _v0_db(tmp_path / "roster.db")
     RosterStore(db).all()
     conn = sqlite3.connect(str(db))
