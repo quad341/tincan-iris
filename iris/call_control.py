@@ -123,6 +123,18 @@ class TincanCallControl:
         except Exception:  # noqa: BLE001 — D-Bus hiccup: log and move on
             self.emit(("answer_error", call_id))
 
+    def _hangup(self, call_id: str = "") -> None:
+        """Send ``Hangup(call_id)`` on the D-Bus interface. call_id='' lets tincand
+        fall back to HangupAll, which ends the single active call (matches the
+        ``Answer("")`` semantics above)."""
+        if self._bus is None:
+            return
+        try:
+            proxy = self._bus.get_object(_BUS_NAME, _OBJECT_PATH)
+            proxy.get_dbus_method("Hangup", _INTERFACE)(call_id)
+        except Exception:  # noqa: BLE001 — D-Bus hiccup: log and move on
+            self.emit(("hangup_error", call_id))
+
     def _dial(self, number: str) -> str | None:
         """Send ``Dial(number)`` on the D-Bus interface. Fire-and-continue: does not
         wait for CallConnected. 15-second timeout handling belongs in DialSkill."""

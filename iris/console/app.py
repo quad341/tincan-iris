@@ -42,7 +42,7 @@ from .. import settings
 from ..addressing import address
 from ..daemon.posture import PostureManager
 from ..daemon.proxy import DaemonNotRunning, DaemonProxy
-from ..message_store import MessageStore, VoiceMessage
+from ..message_store import MessageStore
 from ..prefs import PreferencesStore
 from .contacts import ContactsScreen
 from .contacts_logic import VERB_DESCRIPTION
@@ -75,6 +75,12 @@ _DEFAULT_ANNOUNCE = (
 # Addressed stop words -> a hard interrupt (cut her off now, no spoken reply).
 _STOP = re.compile(
     r"^\s*(?:stop|stand[ -]?down|cancel|never ?mind|quiet|enough|shush|hush)\b",
+    re.IGNORECASE,
+)
+
+# Operator voice command to end the call: "Hey Iris, hang up" (operator stream only).
+_HANGUP = re.compile(
+    r"^\s*(?:hang\s*up|hang\s*the\s*phone|end\s+(?:the\s+)?call|drop\s+the\s+call)\b",
     re.IGNORECASE,
 )
 
@@ -419,6 +425,9 @@ class IrisConsole(App):
         self._pre_call_muted: bool = False
         self._far_announced: bool = False  # ti-rqhn: announced consent to the far party this call?
         self._follow_up_until: float = 0.0
+        # Iris asked a question → listen for the reply without a wake word. Armed when
+        # her reply ends with "?"; the window opens when she stops speaking (→ IDLE).
+        self._await_answer: bool = False
         self._messages = MessageStore()
         self._roster = RosterStore()
         self._posture = PostureManager()
@@ -522,6 +531,9 @@ class IrisConsole(App):
                 elif kind == "reply":
                     self._w(f"[bold cyan]iris[/] › {ev[1]}")
                     self._w(f"        [dim]⟮{ev[2]} · {ev[3]}⟯[/]")
+                    # If Iris asked a question, listen for the answer without a wake
+                    # word — the window opens when she stops speaking (state → IDLE).
+                    self._await_answer = bool(ev[1]) and ev[1].rstrip().endswith("?")
                 elif kind == "heard":
                     self._on_heard_main(ev[1], ev[2] if len(ev) > 2 else "")
                 elif kind == "heard_far":
@@ -544,27 +556,34 @@ class IrisConsole(App):
                     )
                 elif kind == "call_connected":
                     self._in_call = True
-                    # ti-gbz4.1: mute mic by default at call start (push-to-talk model)
+                    # Hands-free ride-along: keep the mic UNMUTED so Iris's addressed
+                    # replies are audible to both parties (was: auto-mute push-to-talk,
+                    # ti-gbz4.1). She still only SPEAKS when addressed ("Hey Iris, …").
                     self._pre_call_muted = self.conductor.muted
-                    if not self.conductor.muted:
-                        self.conductor.toggle_mute()
-                    self._w("[yellow]call connected — mic muted (press [m] to unmute / push-to-talk)[/]")
-                    # ti-gbz4.2: stop far-party transcription gate
+                    # No auto-mute (was ti-gbz4.1 push-to-talk): ride-along keeps the
+                    # conductor's current state — unmuted by default — so addressed
+                    # replies are audible to both. The operator can still [m] to mute.
+                    # Drop any stale far stream from a prior call before re-consenting.
                     if self._far_stream is not None:
                         self._far_stream.stop()
                         self._far_stream = None
-                    if self._call_trust_eligible and self._call_contact_name:
-                        self.query_one(ActiveCallCard).show_card(
-                            self._call_contact_name
-                        )
-                    # ti-veyx: ride along on THIS console session — adopt the live
-                    # SCO endpoint instead of relaunching with IRIS_AUDIO=tincan-sco.
+                    # ti-veyx: adopt the live SCO endpoint so Iris hears/speaks on the call.
                     self._attach_call_audio()
+                    # Make the grant control reachable on ANY call (incl. outbound): the
+                    # operator arms via the ARM TRUST button, then [g] grants the far party.
+                    self.query_one(ActiveCallCard).show_card(
+                        self._call_contact_name or self._call_contact_number or "call"
+                    )
                     # ti-rqhn: re-announce every call — never assume prior consent.
                     self._far_announced = False
-                    # ti-rqhn screening seam (D2, not built): when auto_answer
-                    # screening lands, auto-announce here on pickup BEFORE enabling
-                    # far-party transcription (the gate stays the same).
+                    self._w(
+                        "[green]call connected — ride-along: say \"Hey Iris …\"; "
+                        "ARM TRUST + [g] to grant the far party[/]"
+                    )
+                    # Hands-free: continuously listen to the operator, and disclose to
+                    # BOTH parties — a successful announcement opens far-party
+                    # transcription via the far_announced gate (consent stays fail-closed).
+                    self._begin_ride_along()
                 elif kind in ("far_trust", "trust"):
                     card = self.query_one(ActiveCallCard)
                     if "visible" in card.classes:
@@ -640,6 +659,11 @@ class IrisConsole(App):
                 elif kind == "state":
                     if ev[1] is State.IDLE:
                         self._note = ""
+                        if self._await_answer:
+                            # Iris just finished asking a question — open the
+                            # no-wake-word window so the operator can just answer.
+                            self._await_answer = False
+                            self._follow_up_until = time.monotonic() + _FOLLOW_UP_S
                     self._refresh_status()
                 elif kind == "mute":
                     self._refresh_status()
@@ -731,6 +755,11 @@ class IrisConsole(App):
     def _ensure_aec_up(self) -> None:
         """Load the WebRTC AEC once at startup when ``IRIS_AEC`` is set.
 
+        Opt-in, NOT default-on: loading module-echo-cancel grabs the mic as its
+        ALSA source_master, which starves the pre-call continuous-listen capture
+        (it reads the same default mic) — so AEC must be enabled deliberately, per
+        ``[audio] aec = true`` / ``IRIS_AEC=1``, not forced on at startup.
+
         Keeping it always-loaded (not per-call) is the ti-veyx design: the
         canceller is harmless when idle / on a headset and avoids a module load on
         every call. A second ``up`` just no-ops.
@@ -766,6 +795,33 @@ class IrisConsole(App):
         self.mic = self._local_mic
         self.conductor.mic = self._local_mic
         self._w("[dim]ride-along: call ended — restored local audio[/]")
+
+    def _begin_ride_along(self) -> None:
+        """Hands-free ride-along on connect: continuously listen to the operator and
+        disclose to BOTH parties. The disclosure (on a successful announcement) opens
+        far-party transcription via the ``far_announced`` gate — consent stays
+        fail-closed. No push-to-talk; the operator addresses Iris with "Hey Iris, …"."""
+        if self._stream is None:
+            self.action_listen()             # start operator continuous listen
+        if not self._far_announced:
+            self._announce_then_hear_far()   # disclose -> far_announced -> _start_far_stream
+
+    def _hang_up_call(self) -> None:
+        """Operator voice command "Hey Iris, hang up": speak a goodbye to both parties
+        (blocking, so it is heard before the line drops), then end the call. Reached
+        only from the operator stream — the far party cannot hang up."""
+        if not self._in_call:
+            self._w("[dim](no active call to hang up)[/]")
+            return
+        self._w("[yellow]you → iris: hang up[/]")
+
+        def _bye_then_hangup() -> None:
+            try:
+                self.conductor.say("Sure — talk soon. Goodbye!")
+            finally:
+                self.ctrl._hangup("")  # noqa: SLF001 — D-Bus Hangup; CallEnded cleans up
+
+        self.run_worker(_bye_then_hangup, thread=True, exclusive=True)
 
     def _on_list_event(self, ev: tuple) -> None:
         """Handle list-related events from ListSkill background threads."""
@@ -830,6 +886,8 @@ class IrisConsole(App):
             self.conductor.interrupt()  # cut her off now; no spoken reply
             self._w("[yellow](stopped)[/]")
             self._refresh_status()
+        elif _HANGUP.match(cmd):
+            self._hang_up_call()  # operator-only end-call: say goodbye, then Hangup
         elif not self._dispatch(cmd, speaker):
             self._w("[dim](busy — one sec)[/]")
 
@@ -843,8 +901,8 @@ class IrisConsole(App):
         iris-arm CLI (the spoken-grant path was removed — ti-qt1i.1.1). The far
         party can never self-escalate (this path has no grant branch). See ADR-0002.
         """
-        if self._in_call:
-            return  # ti-gbz4.2: downlink suppressed during SCO/HFP calls
+        if self._in_call and not self._far_announced:
+            return  # ti-gbz4.2 + ti-rqhn: far party suppressed UNTIL consent announced
         cmd = address(text)
         if cmd is None:
             self._w(f"[dim]them: {text}[/]")  # respondent, not addressing Iris

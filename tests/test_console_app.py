@@ -467,8 +467,9 @@ def test_call_ended_hides_active_call_card():
 # --- call mic mute + far-party downlink gate (ti-gbz4.1, ti-gbz4.2) --------
 
 
-def test_call_connected_auto_mutes_unmuted_conductor():
-    """call_connected mutes an unmuted conductor and records _pre_call_muted=False."""
+def test_call_connected_no_auto_mute_for_ride_along():
+    """call_connected does NOT auto-mute: hands-free ride-along keeps the conductor
+    unmuted so addressed replies are audible. _pre_call_muted records pre-call state."""
     async def scenario():
         app = IrisConsole()
         async with app.run_test() as pilot:
@@ -477,7 +478,7 @@ def test_call_connected_auto_mutes_unmuted_conductor():
             app._drain()
             assert app._in_call is True
             assert app._pre_call_muted is False
-            assert app.conductor.muted is True
+            assert app.conductor.muted is False  # ride-along: stays unmuted
             await pilot.press("q")
 
     asyncio.run(scenario())
@@ -499,19 +500,19 @@ def test_call_connected_preserves_already_muted_state():
     asyncio.run(scenario())
 
 
-def test_call_ended_restores_unmuted_pre_call_state():
-    """call_ended unmutes the conductor when the operator was not muted before the call."""
+def test_call_ended_leaves_unmuted_when_pre_call_unmuted():
+    """A ride-along call that started unmuted ends unmuted (ride-along never auto-mutes)."""
     async def scenario():
         app = IrisConsole()
         async with app.run_test() as pilot:
             assert app.conductor.muted is False
             app.events.put(("call_connected",))
             app._drain()
-            assert app.conductor.muted is True  # auto-muted at call start
+            assert app.conductor.muted is False  # ride-along: not auto-muted
 
             app.events.put(("call_ended", "session-x"))
             app._drain()
-            assert app.conductor.muted is False  # restored to pre-call state
+            assert app.conductor.muted is False  # still unmuted
             assert app._in_call is False
             await pilot.press("q")
 
@@ -579,6 +580,105 @@ def test_action_far_blocked_during_call():
             assert app._far_stream is None
             await pilot.press("f")
             assert app._far_stream is None
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_hangup_voice_command_intercepted():
+    """'Hey Iris, hang up' (operator) is intercepted to the hang-up path and does NOT
+    reach the brain."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            called, dispatched = [], []
+            app._hang_up_call = lambda: called.append(True)
+            app._dispatch = lambda cmd, speaker="": dispatched.append(cmd) or True
+            app._on_heard_main("Hey Iris, hang up", "")
+            assert called == [True]
+            assert dispatched == []  # intercepted before brain dispatch
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_far_party_cannot_hang_up():
+    """The far party can never reach the hang-up path (operator-only), even with
+    consent open."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            called = []
+            app._hang_up_call = lambda: called.append(True)
+            app._dispatch = lambda cmd, speaker="": True
+            app._in_call = True
+            app._far_announced = True  # consent given, far transcription open
+            app._on_heard_far_main("Hey Iris, hang up", "far")
+            assert called == []  # far party cannot hang up
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_far_gate_opens_only_after_consent():
+    """Far-party commands are dispatched ONLY after the consent announcement
+    (_far_announced) — the ride-along consent gate."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            dispatched = []
+            app._dispatch = lambda cmd, speaker="": dispatched.append((cmd, speaker)) or True
+            app._in_call = True
+            # before consent: suppressed (fail-closed)
+            app._far_announced = False
+            app._on_heard_far_main("Hey Iris, what's the time?", "far")
+            assert dispatched == []
+            # after consent: dispatched
+            app._far_announced = True
+            app._on_heard_far_main("Hey Iris, what's the time?", "far")
+            assert dispatched == [("what's the time?", "far")]
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_iris_question_opens_no_wakeword_answer_window():
+    """When Iris asks a question, the operator answers WITHOUT a wake word: a '?'
+    reply arms _await_answer; reaching IDLE opens the follow-up window; the next
+    plain utterance is dispatched."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            dispatched = []
+            app._dispatch = lambda cmd, speaker="": dispatched.append((cmd, speaker)) or True
+            app.events.put(("reply", "Shall I dial?", "tier1", ""))
+            app._drain()
+            assert app._await_answer is True
+            app.events.put(("state", State.IDLE))
+            app._drain()
+            assert app._follow_up_until > 0.0  # window opened on stop-speaking
+            app._on_heard_main("yes please", "")  # no wake word
+            assert dispatched == [("yes please", "")]
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_iris_statement_does_not_open_answer_window():
+    """A non-question reply does NOT open the no-wake-word window — plain chatter
+    stays overheard, not dispatched."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            dispatched = []
+            app._dispatch = lambda cmd, speaker="": dispatched.append(cmd) or True
+            app.events.put(("reply", "Done — I saved that note.", "tier1", ""))
+            app._drain()
+            assert app._await_answer is False
+            app.events.put(("state", State.IDLE))
+            app._drain()
+            app._on_heard_main("okay thanks", "")
+            assert dispatched == []  # no wake word + no window → overheard
             await pilot.press("q")
 
     asyncio.run(scenario())

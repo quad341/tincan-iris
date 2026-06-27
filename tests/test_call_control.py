@@ -186,6 +186,8 @@ def test_call_connected_enables_aec_when_iris_aec_set():
 
 
 def test_call_connected_aec_off_by_default():
+    """AEC is opt-in (IRIS_AEC / [audio] aec): off unless explicitly enabled —
+    loading it at startup starves the pre-call continuous-listen mic."""
     c, events = _ctrl()
     with patch(
         "iris.call_control.discover_sco_nodes",
