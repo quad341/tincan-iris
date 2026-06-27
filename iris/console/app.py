@@ -3,9 +3,9 @@
 Live transcription, per-turn tier + latency, a hard interrupt (barge-in), mute,
 and a command dump — over the local voice loop. Ways to talk:
   - push-to-talk: [space] to start/stop a turn;
-  - listen [L]: continuous — just talk, Iris acts only when addressed ("Iris, …");
+  - listen [L]: continuous — just talk, Iris acts only when addressed ("Hey Iris, …");
   - respondent [f]: also hear the far-end party (the other side of a call);
-  - approve [a]: allow the respondent's "Iris, …" commands to act (default OFF —
+  - approve [a]: allow the respondent's "Hey Iris, …" commands to act (default OFF —
     their requests are shown but ignored until you approve).
   - list panel [L] (capital): toggle the right-side live list panel.
   - ARM TRUST button: shown during calls with trust_tier=full contacts; grants full
@@ -20,7 +20,7 @@ Every line shown is also appended (plain text) to a session logfile —
 ~/.local/state/iris/console.log by default, or $IRIS_LOG_FILE — so a session can
 be read back or shared without copying out of the TUI.
 
-Keys: [space] talk · [l] hear you · [L] list panel · [f] hear them · [a] approve them · [i] interrupt · [m] mute · [d] DND · [c] commands · [q] quit
+Keys: [space] talk · [l] hear you · [L] list panel · [f] hear them · [a] approve them · [i] interrupt · [m] mute · [d] DND · [c] commands · [y] copy last reply · [q] quit
 """
 from __future__ import annotations
 
@@ -381,6 +381,7 @@ class IrisConsole(App):
         Binding("d", "toggle_dnd", "dnd", show=False),
         Binding("n", "notification", "next notif", show=False),
         Binding("c", "commands", "commands"),
+        Binding("y", "copy_last", "copy reply", show=False),
         Binding("K", "contacts", "contacts"),
         Binding("q", "quit", "quit", priority=True),
         Binding("1", "choose_1", "put through", show=False),
@@ -418,6 +419,7 @@ class IrisConsole(App):
         self._silence_tracker = SilenceTracker()
         self._proactive_store = ProactiveStore()
         self._prefs = PreferencesStore()
+        self._last_iris_reply: str = ""
         self._call_contact_name: str = ""
         self._call_contact_number: str = ""
         self._call_trust_eligible: bool = False
@@ -529,6 +531,7 @@ class IrisConsole(App):
                         f"  [dim]⟮stt {ms:.0f}ms⟯[/]"
                     )
                 elif kind == "reply":
+                    self._last_iris_reply = ev[1]
                     self._w(f"[bold cyan]iris[/] › {ev[1]}")
                     self._w(f"        [dim]⟮{ev[2]} · {ev[3]}⟯[/]")
                     # If Iris asked a question, listen for the answer without a wake
@@ -984,7 +987,7 @@ class IrisConsole(App):
             return
         self._stream = stream
         stream.start()
-        self._w('[green]hearing you — just talk; say "Iris, …" to address her[/]')
+        self._w('[green]hearing you — just talk; say "Hey Iris, …" to address her[/]')
         self._refresh_status()
 
     def action_far(self) -> None:
@@ -1168,11 +1171,27 @@ class IrisConsole(App):
         skills = [self.brain.skills.get(n) for n in self.brain.skills.names()]
         skills = [s for s in skills if s is not None]
         if skills:
-            self._w('[b]Skills[/] [dim](Tier-1 — just ask naturally, e.g. "Iris, …")[/]')
+            self._w('[b]Skills[/] [dim](Tier-1 — just ask naturally, e.g. "Hey Iris, …")[/]')
             for s in skills:
                 self._w(f"  [cyan]{s.name:<12}[/] [dim]{s.description}[/]")
         self._w('[dim]Anything else → local model · "ask Haiku about …" → cloud[/]')
         self._w("  [cyan]d[/]          [dim]toggle DND (do not disturb)[/]")
+
+    def action_copy_last(self) -> None:
+        """Copy the last Iris reply to the system clipboard ([y] key)."""
+        if not self._last_iris_reply:
+            self.notify("No reply to copy yet.", severity="warning")
+            return
+        text = self._last_iris_reply
+        try:
+            for cmd in (["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--input", "--clipboard"]):
+                if subprocess.run(["which", cmd[0]], capture_output=True).returncode == 0:
+                    subprocess.run(cmd, input=text.encode(), check=True)
+                    self.notify("Copied to clipboard.", severity="information")
+                    return
+            self.notify("No clipboard tool found (install wl-copy or xclip).", severity="warning")
+        except Exception as e:  # noqa: BLE001
+            self.notify(f"Clipboard error: {e}", severity="error")
 
     def action_notification(self) -> None:
         """Cycle to the next pending proactive notification ([n] key)."""
@@ -1198,6 +1217,8 @@ class IrisConsole(App):
             return bool(self._proactive_badge)
         if action in ("choose_1", "choose_2", "choose_3"):
             return self._incoming_call_id is not None
+        if action == "copy_last":
+            return bool(self._last_iris_reply)
         return True
 
     def _send_choose(self, index: int) -> None:
