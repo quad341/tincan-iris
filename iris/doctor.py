@@ -62,6 +62,7 @@ class ServiceCheckResult:
     required: bool
     note: str = ""
     round_trip_ms: float | None = None
+    sentinel_hint: bool = False
 
 
 @dataclass
@@ -147,7 +148,8 @@ def check_services(
         else:
             status = DoctorStatus.UNKNOWN
 
-        results.append(ServiceCheckResult(svc.name, svc.unit, status, svc.required, note=note, round_trip_ms=rtt_ms))
+        sentinel = svc.name == "tincand" and status == DoctorStatus.DOWN
+        results.append(ServiceCheckResult(svc.name, svc.unit, status, svc.required, note=note, round_trip_ms=rtt_ms, sentinel_hint=sentinel))
 
     return results
 
@@ -291,7 +293,7 @@ def doctor_main(args: list[str] | None = None) -> int:
             ],
             "services": [
                 {"name": r.name, "status": r.status.value, "required": r.required,
-                 "round_trip_ms": r.round_trip_ms}
+                 "round_trip_ms": r.round_trip_ms, "sentinel_hint": r.sentinel_hint}
                 for r in results
             ],
             "exit_code": exit_code,
@@ -366,6 +368,12 @@ def doctor_main(args: list[str] | None = None) -> int:
         print("Setup — provision the items flagged above:")
         for a in fixes:
             print(f"  {a.name}: {a.fix}")
+
+    for r in results:
+        if r.sentinel_hint:
+            print()
+            print(f"Run: journalctl --user -u {r.unit} -n 20")
+            print("Note: if you intentionally stopped tincand, /run/tincan/want-down suppresses auto-restart. Remove it to re-enable.")
 
     advisory = _sco_advisory()
     if advisory:
