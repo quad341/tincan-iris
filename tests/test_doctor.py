@@ -373,3 +373,135 @@ def test_absent_when_no_unit_and_no_server():
     with patch("iris.doctor.subprocess.run", return_value=_mock_not_found()):
         results = check_services([svc])
     assert results[0].status == DoctorStatus.ABSENT
+
+
+# ---------------------------------------------------------------------------
+# _tincand_deep_check (tincan-m9t6h.2)
+# ---------------------------------------------------------------------------
+
+def test_tincand_deep_check_all_pass():
+    from iris.doctor import _tincand_deep_check
+    status = {"call_setup_ready": True, "adapter_warning": "", "connected": True}
+    with patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
+         patch("iris.doctor._tincand_get_status", return_value=status):
+        lines = _tincand_deep_check("tincand", "tincand.service")
+    assert any("✓" in l and "health" in l for l in lines)
+    assert any("✓" in l and "SELinux" in l for l in lines)
+    assert any("✓" in l and "adapter" in l for l in lines)
+    assert any("iPhone" in l for l in lines)
+
+
+def test_tincand_deep_check_health_unreachable():
+    import urllib.error
+    from iris.doctor import _tincand_deep_check
+    status = {"call_setup_ready": True, "adapter_warning": "", "connected": False}
+    with patch("iris.doctor.urllib.request.urlopen",
+               side_effect=urllib.error.URLError("refused")), \
+         patch("iris.doctor._tincand_get_status", return_value=status):
+        lines = _tincand_deep_check("tincand", "tincand.service")
+    assert any("✗" in l and "health" in l for l in lines)
+
+
+def test_tincand_deep_check_selinux_missing():
+    from iris.doctor import _tincand_deep_check
+    status = {"call_setup_ready": False, "adapter_warning": "", "connected": False}
+    with patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
+         patch("iris.doctor._tincand_get_status", return_value=status):
+        lines = _tincand_deep_check("tincand", "tincand.service")
+    selinux_line = next((l for l in lines if "SELinux" in l), None)
+    assert selinux_line is not None
+    assert "✗" in selinux_line
+    assert "semodule" in selinux_line or "NOT loaded" in selinux_line
+
+
+def test_tincand_deep_check_adapter_mismatch():
+    from iris.doctor import _tincand_deep_check
+    status = {"call_setup_ready": True, "adapter_warning": "iPhone on hci0 (built-in)", "connected": False}
+    with patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
+         patch("iris.doctor._tincand_get_status", return_value=status):
+        lines = _tincand_deep_check("tincand", "tincand.service")
+    mismatch = next((l for l in lines if "mismatch" in l.lower() or "adapter" in l.lower()), None)
+    assert mismatch is not None
+    assert "✗" in mismatch
+    assert "hci0" in mismatch
+
+
+def test_tincand_deep_check_dbus_unavailable():
+    from iris.doctor import _tincand_deep_check
+    with patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
+         patch("iris.doctor._tincand_get_status", side_effect=Exception("no dbus")):
+        lines = _tincand_deep_check("tincand", "tincand.service")
+    assert any("?" in l and ("D-Bus" in l or "unavailable" in l) for l in lines)
+
+
+def test_check_services_deep_populates_deep_lines():
+    from iris.doctor import ServiceDescriptor, check_services
+    deep_fn = MagicMock(return_value=["✓ health endpoint"])
+    svc = ServiceDescriptor("tincand", "tincand.service",
+                            "http://127.0.0.1:9001/health", required=False,
+                            deep_check=deep_fn)
+    with patch("iris.doctor.subprocess.run", return_value=_mock_active()), \
+         patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()):
+        results = check_services([svc], deep=True)
+    assert results[0].deep_lines == ["✓ health endpoint"]
+    deep_fn.assert_called_once_with("tincand", "tincand.service")
+
+
+def test_check_services_no_deep_skips_deep_check():
+    from iris.doctor import ServiceDescriptor, check_services
+    deep_fn = MagicMock(return_value=["✓ health endpoint"])
+    svc = ServiceDescriptor("tincand", "tincand.service",
+                            "http://127.0.0.1:9001/health", required=False,
+                            deep_check=deep_fn)
+    with patch("iris.doctor.subprocess.run", return_value=_mock_active()), \
+         patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()):
+        results = check_services([svc], deep=False)
+    assert results[0].deep_lines == []
+    deep_fn.assert_not_called()
+
+
+def test_json_includes_tincand_detail(capsys):
+    from iris.doctor import doctor_main
+    status = {"call_setup_ready": True, "adapter_warning": "", "connected": True, "device_discovered": False}
+    with patch("iris.doctor.subprocess.run", return_value=_mock_active()), \
+         patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
+         patch("iris.doctor._tincand_get_status", return_value=status):
+        doctor_main(["--check", "tincand", "--json"])
+    out = json.loads(capsys.readouterr().out)
+    tincand_svc = next((s for s in out["services"] if s["name"] == "tincand"), None)
+    assert tincand_svc is not None
+    assert "tincand_detail" in tincand_svc
+    assert tincand_svc["tincand_detail"]["call_setup_ready"] is True
+
+
+# ---------------------------------------------------------------------------
+# sentinel_hint — tincand DOWN hint (tincan-17bsu)
+# ---------------------------------------------------------------------------
+
+def test_sentinel_hint_prints_journalctl_and_want_down_note_when_tincand_down(capsys):
+    from iris.doctor import doctor_main
+    services = _get_services()
+    tincand_svc = next(s for s in services if s.name == "tincand")
+
+    with patch("iris.doctor.subprocess.run", return_value=_mock_inactive()), \
+         patch("iris.doctor.EXPECTED_SERVICES", [tincand_svc]):
+        doctor_main(args=[])
+
+    out = capsys.readouterr().out
+    assert "journalctl --user -u tincand.service -n 20" in out
+    assert "/run/tincan/want-down" in out
+
+
+def test_sentinel_hint_not_printed_when_tincand_ok(capsys):
+    from iris.doctor import doctor_main
+    services = _get_services()
+    tincand_svc = next(s for s in services if s.name == "tincand")
+
+    with patch("iris.doctor.subprocess.run", return_value=_mock_active()), \
+         patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
+         patch("iris.doctor.EXPECTED_SERVICES", [tincand_svc]):
+        doctor_main(args=[])
+
+    out = capsys.readouterr().out
+    assert "journalctl" not in out
+    assert "/run/tincan/want-down" not in out

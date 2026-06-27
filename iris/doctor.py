@@ -20,7 +20,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
@@ -62,6 +62,8 @@ class ServiceCheckResult:
     required: bool
     note: str = ""
     round_trip_ms: float | None = None
+    sentinel_hint: bool = False
+    deep_lines: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -73,11 +75,50 @@ class AssetCheckResult:
     fix: str = ""       # full remediation; shown in the Setup block, not the table
 
 
+def _tincand_get_status() -> dict:
+    import dbus  # noqa: PLC0415
+    bus = dbus.SessionBus()
+    obj = bus.get_object("im.tincan.Daemon", "/im/tincan")
+    iface = dbus.Interface(obj, "im.tincan.Daemon")
+    return {str(k): v for k, v in dict(iface.GetStatus()).items()}
+
+
+def _tincand_deep_check(svc_name: str, unit: str) -> list[str]:  # noqa: ARG001
+    lines: list[str] = []
+
+    try:
+        with urllib.request.urlopen(
+            urllib.request.Request("http://127.0.0.1:9001/health"), timeout=2
+        ) as resp:
+            data = json.loads(resp.read())
+        lines.append("✓ health endpoint" if _health_ready(data) else "✗ health endpoint (not ready)")
+    except (urllib.error.URLError, OSError, ValueError):
+        lines.append("✗ health endpoint (unreachable)")
+
+    try:
+        st = _tincand_get_status()
+        if st.get("call_setup_ready"):
+            lines.append("✓ SELinux loaded")
+        else:
+            lines.append("✗ SELinux NOT loaded — run: sudo semodule -i /usr/share/tincan/tincan.pp")
+        warn = str(st.get("adapter_warning") or "")
+        if warn:
+            lines.append(f"✗ BT adapter mismatch: {warn}")
+        else:
+            lines.append("✓ adapter correct")
+        connected = bool(st.get("connected"))
+        lines.append(f"⟳ iPhone {'connected' if connected else 'not connected'} (informational)")
+    except Exception as exc:  # noqa: BLE001
+        lines.append(f"? D-Bus GetStatus() unavailable: {exc}")
+
+    return lines
+
+
 EXPECTED_SERVICES: list[ServiceDescriptor] = [
     ServiceDescriptor("iris-llama",   "iris-llama.service",   "http://127.0.0.1:8080/health", required=True),
     ServiceDescriptor("iris-whisper", "iris-whisper.service", "http://127.0.0.1:8082/health", required=True),
     ServiceDescriptor("iris-kokoro",  "iris-kokoro.service",  "http://127.0.0.1:8083/health", required=True),
-    ServiceDescriptor("tincand",      "tincand.service",      "http://127.0.0.1:9001/health",  required=False),
+    ServiceDescriptor("tincand",      "tincand.service",      "http://127.0.0.1:9001/health",  required=False, deep_check=_tincand_deep_check),
 ]
 
 
@@ -147,7 +188,14 @@ def check_services(
         else:
             status = DoctorStatus.UNKNOWN
 
-        results.append(ServiceCheckResult(svc.name, svc.unit, status, svc.required, note=note, round_trip_ms=rtt_ms))
+        sentinel = svc.name == "tincand" and status == DoctorStatus.DOWN
+        result = ServiceCheckResult(svc.name, svc.unit, status, svc.required, note=note, round_trip_ms=rtt_ms, sentinel_hint=sentinel)
+        if deep and callable(svc.deep_check):
+            try:
+                result.deep_lines = svc.deep_check(svc.name, svc.unit)
+            except Exception as exc:  # noqa: BLE001
+                result.deep_lines = [f"? deep check error: {exc}"]
+        results.append(result)
 
     return results
 
@@ -273,11 +321,35 @@ def doctor_main(args: list[str] | None = None) -> int:
         services = [s for s in services if s.name == ns.check]
         assets = [a for a in assets if a.name == ns.check]
 
-    timeout_s = DEFAULT.doctor_deep_timeout_s if ns.deep else DEFAULT.doctor_timeout_s
-    results = check_services(services, timeout_s=timeout_s, deep=ns.deep)
+    # --check tincand auto-runs deep check even without --deep
+    run_deep = ns.deep or ns.check == "tincand"
+    timeout_s = DEFAULT.doctor_deep_timeout_s if run_deep else DEFAULT.doctor_timeout_s
+    results = check_services(services, timeout_s=timeout_s, deep=run_deep)
     exit_code = max(_exit_code(results), _asset_exit_code(assets))
 
     if ns.json:
+        tincand_detail = None
+        if run_deep and any(r.name == "tincand" for r in results):
+            try:
+                st = _tincand_get_status()
+                tincand_detail = {
+                    "call_setup_ready": bool(st.get("call_setup_ready")),
+                    "adapter_warning": str(st.get("adapter_warning") or ""),
+                    "connected": bool(st.get("connected")),
+                    "device_discovered": bool(st.get("device_discovered")),
+                }
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _svc_entry(r: ServiceCheckResult) -> dict:
+            entry: dict = {
+                "name": r.name, "status": r.status.value, "required": r.required,
+                "round_trip_ms": r.round_trip_ms, "sentinel_hint": r.sentinel_hint,
+            }
+            if r.name == "tincand" and tincand_detail is not None:
+                entry["tincand_detail"] = tincand_detail
+            return entry
+
         print(json.dumps({
             "config": {
                 "path": str(settings.config_path()),
@@ -289,11 +361,7 @@ def doctor_main(args: list[str] | None = None) -> int:
                  "detail": a.detail}
                 for a in assets
             ],
-            "services": [
-                {"name": r.name, "status": r.status.value, "required": r.required,
-                 "round_trip_ms": r.round_trip_ms}
-                for r in results
-            ],
+            "services": [_svc_entry(r) for r in results],
             "exit_code": exit_code,
         }))
         return exit_code
@@ -348,6 +416,12 @@ def doctor_main(args: list[str] | None = None) -> int:
         else:
             print(f"{r.name:<22} {status_cell:<12} {req_str:<5}".rstrip())
 
+    for r in results:
+        if r.deep_lines:
+            for line in r.deep_lines:
+                print(f"  {line}")
+            print()
+
     if ns.fix:
         for r in results:
             if r.status == DoctorStatus.DOWN:
@@ -366,6 +440,12 @@ def doctor_main(args: list[str] | None = None) -> int:
         print("Setup — provision the items flagged above:")
         for a in fixes:
             print(f"  {a.name}: {a.fix}")
+
+    for r in results:
+        if r.sentinel_hint:
+            print()
+            print(f"Run: journalctl --user -u {r.unit} -n 20")
+            print("Note: if you intentionally stopped tincand, /run/tincan/want-down suppresses auto-restart. Remove it to re-enable.")
 
     advisory = _sco_advisory()
     if advisory:
