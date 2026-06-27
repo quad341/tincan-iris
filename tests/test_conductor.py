@@ -251,3 +251,56 @@ def test_say_noop_for_empty_text():
     c, _events, mic, _ = _make()
     c.say("")
     mic.start_playback.assert_not_called()
+
+
+# --- cadence slow-mode: re_ask=True → speed=CADENCE_SLOW (ti-rcn9.3) ----------
+
+def test_cadence_slow_on_re_ask():
+    c, _, _, _ = _make()
+    c.brain.respond.return_value.re_ask = True
+    c.respond_to("say what?")
+    c.tts.synth.assert_called_once_with(
+        c.brain.respond.return_value.text, speed=Conductor.CADENCE_SLOW
+    )
+
+
+def test_cadence_normal_when_not_re_ask():
+    c, _, _, _ = _make()
+    c.brain.respond.return_value.re_ask = False
+    c.respond_to("what time is it")
+    c.tts.synth.assert_called_once_with(
+        c.brain.respond.return_value.text, speed=Conductor.CADENCE_NORMAL
+    )
+
+
+# --- Voice.say_reply() cadence path (iris/voice/__init__.py:42) ---------------
+
+from unittest.mock import patch  # noqa: E402
+
+from iris.voice import Voice  # noqa: E402
+
+
+def _make_voice(*, re_ask=False):
+    reply = MagicMock()
+    reply.text = "pardon?"
+    reply.re_ask = re_ask
+    brain = MagicMock()
+    brain.respond.return_value = reply
+    tts = MagicMock()
+    tts.synth.return_value = b""
+    endpoint = MagicMock()
+    with patch("iris.voice.filler_picker", return_value=lambda: "one sec"):
+        v = Voice(brain=brain, tts=tts, endpoint=endpoint)
+    return v, tts, reply
+
+
+def test_voice_say_reply_slow_on_re_ask():
+    v, tts, reply = _make_voice(re_ask=True)
+    v.say_reply("come again?")
+    tts.synth.assert_called_once_with(reply.text, speed=Voice._CADENCE_SLOW)
+
+
+def test_voice_say_reply_normal_when_not_re_ask():
+    v, tts, reply = _make_voice(re_ask=False)
+    v.say_reply("what time is it")
+    tts.synth.assert_called_once_with(reply.text, speed=1.0)
