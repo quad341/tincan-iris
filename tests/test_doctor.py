@@ -472,3 +472,36 @@ def test_json_includes_tincand_detail(capsys):
     assert tincand_svc is not None
     assert "tincand_detail" in tincand_svc
     assert tincand_svc["tincand_detail"]["call_setup_ready"] is True
+
+
+# ---------------------------------------------------------------------------
+# sentinel_hint — tincand DOWN hint (tincan-17bsu)
+# ---------------------------------------------------------------------------
+
+def test_sentinel_hint_prints_journalctl_and_want_down_note_when_tincand_down(capsys):
+    from iris.doctor import doctor_main
+    services = _get_services()
+    tincand_svc = next(s for s in services if s.name == "tincand")
+
+    with patch("iris.doctor.subprocess.run", return_value=_mock_inactive()), \
+         patch("iris.doctor.EXPECTED_SERVICES", [tincand_svc]):
+        doctor_main(args=[])
+
+    out = capsys.readouterr().out
+    assert "journalctl --user -u tincand.service -n 20" in out
+    assert "/run/tincan/want-down" in out
+
+
+def test_sentinel_hint_not_printed_when_tincand_ok(capsys):
+    from iris.doctor import doctor_main
+    services = _get_services()
+    tincand_svc = next(s for s in services if s.name == "tincand")
+
+    with patch("iris.doctor.subprocess.run", return_value=_mock_active()), \
+         patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
+         patch("iris.doctor.EXPECTED_SERVICES", [tincand_svc]):
+        doctor_main(args=[])
+
+    out = capsys.readouterr().out
+    assert "journalctl" not in out
+    assert "/run/tincan/want-down" not in out
