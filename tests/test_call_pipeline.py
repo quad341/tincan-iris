@@ -203,6 +203,7 @@ from iris.voice.call_pipeline import CallPipeline  # noqa: E402
 # Grab stub frame classes for use in tests
 _frames_mod = sys.modules["pipecat.frames.frames"]
 VADUserStartedSpeakingFrame = _frames_mod.VADUserStartedSpeakingFrame
+TTSStartedFrame = _frames_mod.TTSStartedFrame
 TTSStoppedFrame = _frames_mod.TTSStoppedFrame
 LLMFullResponseEndFrame = _frames_mod.LLMFullResponseEndFrame
 _FrameProcessor = sys.modules["pipecat.processors.frame_processor"].FrameProcessor
@@ -270,7 +271,7 @@ def _make_pipeline(*, emit=None, brain=None, endpoint=None):
 
     runner_cls = sys.modules["pipecat.pipeline.runner"].PipelineRunner
 
-    async def _instant_run(task):
+    async def _instant_run(self, task):
         pass  # pipeline completes immediately
 
     with patch.object(runner_cls, "run", new=_instant_run):
@@ -289,7 +290,7 @@ def test_start_with_loopback_completes_without_error():
     events: list = []
     runner_cls = sys.modules["pipecat.pipeline.runner"].PipelineRunner
 
-    async def _instant_run(task):
+    async def _instant_run(self, task):
         pass
 
     with patch.object(runner_cls, "run", new=_instant_run):
@@ -309,7 +310,7 @@ def test_stop_cancels_pipeline_task_cleanly():
 
     runner_cls = sys.modules["pipecat.pipeline.runner"].PipelineRunner
     started = threading.Event()
-    async def _blocking_run(task):
+    async def _blocking_run(self, task):
         started.set()
         await asyncio.sleep(0)  # yield control once
         # In a real pipeline, task.cancel() would break out of run().
@@ -348,7 +349,7 @@ def test_emit_receives_pipeline_start_and_stop():
     events: list = []
     runner_cls = sys.modules["pipecat.pipeline.runner"].PipelineRunner
 
-    async def _instant_run(task):
+    async def _instant_run(self, task):
         pass
 
     with patch.object(runner_cls, "run", new=_instant_run):
@@ -373,7 +374,7 @@ def test_second_start_raises_runtime_error():
     running = threading.Event()
     allow_exit = threading.Event()
 
-    async def _hold_run(task):
+    async def _hold_run(self, task):
         running.set()
         # Block until the test allows exit
         while not allow_exit.is_set():
@@ -416,7 +417,7 @@ def test_emit_state_listening_on_vad_user_started_speaking():
         captured_processors.extend(processors)
         real_pipeline_init(self, processors, **kw)
 
-    async def _instant_run(task):
+    async def _instant_run(self, task):
         pass
 
     with patch.object(Pipeline_cls, "__init__", new=_capturing_init), \
@@ -474,6 +475,18 @@ def test_emit_state_idle_on_llm_full_response_end_frame():
     )
 
 
+def test_emit_state_speaking_on_tts_started_frame():
+    """('state', 'speaking') fires on TTSStartedFrame."""
+    events: list = []
+    observer = _make_state_observer_from_pipeline(events)
+
+    asyncio.run(observer.process_frame(TTSStartedFrame(), _FrameDirection.DOWNSTREAM))
+
+    assert ("state", "speaking") in events, (
+        f"Expected ('state', 'speaking') after TTSStartedFrame; events={events}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # 7. ImportError when pipecat-ai absent
 # ---------------------------------------------------------------------------
@@ -518,7 +531,7 @@ def _make_state_observer_from_pipeline(events: list):
         captured.extend(processors)
         real_init(self, processors, **kw)
 
-    async def _instant_run(task):
+    async def _instant_run(self, task):
         pass
 
     with patch.object(Pipeline_cls, "__init__", new=_capturing_init), \

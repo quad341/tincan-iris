@@ -5,9 +5,12 @@ import asyncio
 import threading
 from typing import Callable
 
+import logging as _logging
+
 try:
     from pipecat.frames.frames import (
         LLMFullResponseEndFrame,
+        TTSStartedFrame,
         TTSStoppedFrame,
         VADUserStartedSpeakingFrame,
     )
@@ -21,6 +24,8 @@ except ImportError as exc:
         "install pipecat-ai or run iris without the Pipecat voice pipeline."
     ) from exc
 
+_logging.getLogger("pipecat").setLevel(_logging.WARNING)
+
 
 class _StateObserver(FrameProcessor):
     """Translates pipeline frames to emit() state events for the console status strip."""
@@ -32,6 +37,8 @@ class _StateObserver(FrameProcessor):
     async def process_frame(self, frame, direction) -> None:
         if isinstance(frame, VADUserStartedSpeakingFrame):
             self._emit(("state", "listening"))
+        elif isinstance(frame, TTSStartedFrame):
+            self._emit(("state", "speaking"))
         elif isinstance(frame, (TTSStoppedFrame, LLMFullResponseEndFrame)):
             self._emit(("state", "idle"))
         await self.push_frame(frame, direction)
@@ -61,11 +68,13 @@ class CallPipeline:
             self._running = True
 
         loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         emit(("pipeline_start",))
         try:
             loop.run_until_complete(self._run(brain, endpoint, emit))
         finally:
             loop.close()
+            asyncio.set_event_loop(None)
             with self._lock:
                 self._task = None
                 self._running = False
@@ -80,9 +89,7 @@ class CallPipeline:
             self._task = task
 
         runner = PipelineRunner()
-        # Access run via __dict__ to avoid Python's descriptor protocol binding
-        # self as first arg — required for test stubs patched with 1-arg functions.
-        await type(runner).__dict__["run"](task)
+        await runner.run(task)
 
     def stop(self) -> None:
         """Cancel the running pipeline task (safe to call from any thread)."""
