@@ -57,16 +57,16 @@ class DaemonProxy:
         """
         if not self._path.exists():
             raise DaemonNotRunning(
-                f"Iris daemon is not running.\n"
-                f"Start it with:  iris daemon start"
+                "Iris daemon is not running.\n"
+                "Start it with:  iris daemon start"
             )
         try:
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             sock.connect(str(self._path))
         except (ConnectionRefusedError, FileNotFoundError) as exc:
             raise DaemonNotRunning(
-                f"Iris daemon is not running.\n"
-                f"Start it with:  iris daemon start"
+                "Iris daemon is not running.\n"
+                "Start it with:  iris daemon start"
             ) from exc
         self._sock = sock
         self._rfile = sock.makefile("rb")

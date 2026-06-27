@@ -98,7 +98,7 @@ def test_list_skill_shows_count_and_items(store):
 
 def test_list_skill_excludes_done(store):
     store.capture("done already")
-    n = store.capture("still open")
+    store.capture("still open")
     store.mark_done(1)
     skill = ListNotesSkill(store)
     reply = skill.run()

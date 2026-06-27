@@ -9,8 +9,7 @@ These tests will fail until iris/calendar.py is implemented
 """
 from __future__ import annotations
 
-from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

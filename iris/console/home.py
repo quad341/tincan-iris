@@ -7,8 +7,7 @@ from __future__ import annotations
 
 from textual.app import App, ComposeResult, Screen
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
-from textual.reactive import reactive
+from textual.containers import Vertical
 from textual.widget import Widget
 from textual.widgets import Footer, Input, Label, RichLog, Static
 

@@ -9,13 +9,10 @@ Covers:
 """
 from __future__ import annotations
 
-import queue
 import socket
-import tempfile
 import threading
 import time
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -219,7 +216,7 @@ def test_broadcast_reaches_n_clients(api, tmp_sock, posture):
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.connect(str(tmp_sock))
         rfile = sock.makefile("rb")
-        wfile = sock.makefile("wb")
+        _ = sock.makefile("wb")
         ready_events[i].set()
         # Read one line (the posture broadcast)
         raw = rfile.readline()

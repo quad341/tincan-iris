@@ -6,12 +6,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from iris.up import (
     bring_up,
     _is_active,
-    _start_service,
     _bring_up_tincand,
     _print_tincand_readiness,
 )

@@ -119,7 +119,7 @@ class PostureManager:
 
     def unsubscribe(self, listener: Callable[[dict], None]) -> None:
         with self._lock:
-            self._listeners = [l for l in self._listeners if l is not listener]
+            self._listeners = [cb for cb in self._listeners if cb is not listener]
 
     def _broadcast(self, state: _State) -> None:
         event = {

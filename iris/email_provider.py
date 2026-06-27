@@ -25,8 +25,7 @@ import html.parser
 import imaplib
 import logging
 import smtplib
-import socket
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 log = logging.getLogger(__name__)

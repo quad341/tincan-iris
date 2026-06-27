@@ -5,13 +5,14 @@ so CI (no model) passes; on a box with llama.cpp up it verifies the real path.
 """
 from __future__ import annotations
 
+import json as _json
 from unittest.mock import patch
 
 import pytest
 
 from iris.config import Config
 from iris.lanes import Tier1Qwen
-from iris.skills import SkillParam, SkillRegistry
+from iris.skills import SkillParam, SkillRegistry, TimeSkill, default_registry
 
 
 def _brain():
@@ -116,10 +117,6 @@ def test_handle_no_skill_falls_through_to_chat():
 # ti-dp7p — chitchat/Q&A must fall through to 'none'; EchoSkill removed from
 # default registry; dispatch prompt must carry action-vs-conversation bias.
 # ---------------------------------------------------------------------------
-
-import json as _json
-
-from iris.skills import TimeSkill, default_registry
 
 
 def _time_tier() -> "Tier1Qwen":
