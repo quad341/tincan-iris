@@ -7,8 +7,9 @@ Importable without pipecat or kokoro installed.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
+
+from iris import settings
 
 
 @dataclass(frozen=True)
@@ -35,7 +36,7 @@ DEFAULT_CATALOGUE: dict[str, VoiceEntry] = {
 
 def _load_toml_overrides() -> dict[str, VoiceEntry]:
     """Read [voice.catalogue] from config.toml if present."""
-    config_path = Path("config.toml")
+    config_path = settings.config_path()
     if not config_path.exists():
         return {}
     try:
