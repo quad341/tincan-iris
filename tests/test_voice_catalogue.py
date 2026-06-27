@@ -11,8 +11,6 @@ Coverage map (4 acceptance criteria from ti-joq2.1):
 """
 from __future__ import annotations
 
-import pytest
-
 from iris.audio.voice_catalogue import VoiceEntry, voice_for_lang
 
 
@@ -70,7 +68,7 @@ def test_toml_override_replaces_entry(tmp_path, monkeypatch):
         'espeak_voice = "es"\n',
         encoding="utf-8",
     )
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IRIS_CONFIG", str(config))
     entry = voice_for_lang("es")
     assert entry.voice_id == "custom_voice"
 
@@ -85,7 +83,7 @@ def test_toml_override_does_not_affect_other_entries(tmp_path, monkeypatch):
         'espeak_voice = "es"\n',
         encoding="utf-8",
     )
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IRIS_CONFIG", str(config))
     entry = voice_for_lang("en")
     assert entry.voice_id == "af_heart"
 
@@ -100,7 +98,7 @@ def test_toml_override_new_language(tmp_path, monkeypatch):
         'espeak_voice = "tlh"\n',
         encoding="utf-8",
     )
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IRIS_CONFIG", str(config))
     entry = voice_for_lang("tlh")
     assert entry.voice_id == "klingon_voice"
     assert entry.espeak_voice == "tlh"
@@ -108,6 +106,6 @@ def test_toml_override_new_language(tmp_path, monkeypatch):
 
 def test_no_config_toml_uses_defaults(tmp_path, monkeypatch):
     """Missing config.toml falls back to DEFAULT_CATALOGUE without error."""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IRIS_CONFIG", str(tmp_path / "config.toml"))
     entry = voice_for_lang("es")
     assert entry.voice_id == "ef_dalia"
