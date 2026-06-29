@@ -8,7 +8,6 @@ from __future__ import annotations
 import pathlib
 import tempfile
 
-import pytest
 
 from iris.screen_call import ScreenCallFlow, ScreenPivotFlow
 

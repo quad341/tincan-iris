@@ -10,13 +10,10 @@ test_console_app.py).  The proxy fallback and pure-logic tests run everywhere.
 """
 from __future__ import annotations
 
-import threading
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from iris.daemon._cli import _parse_until
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +65,6 @@ def test_incoming_call_id_starts_none():
     # _incoming_call_id = None → _send_choose returns early → no proxy.send
     proxy = MagicMock()
     incoming_call_id = None   # simulates console state
-    choices = []
 
     def _send_choose(index):
         if incoming_call_id is None:
@@ -112,7 +108,8 @@ def _make_panel():
             def _update(txt): mock._text = txt
             mock.update = _update
             def _add_class(c):
-                if c not in mock.classes: mock.classes.append(c)
+                if c not in mock.classes:
+                    mock.classes.append(c)
             def _remove_class(c):
                 mock.classes = [x for x in mock.classes if x != c]
             mock.add_class = _add_class
@@ -246,9 +243,6 @@ def test_console_on_mount_daemon_not_running(tmp_path):
 
     # Just test the on_mount logic path without running the full TUI
     # We verify the logic by checking the state after a mock on_mount
-    import queue as _queue
-    events = _queue.Queue()
-
     with patch("iris.daemon.proxy.DaemonProxy", return_value=_FakeProxy()):
         proxy = _FakeProxy()
         try:

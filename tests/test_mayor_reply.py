@@ -1,9 +1,7 @@
 """Tests for MayorReplyListener (ti-h9di.3) — stub mode + deliver() path."""
 from __future__ import annotations
 
-import threading
 import time
-from unittest.mock import MagicMock
 
 from iris.delegate_skill import _DelegateState, ConfirmDelegateSkill
 from iris.mayor_reply import MayorReplyListener
@@ -31,7 +29,6 @@ def test_stub_start_does_not_error():
 
 def test_stub_start_spawns_daemon_thread():
     state = _make_state()
-    threads_before = {t.name for t in threading.enumerate()}
     listener = MayorReplyListener(state=state, emit=lambda ev: None)
     listener.start("del-00000001")
     # The thread may have already exited (stub returns immediately) — that's fine.

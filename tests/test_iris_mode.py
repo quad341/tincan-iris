@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from iris.mode import IrisMode, ModeManager
 from iris.scope import ScopeManifest

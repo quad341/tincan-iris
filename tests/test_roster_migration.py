@@ -461,7 +461,6 @@ def test_v2_migration_transactional_rollback_on_failure(tmp_path):
 
     # Patch conn.execute so the posture CREATE TABLE raises
     import iris.roster as _roster_mod
-    original_migrate = _roster_mod._migrate_v1_to_v2
 
     def _broken_migrate(conn):
         raise sqlite3.OperationalError("simulated disk failure")

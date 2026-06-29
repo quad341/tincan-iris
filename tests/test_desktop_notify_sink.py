@@ -9,7 +9,6 @@ import subprocess
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from iris.notify_sink import DesktopNotifySink
 
