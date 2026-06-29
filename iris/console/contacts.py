@@ -352,7 +352,7 @@ class ContactsScreen(Screen):
             # Saving a new contact requires name + phone — show a prompt for now.
             # The inline editor for new contacts is a future UX iteration (v2).
             self.notify(
-                "To add a contact, say: 'Iris, add a contact — [name], [phone]'",
+                "To add a contact, say: 'Hey Iris, add a contact — [name], [phone]'",
                 severity="information",
                 timeout=6,
             )
