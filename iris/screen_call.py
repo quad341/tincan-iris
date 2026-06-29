@@ -32,12 +32,16 @@ The caller injects all dependencies so tests run without audio hardware.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from . import settings
+
+if TYPE_CHECKING:
+    from .profile_resolver import PresentationProfile, ProfileResolver
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +105,7 @@ class ScreenCallFlow:
         caller_number: str = "",
         disclosure_wav: str | Path | None = None,
         relay_timeout_s: float = _RELAY_TIMEOUT_S,
+        resolver: ProfileResolver | None = None,
     ) -> None:
         self.tts = tts
         self.stt = stt
@@ -115,6 +120,8 @@ class ScreenCallFlow:
         self.caller_number = caller_number.strip()
         self.disclosure_wav = str(disclosure_wav) if disclosure_wav else None
         self.relay_timeout_s = relay_timeout_s
+        self.resolver = resolver
+        self.profile: PresentationProfile | None = None
 
     # --- helpers (caller-side) ---
 
@@ -127,6 +134,40 @@ class ScreenCallFlow:
         wav = self.capture_fn(window_s)
         text = self.stt.transcribe(wav).strip()
         logger.debug("screen_call: heard: %s", text[:80] if text else "(silence)")
+        return text
+
+    def _capture_utt1(self, window_s: float) -> str:
+        """Capture first utterance audio; run language detection concurrently with STT."""
+        wav = self.capture_fn(window_s)
+        if self.resolver is None:
+            text = self.stt.transcribe(wav).strip()
+            logger.debug("screen_call: utt-1: %s", text[:80] if text else "(silence)")
+            return text
+
+        _detector = getattr(self.resolver, "_detector", None)
+        if _detector is not None:
+            # Run STT and language detection concurrently to keep detection off the
+            # critical path — zero added wall-clock latency before iris replies.
+            stt_result: list[str] = []
+
+            def _run_stt() -> None:
+                stt_result.append(self.stt.transcribe(wav).strip())
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+                stt_f = ex.submit(_run_stt)
+                ex.submit(_detector, wav)
+                stt_f.result()
+
+            text = stt_result[0] if stt_result else ""
+        else:
+            text = self.stt.transcribe(wav).strip()
+
+        self.profile = self.resolver.resolve(utterance=text)
+        logger.debug(
+            "screen_call: utt-1: %s | profile: %s",
+            text[:80] if text else "(silence)",
+            self.profile.source if self.profile else "none",
+        )
         return text
 
     def _play_disclosure(self) -> None:
@@ -157,12 +198,14 @@ class ScreenCallFlow:
         # 1. Disclosure (caller hears)
         self._play_disclosure()
 
-        # 2. Ask who's calling
+        # 2. Ask who's calling (utt-1: concurrent language detection if resolver set)
         self._speak("Can I ask who's calling and what this is about?")
-        intro = self._listen(_INTRO_WINDOW_S)
+        intro = self._capture_utt1(_INTRO_WINDOW_S)
 
         # 3. Silence → re-ask once, then hang up
         if not intro:
+            if self.resolver is not None and self.profile is not None:
+                self.resolver.turn_cadence(self.profile, re_ask=True)
             self._speak("Sorry — I didn't catch that. Who's calling, please?")
             intro = self._listen(_RETRY_WINDOW_S)
 
