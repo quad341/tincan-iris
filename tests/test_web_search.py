@@ -8,7 +8,7 @@ These tests will fail until iris/web_search.py is implemented
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -129,7 +129,7 @@ def test_injection_detection_console_annotation(capsys, monkeypatch):
     monkeypatch.setattr(skill, "_fetch", lambda url: (injection_page, []))
     monkeypatch.setattr(skill, "_qa", lambda content, q: ("$99/mo.", True))  # True = injection flagged
     annotations: list[str] = []
-    reply = skill.run(
+    skill.run(
         url="https://attacker.example.com",
         question="pricing",
         speaker="operator",
@@ -170,7 +170,6 @@ def test_injection_with_no_answer_returns_fallback(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_fetch_timeout_returns_friendly_message(monkeypatch):
-    import socket
     skill = WebSearchSkill()
 
     def slow_fetch(url):
@@ -203,7 +202,6 @@ def test_auth_wall_returns_friendly_message(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_still_fetching_fires_at_2s(monkeypatch):
-    import threading
     import time
 
     skill = WebSearchSkill()

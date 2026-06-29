@@ -1,7 +1,6 @@
 """Tests for CallListStore — CallList, ListItem, LookupResult CRUD + retention."""
 from __future__ import annotations
 
-import time
 
 import pytest
 
@@ -137,8 +136,7 @@ def test_add_lookup_returns_dataclass(store):
 def test_get_lookups_ordered_by_timestamp(store):
     cl = store.create_list("s1")
     item = store.add_item(cl.id, "eggs")
-    t0 = time.time()
-    store.add_lookup(item.id, "web", "first", )
+    store.add_lookup(item.id, "web", "first")
     store.add_lookup(item.id, "web", "second")
     lrs = store.get_lookups(item.id)
     assert len(lrs) == 2

@@ -23,7 +23,6 @@ import sys
 import threading
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from pathlib import Path
 
 _DEFAULT_PORT = 8083
 

@@ -3,13 +3,12 @@ command dump. Also covers SkillRegistry manifest + param schema, and Tier1Qwen
 grammar-constrained dispatch."""
 from __future__ import annotations
 
-import io
 import json
 from unittest.mock import MagicMock, patch
 
 from iris.config import Config
 from iris.lanes import Tier0Rules, Tier1Qwen
-from iris.skills import EchoSkill, SkillParam, SkillRegistry, TimeSkill, default_registry
+from iris.skills import EchoSkill, SkillRegistry, TimeSkill, default_registry
 
 
 def test_commands_lists_name_example_pairs():

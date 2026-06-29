@@ -11,7 +11,7 @@ import pytest
 
 pytest.importorskip("textual")
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 
 # ---------------------------------------------------------------------------

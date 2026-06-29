@@ -19,17 +19,15 @@ Footer shows: "<N> items · <M> looked up · [q] close"
 from __future__ import annotations
 
 import datetime
-import os
 import subprocess
 from pathlib import Path
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
 
-from ..list_store import CallList, CallListStore, ListItem, LookupResult
+from ..list_store import CallList, CallListStore, ListItem
 
 _EXPORT_DIR = Path.home() / "iris-exports"
 
@@ -138,7 +136,7 @@ class PostCallListView(Screen):
         if row_key is None:
             return None
         try:
-            row = table.get_row_at(row_key)
+            table.get_row_at(row_key)
             return int(table.coordinate_to_cell_key(
                 (row_key, 0)
             ).row_key.value)

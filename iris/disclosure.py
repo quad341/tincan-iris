@@ -14,7 +14,6 @@ render the current WAV; on mismatch the WAV is re-rendered.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 from .audio.tts import TTS, default_tts

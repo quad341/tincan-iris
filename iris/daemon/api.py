@@ -23,7 +23,6 @@ import stat
 import threading
 import time
 from pathlib import Path
-from typing import Callable
 
 from ._socket_path import daemon_socket_path
 from .posture import PostureManager

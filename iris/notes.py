@@ -12,7 +12,6 @@ IDs are 1-based (matching the spoken list ordinals).
 from __future__ import annotations
 
 import json
-import os
 import time
 from pathlib import Path
 

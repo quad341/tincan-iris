@@ -7,10 +7,8 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass, field
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from iris.dial_skill import (
     CancelDialSkill,

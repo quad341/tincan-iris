@@ -519,16 +519,21 @@ class RosterStore:
         fields: list[str] = []
         vals: list = []
         if display_name is not None:
-            fields.append("display_name=?"); vals.append(display_name)
+            fields.append("display_name=?")
+            vals.append(display_name)
         if handling_rule is not None:
-            fields.append("handling_rule=?"); vals.append(handling_rule)
+            fields.append("handling_rule=?")
+            vals.append(handling_rule)
         if trust_tier is not None:
-            fields.append("trust_tier=?"); vals.append(trust_tier)
+            fields.append("trust_tier=?")
+            vals.append(trust_tier)
         if relationship_notes is not None:
-            fields.append("relationship_notes=?"); vals.append(relationship_notes)
+            fields.append("relationship_notes=?")
+            vals.append(relationship_notes)
         if not fields:
             return False
-        fields.append("updated_at=?"); vals.append(now)
+        fields.append("updated_at=?")
+        vals.append(now)
         vals.append(contact_id)
         with self._connect() as conn:
             n = conn.execute(

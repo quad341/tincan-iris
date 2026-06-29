@@ -1,7 +1,6 @@
 """Tests for PreferencesStore and the Brain prefs hook."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
 
 import pytest
 

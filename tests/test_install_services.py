@@ -4,14 +4,11 @@ All filesystem writes and subprocess calls are controlled via tmp_path + mocks.
 """
 from __future__ import annotations
 
-import io
-import os
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 
-from iris.services.install import install, _validate_exec_starts, UNITS
+from iris.services.install import install, _validate_exec_starts
 
 
 def _ok_run(cmd, **kwargs):
@@ -291,7 +288,6 @@ class TestPythonPreflight:
 
     def test_import_iris_failure_returns_1(self, tmp_path, capsys):
         repo = _make_venvs(tmp_path)
-        py = repo / ".venv" / "bin" / "python"
         fail_proc = MagicMock(returncode=1, stdout="", stderr="No module named iris")
 
         def _run_side(cmd, **kwargs):

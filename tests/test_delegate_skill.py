@@ -7,11 +7,9 @@ ADR-0005: confirm is required before mail is sent (no silent dispatch).
 """
 from __future__ import annotations
 
-import os
-import threading
 import time
 from subprocess import CalledProcessError, CompletedProcess
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
