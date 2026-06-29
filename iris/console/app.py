@@ -1193,22 +1193,6 @@ class IrisConsole(App):
         except Exception as e:  # noqa: BLE001
             self.notify(f"Clipboard error: {e}", severity="error")
 
-    def action_copy_last(self) -> None:
-        """Copy the last Iris reply to the system clipboard ([y] key)."""
-        if not self._last_iris_reply:
-            self.notify("No reply to copy yet.", severity="warning")
-            return
-        text = self._last_iris_reply
-        try:
-            for cmd in (["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--input", "--clipboard"]):
-                if subprocess.run(["which", cmd[0]], capture_output=True).returncode == 0:
-                    subprocess.run(cmd, input=text.encode(), check=True)
-                    self.notify("Copied to clipboard.", severity="information")
-                    return
-            self.notify("No clipboard tool found (install wl-copy or xclip).", severity="warning")
-        except Exception as e:  # noqa: BLE001
-            self.notify(f"Clipboard error: {e}", severity="error")
-
     def action_notification(self) -> None:
         """Cycle to the next pending proactive notification ([n] key)."""
         item = self._proactive_store.cycle_next(after_id=self._current_notification_id)

@@ -22,11 +22,7 @@ Coverage map:
 from __future__ import annotations
 
 import threading
-import time
-from dataclasses import dataclass
-from unittest.mock import MagicMock, call
-
-import pytest
+from unittest.mock import MagicMock
 
 from iris.profile_resolver import PresentationProfile, ProfileResolver
 from iris.screen_call import ScreenCallFlow
@@ -388,7 +384,8 @@ def test_detection_does_not_add_latency_after_stt():
     # Build a real ProfileResolver with our spy detector
     from iris.config import Config
     from iris.prefs import PreferencesStore
-    import tempfile, pathlib
+    import tempfile
+    import pathlib
 
     with tempfile.TemporaryDirectory() as tmp:
         prefs = PreferencesStore(pathlib.Path(tmp) / "prefs.json")
