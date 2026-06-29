@@ -385,10 +385,10 @@ def test_tincand_deep_check_all_pass():
     with patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
          patch("iris.doctor._tincand_get_status", return_value=status):
         lines = _tincand_deep_check("tincand", "tincand.service")
-    assert any("✓" in l and "health" in l for l in lines)
-    assert any("✓" in l and "SELinux" in l for l in lines)
-    assert any("✓" in l and "adapter" in l for l in lines)
-    assert any("iPhone" in l for l in lines)
+    assert any("✓" in ln and "health" in ln for ln in lines)
+    assert any("✓" in ln and "SELinux" in ln for ln in lines)
+    assert any("✓" in ln and "adapter" in ln for ln in lines)
+    assert any("iPhone" in ln for ln in lines)
 
 
 def test_tincand_deep_check_health_unreachable():
@@ -399,7 +399,7 @@ def test_tincand_deep_check_health_unreachable():
                side_effect=urllib.error.URLError("refused")), \
          patch("iris.doctor._tincand_get_status", return_value=status):
         lines = _tincand_deep_check("tincand", "tincand.service")
-    assert any("✗" in l and "health" in l for l in lines)
+    assert any("✗" in ln and "health" in ln for ln in lines)
 
 
 def test_tincand_deep_check_selinux_missing():
@@ -408,7 +408,7 @@ def test_tincand_deep_check_selinux_missing():
     with patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
          patch("iris.doctor._tincand_get_status", return_value=status):
         lines = _tincand_deep_check("tincand", "tincand.service")
-    selinux_line = next((l for l in lines if "SELinux" in l), None)
+    selinux_line = next((ln for ln in lines if "SELinux" in ln), None)
     assert selinux_line is not None
     assert "✗" in selinux_line
     assert "semodule" in selinux_line or "NOT loaded" in selinux_line
@@ -420,7 +420,7 @@ def test_tincand_deep_check_adapter_mismatch():
     with patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
          patch("iris.doctor._tincand_get_status", return_value=status):
         lines = _tincand_deep_check("tincand", "tincand.service")
-    mismatch = next((l for l in lines if "mismatch" in l.lower() or "adapter" in l.lower()), None)
+    mismatch = next((ln for ln in lines if "mismatch" in ln.lower() or "adapter" in ln.lower()), None)
     assert mismatch is not None
     assert "✗" in mismatch
     assert "hci0" in mismatch
@@ -431,7 +431,7 @@ def test_tincand_deep_check_dbus_unavailable():
     with patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
          patch("iris.doctor._tincand_get_status", side_effect=Exception("no dbus")):
         lines = _tincand_deep_check("tincand", "tincand.service")
-    assert any("?" in l and ("D-Bus" in l or "unavailable" in l) for l in lines)
+    assert any("?" in ln and ("D-Bus" in ln or "unavailable" in ln) for ln in lines)
 
 
 def test_check_services_deep_populates_deep_lines():

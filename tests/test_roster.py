@@ -360,7 +360,7 @@ def test_remove_address_returns_false_for_missing(store):
 # --- add with addresses list ---
 
 def test_add_with_addresses_stores_them(store):
-    c = store.add("Alice", addresses=[("email", "alice@example.com"), ("discord", "alice#1234")])
+    store.add("Alice", addresses=[("email", "alice@example.com"), ("discord", "alice#1234")])
     assert store.get_by_address("email", "alice@example.com") is not None
     assert store.get_by_address("discord", "alice#1234") is not None
 

@@ -19,10 +19,7 @@ Trust-tier commands are NOT implemented here — voice must never set trust/priv
 """
 from __future__ import annotations
 
-import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import Protocol
 
 from .roster import Contact, RosterProvider
 from .skills import Skill, SkillParam

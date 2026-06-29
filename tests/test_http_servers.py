@@ -9,8 +9,6 @@ from __future__ import annotations
 import io
 import json
 import socket
-import sys
-from http.server import BaseHTTPRequestHandler
 from unittest.mock import MagicMock, patch
 
 import pytest

@@ -1,7 +1,6 @@
 """iris install-services — write systemd user unit files and start the services."""
 from __future__ import annotations
 
-import hashlib
 import os
 import subprocess
 import sys
@@ -179,7 +178,7 @@ def install(dry_run: bool = False) -> int:
             print(f"      journalctl --user -u {spec.name} -n 20   ← run this to diagnose")
             failed.append(spec.name)
 
-    print(f"\n  Services installed. Run 'iris doctor' to verify health.\n")
+    print("\n  Services installed. Run 'iris doctor' to verify health.\n")
     print("  Note: tincand.service is managed separately — see the tincand project.")
 
     if not _linger_enabled() and not dry_run:

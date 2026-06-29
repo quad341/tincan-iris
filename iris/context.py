@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import re
 import threading
-import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass

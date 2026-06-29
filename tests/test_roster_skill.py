@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
 
-import pytest
 
-from iris.roster import Contact, ImportResult, RosterProvider
+from iris.roster import Contact, ImportResult
 from iris.roster_skill import (
     AddContactSkill,
     CancelRosterSkill,

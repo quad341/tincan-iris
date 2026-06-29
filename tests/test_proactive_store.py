@@ -5,7 +5,6 @@ one fixture, one concern per test.
 """
 from __future__ import annotations
 
-import time
 
 import pytest
 

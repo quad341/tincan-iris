@@ -8,7 +8,7 @@ Four scenarios (bead ti-93w):
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 from iris.brain import Brain
 from iris.config import Config

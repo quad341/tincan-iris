@@ -10,7 +10,6 @@ ti-ccc.16.2 is implemented.
 """
 from __future__ import annotations
 
-import os
 
 import pytest
 

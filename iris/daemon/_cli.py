@@ -13,7 +13,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import NoReturn
 
 from ._socket_path import daemon_socket_path
 from .proxy import DaemonNotRunning, DaemonProxy
@@ -164,8 +163,8 @@ def _daemon_status() -> int:
     sock_path = daemon_socket_path()
 
     if pid is None:
-        print(f"  Iris daemon  ○  not running")
-        print(f"  Start with:  iris daemon start")
+        print("  Iris daemon  ○  not running")
+        print("  Start with:  iris daemon start")
         return 1
 
     dot = _green("●") if not _NO_COLOR else "●"

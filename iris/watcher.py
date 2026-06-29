@@ -52,7 +52,7 @@ class ProactiveWatcher:
     def _setup_dbus(self) -> None:
         """Attempt D-Bus subscription. Raises RuntimeError if unavailable."""
         try:
-            import dbus  # type: ignore
+            import dbus  # type: ignore  # noqa: F401
         except ImportError as exc:
             raise RuntimeError(f"D-Bus not available: {exc}") from exc
 

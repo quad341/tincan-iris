@@ -14,10 +14,9 @@ None of these need a live Qwen — dispatch/chat are injected.
 """
 from __future__ import annotations
 
-import pytest
 
 from iris.agenda_skill import AgendaSkill
-from iris.brain import Brain, StreamChunk
+from iris.brain import Brain
 from iris.lanes import LaneResult, SkillProposal, Tier1Qwen
 from iris.skills import SkillRegistry, TimeSkill, supports_streaming
 from iris.trust import TrustMode
@@ -153,7 +152,10 @@ def test_nonstreaming_skill_yields_single_final_chunk():
 
 def test_missing_required_arg_asks_instead_of_crashing():
     class _NeedsArg:
-        name = "needsarg"; description = "x"; params = []; operator_only = False
+        name = "needsarg"
+        description = "x"
+        params = []
+        operator_only = False
         def run(self, *, required: str, **_k: object) -> str:
             return required
     brain, _ = _brain_with(_NeedsArg())

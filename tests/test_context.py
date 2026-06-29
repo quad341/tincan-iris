@@ -19,7 +19,6 @@ from iris.context import (
     WINDOW_PREFIX,
     ConversationContext,
     ContextTurn,
-    LookupResult,
 )
 
 

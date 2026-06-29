@@ -12,7 +12,6 @@ import logging
 import queue
 import threading
 import time
-import unittest.mock as mock
 import urllib.error
 from unittest.mock import MagicMock, patch
 
@@ -327,7 +326,6 @@ def test_rolling_window_evicts_oldest_10_when_full():
 
 def test_rolling_window_append_does_not_block_on_eviction():
     ts = TranscriptStore()
-    gs = GistStore()
     slow_q: queue.Queue = queue.Queue()
 
     class SlowWorker:
@@ -391,7 +389,7 @@ def test_memory_store_get_gist_reflects_gist_store():
 
 
 def _fake_urlopen(url_obj, timeout):
-    import io, json  # noqa: E401
+    import json  # noqa: E401
 
     class FakeResp:
         def __enter__(self):
