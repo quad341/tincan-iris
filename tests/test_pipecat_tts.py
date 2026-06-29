@@ -15,8 +15,8 @@ import tempfile
 import threading
 import types
 import wave
-from dataclasses import dataclass, field
-from unittest.mock import MagicMock, patch
+from dataclasses import dataclass
+from unittest.mock import MagicMock
 
 import pytest
 
