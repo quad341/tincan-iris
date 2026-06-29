@@ -14,6 +14,7 @@ from .latency import Timeline
 from .masking import run_with_masking
 from .notes import NotesStore
 from .prefs import PreferencesStore
+from .re_ask_phrasebook import is_re_ask
 from .skills import SkillRegistry, default_registry, is_operator_only, supports_streaming
 from .trust import TrustMode
 
@@ -25,6 +26,7 @@ class Reply:
     timeline: Timeline
     skill: str | None = None
     speaker: str = ""  # "operator" | "far" | "" — who spoke; set by brain.respond(speaker=)
+    re_ask: bool = False  # True when far party signalled they didn't catch the last utterance
 
 
 @dataclass
@@ -65,6 +67,7 @@ class Brain:
         self.call_context: str = ""   # set to a contact ID before each call
         self.memory_hint: str = ""    # L3 vector recall hint from MemoryManager.call_start()
         self.context_hint: str = ""   # supplementary context hint (caller-level notes etc.)
+        self._locked_language: str = "en"  # updated when PresentationProfile is locked
         if skills is None:
             self.skills = default_registry()
             # Optional/offline lanes (notes, roster, web search, email when
@@ -125,6 +128,13 @@ class Brain:
         tl = Timeline()
         demo_mode = speaker == "far" and far_trust is TrustMode.DEMO
 
+        # Tier-0 re-ask detection: far party only; length guard ≤6 words.
+        re_ask = (
+            speaker == "far"
+            and len(text.split()) <= 6
+            and is_re_ask(text, lang=self._locked_language)
+        )
+
         # Explicit escalation — "ask Haiku about X" -> Tier 2 (raw text, slow).
         # Blocked in DEMO mode: the far party cannot reach the cloud tier.
         m = self._ASK_HAIKU.match(text.strip())
@@ -132,22 +142,22 @@ class Brain:
             try:
                 r2 = self._masked(lambda: self.tier2.handle(m.group(1).strip()), "tier2-haiku", on_filler)
                 tl.mark("tier2-haiku")
-                return Reply(r2.text, r2.lane, tl, speaker=speaker)
+                return Reply(r2.text, r2.lane, tl, speaker=speaker, re_ask=re_ask)
             except Exception as exc:  # noqa: BLE001 — degrade gracefully, don't crash
                 tl.mark("tier2-haiku(failed)")
-                return Reply(f"(couldn't reach Haiku: {exc})", "tier2-haiku", tl, speaker=speaker)
+                return Reply(f"(couldn't reach Haiku: {exc})", "tier2-haiku", tl, speaker=speaker, re_ask=re_ask)
         if m and demo_mode:
             tl.mark("tier2-haiku(blocked-demo)")
             return Reply(
                 "Sorry — I can only help with that once the operator grants full access.",
-                "tier2-haiku(blocked-demo)", tl, speaker=speaker,
+                "tier2-haiku(blocked-demo)", tl, speaker=speaker, re_ask=re_ask,
             )
 
         # Tier 0 — deterministic local commands (sub-millisecond, never slow).
         r0 = self.tier0.handle(text)
         tl.mark("tier0")
         if r0 is not None:
-            return Reply(r0.text, r0.lane, tl, r0.skill, speaker=speaker)
+            return Reply(r0.text, r0.lane, tl, r0.skill, speaker=speaker, re_ask=re_ask)
 
         # Tier 1 — local Qwen (warm). Masked + deadline-bounded for the busy box.
         hint = self.prefs.hint(self.call_context) if self.call_context else ""
@@ -157,10 +167,10 @@ class Brain:
                 "tier1-qwen", on_filler,
             )
             tl.mark("tier1-qwen")
-            return Reply(r1.text, r1.lane, tl, r1.skill, speaker=speaker)
+            return Reply(r1.text, r1.lane, tl, r1.skill, speaker=speaker, re_ask=re_ask)
         except Exception as exc:  # noqa: BLE001 — local model hiccup: degrade, don't crash
             tl.mark("tier1-qwen(failed)")
-            return Reply(f"(the local model didn't answer: {exc})", "tier1-qwen", tl, speaker=speaker)
+            return Reply(f"(the local model didn't answer: {exc})", "tier1-qwen", tl, speaker=speaker, re_ask=re_ask)
 
     def respond_stream(
         self,

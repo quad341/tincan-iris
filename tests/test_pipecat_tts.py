@@ -58,7 +58,7 @@ def _install_pipecat_stubs() -> None:
     class TTSService(AIService):
         async def run_tts(self, text: str, context_id: str = ""):
             return
-            yield  # noqa: unreachable — makes it an async generator
+            yield  # unreachable — makes it an async generator
 
     pipecat = types.ModuleType("pipecat")
     frames_pkg = types.ModuleType("pipecat.frames")

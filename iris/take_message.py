@@ -22,9 +22,12 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from . import settings
+
+if TYPE_CHECKING:
+    from .profile_resolver import PresentationProfile, ProfileResolver
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +73,7 @@ class TakeMessageFlow:
         contact_name: str = "",
         caller_number: str = "",
         disclosure_wav: str | Path | None = None,
+        resolver: ProfileResolver | None = None,
     ) -> None:
         self.tts = tts
         self.stt = stt
@@ -80,6 +84,8 @@ class TakeMessageFlow:
         self.contact_name = contact_name.strip()
         self.caller_number = caller_number.strip()
         self.disclosure_wav = str(disclosure_wav) if disclosure_wav else None
+        self.resolver = resolver
+        self.profile: PresentationProfile | None = None
 
     # --- internal helpers ---
 
@@ -122,11 +128,12 @@ class TakeMessageFlow:
         # 1. Disclosure
         self._play_disclosure()
 
-        # 2. Ask who's calling
+        # 2. Ask who's calling (utt-1 — resolve profile from caller's first utterance)
         self._speak("May I ask who's calling?")
-        caller_name = self._listen(_NAME_WINDOW_S)
-        if not caller_name:
-            caller_name = "the caller"
+        caller_name_raw = self._listen(_NAME_WINDOW_S)
+        if self.resolver is not None:
+            self.profile = self.resolver.resolve(utterance=caller_name_raw)
+        caller_name = caller_name_raw or "the caller"
 
         # 3. Ask for a message
         self._speak("Can I take a message?")

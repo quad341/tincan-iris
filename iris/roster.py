@@ -159,6 +159,83 @@ class RosterProvider(Protocol):
     def import_contacts(self, contacts: list[dict]) -> ImportResult: ...
 
 
+_ENUM_V2_RENAMES = {
+    "normal": "ring_through",
+    "vip": "ring_with_announcement",
+    "block": "ignore",
+}
+_ENUM_V2_PRESERVED = frozenset({"screen", "take_message"})
+
+
+def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
+    """v1 → v2: enum renames, posture table, handling_schedules stub.
+
+    Runs entirely within an explicit SQLite transaction so that a failure
+    leaves the database unchanged (version stays at 1).
+    """
+    orig_isolation = conn.isolation_level
+    conn.isolation_level = None  # manual transaction control
+    try:
+        conn.execute("BEGIN")
+
+        rows = conn.execute(
+            "SELECT id, handling_rule FROM contacts WHERE id > 0"
+        ).fetchall()
+        for contact_id, rule in rows:
+            if rule in _ENUM_V2_RENAMES:
+                conn.execute(
+                    "UPDATE contacts SET handling_rule=? WHERE id=?",
+                    (_ENUM_V2_RENAMES[rule], contact_id),
+                )
+            elif rule not in _ENUM_V2_PRESERVED:
+                _log.warning(
+                    "roster v2 migration: contact id=%d has unknown"
+                    " handling_rule %r, falling back to ring_through",
+                    contact_id,
+                    rule,
+                )
+                conn.execute(
+                    "UPDATE contacts SET handling_rule='ring_through' WHERE id=?",
+                    (contact_id,),
+                )
+
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS posture (
+                id          INTEGER PRIMARY KEY,
+                dnd         INTEGER NOT NULL DEFAULT 0,
+                dnd_source  TEXT,
+                dnd_expires REAL,
+                busy        INTEGER NOT NULL DEFAULT 0,
+                busy_source TEXT,
+                updated_at  REAL    NOT NULL DEFAULT 0.0
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS handling_schedules (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                name          TEXT    NOT NULL DEFAULT '',
+                schedule_type TEXT    NOT NULL DEFAULT '',
+                days_of_week  TEXT    NOT NULL DEFAULT '',
+                start_time    TEXT    NOT NULL DEFAULT '',
+                end_time      TEXT    NOT NULL DEFAULT '',
+                action        TEXT    NOT NULL DEFAULT '',
+                enabled       INTEGER NOT NULL DEFAULT 1,
+                created_at    REAL    NOT NULL
+            )"""
+        )
+
+        conn.execute("UPDATE _schema_version SET version=2 WHERE id=1")
+        conn.execute("COMMIT")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.isolation_level = orig_isolation
+
+
 def _run_migrations(conn: sqlite3.Connection) -> None:
     """Apply forward-only schema migrations.  Called once per _connect()."""
     conn.execute(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-from iris.audio.tts import EspeakTTS, KokoroTTS, default_tts
+from iris.audio.tts import EspeakTTS, KokoroServerTTS, KokoroTTS, default_tts
 
 # --- EspeakTTS -----------------------------------------------------------------
 
@@ -72,3 +72,9 @@ def test_default_tts_prefers_server_when_available() -> None:
 
     with patch.object(KokoroServerTTS, "available", return_value=True):
         assert isinstance(default_tts(), KokoroServerTTS)
+
+
+def test_default_tts_uses_kokoro_when_available() -> None:
+    with patch.object(KokoroServerTTS, "available", return_value=False):
+        with patch.object(KokoroTTS, "available", return_value=True):
+            assert isinstance(default_tts(), KokoroTTS)

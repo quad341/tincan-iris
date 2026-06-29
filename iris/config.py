@@ -97,6 +97,14 @@ class Config:
     doctor_timeout_s: float = 2.0
     doctor_deep_timeout_s: float = 5.0
 
+    # --- Multilingual presentation profiles (ti-6371 / ti-joq2).
+    language_set: list[str] = field(default_factory=lambda: ["en"])  # ordered BCP-47 tags; Whisper detects top-to-bottom
+    default_language: str = "en"
+    cadence_default: float = 1.0
+    cadence_slow: float = 0.7    # applied per-turn on re-ask trigger
+    cadence_range: tuple[float, float] = (0.7, 1.4)
+    language_detect_threshold: float = 0.80  # Whisper min confidence
+
 
 DEFAULT = Config()
 

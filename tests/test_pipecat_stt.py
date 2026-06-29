@@ -59,7 +59,7 @@ def _install_pipecat_stubs() -> None:
 
         async def run_stt(self, audio: bytes):
             return
-            yield  # noqa — makes it an async generator
+            yield  # unreachable — makes it an async generator
 
     pipecat = types.ModuleType("pipecat")
     frames_pkg = types.ModuleType("pipecat.frames")
