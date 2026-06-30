@@ -11,6 +11,10 @@ dependencies = []
 
 [project.optional-dependencies]
 console = ["textual>=8"]
+call-card = [
+    "phonenumbers>=8.13",
+    "dateparser>=1.2",
+]
 
 [project.scripts]
 iris = "iris.__main__:main"
