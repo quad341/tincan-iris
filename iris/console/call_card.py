@@ -2,6 +2,7 @@
 
 ti-rnlqo.6.1: DisclosureCard — focus-trapped modal gate with disk state persistence
 ti-rnlqo.6.2: CriticalFactCard, FactCard — confidence bar, edit mode, CapturedFact schema
+ti-rnlqo.6.3: ActionItemCard — description/owner/due_date display + inline edit mode
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from typing import Any
 from textual.message import Message
 from textual.widget import Widget
 
-from iris.capture.schemas import CapturedFact
+from iris.capture.schemas import ActionItem, CapturedFact
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -478,3 +479,156 @@ class FactCard(_FactBaseCard):
         elif event.key == "x":
             event.stop()
             self.action_dismiss()
+
+
+# ─────────────────────────────────────────────────────────────────
+# ActionItemCard — indigo border, three-field inline edit mode
+# ─────────────────────────────────────────────────────────────────
+
+class ActionItemConfirmed(Message):
+    """Operator confirmed the action item as-is."""
+
+    def __init__(self, item_id: str) -> None:
+        super().__init__()
+        self.item_id = item_id
+
+
+class ActionItemEdited(Message):
+    """Operator saved edits to an action item."""
+
+    def __init__(
+        self,
+        item_id: str,
+        description: str,
+        owner: str,
+        due_date: str | None,
+    ) -> None:
+        super().__init__()
+        self.item_id = item_id
+        self.description = description
+        self.owner = owner
+        self.due_date = due_date or None
+
+
+def _owner_display(owner: str | None) -> str:
+    return owner if owner else "Them"
+
+
+# Edit field order: 0=description, 1=due_date, 2=owner
+_EDIT_FIELD_LABELS = ["Description", "Due", "Owner"]
+_N_EDIT_FIELDS = 3
+
+
+class ActionItemCard(Widget):
+    """Action item card: indigo border, description + owner + due date, inline edit.
+
+    Actions: [D] Confirm (as-is), [E] Edit (Tab cycles fields, Enter saves, Esc cancels).
+    Owner defaults to 'Them' when ActionItem.owner is empty/None.
+    ARIA: aria-live=polite.
+    """
+
+    aria_role = "article"
+
+    DEFAULT_CSS = """
+    ActionItemCard {
+        border: solid #818cf8;
+        height: auto;
+        padding: 1;
+        margin-bottom: 1;
+    }
+    """
+
+    def __init__(self, item: ActionItem, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._item = item
+        self._editing: bool = False
+        self._edit_field: int = 0
+        self._edit_desc: str = ""
+        self._edit_due: str = ""
+        self._edit_owner: str = ""
+
+    def _start_edit(self) -> None:
+        self._editing = True
+        self._edit_field = 0
+        self._edit_desc = self._item.description
+        self._edit_due = self._item.due_date or ""
+        self._edit_owner = _owner_display(self._item.owner)
+        self.refresh()
+
+    def _cancel_edit(self) -> None:
+        self._editing = False
+        self.refresh()
+
+    def _commit_edit(self) -> None:
+        due = self._edit_due.strip() or None
+        self.post_message(
+            ActionItemEdited(
+                self._item.id,
+                self._edit_desc.strip() or self._item.description,
+                self._edit_owner.strip() or "Them",
+                due,
+            )
+        )
+        self._editing = False
+        self.remove()
+
+    def _current_buf(self) -> str:
+        return [self._edit_desc, self._edit_due, self._edit_owner][self._edit_field]
+
+    def _set_current_buf(self, value: str) -> None:
+        if self._edit_field == 0:
+            self._edit_desc = value
+        elif self._edit_field == 1:
+            self._edit_due = value
+        else:
+            self._edit_owner = value
+
+    def render(self) -> str:
+        owner_str = _owner_display(self._item.owner)
+        due_str = self._item.due_date if self._item.due_date else "—"
+
+        if self._editing:
+            cursor = "▋"
+            lines = [
+                f"[bold #818cf8]✓ ACTION ITEM[/bold #818cf8]  [dim]Owner: {self._edit_owner}{cursor if self._edit_field == 2 else ''}[/dim]",
+                f"[bold white]{self._edit_desc}{cursor if self._edit_field == 0 else ''}[/bold white]",
+                f"[dim]Due: {self._edit_due}{cursor if self._edit_field == 1 else ''}[/dim]",
+                f"[dim]Tab to switch field  •  Enter to save  •  Esc to cancel[/dim]",
+            ]
+            return "\n".join(lines)
+
+        return (
+            f"[bold #818cf8]✓ ACTION ITEM[/bold #818cf8]  [dim]Owner: {owner_str}[/dim]\n"
+            f"[bold white]{self._item.description}[/bold white]\n"
+            f"[dim]Due: {due_str}[/dim]\n"
+            f"[dim]\\[D] Confirm  \\[E] Edit[/dim]"
+        )
+
+    def on_key(self, event: Any) -> None:
+        if self._editing:
+            event.stop()
+            event.prevent_default()
+            if event.key == "escape":
+                self._cancel_edit()
+            elif event.key == "enter":
+                self._commit_edit()
+            elif event.key == "tab":
+                self._edit_field = (self._edit_field + 1) % _N_EDIT_FIELDS
+                self.refresh()
+            elif event.key == "shift+tab":
+                self._edit_field = (self._edit_field - 1) % _N_EDIT_FIELDS
+                self.refresh()
+            elif event.key == "backspace":
+                self._set_current_buf(self._current_buf()[:-1])
+                self.refresh()
+            elif event.character and event.character.isprintable():
+                self._set_current_buf(self._current_buf() + event.character)
+                self.refresh()
+        else:
+            if event.key == "e":
+                event.stop()
+                self._start_edit()
+            elif event.key == "d":
+                event.stop()
+                self.post_message(ActionItemConfirmed(self._item.id))
+                self.remove()
