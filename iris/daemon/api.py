@@ -7,11 +7,15 @@ Socket: ~/.local/run/iris/daemon.sock (mode 0600); override with $IRIS_DAEMON_SO
 
 Event types broadcast to all connected clients:
   incoming_call, screen_intro, call_connected, call_ended, posture, take_message_done
+  brain_turn_started, brain_chunk, brain_reply
 
 Commands accepted from clients:
-  choose  — operator selects a call-handling action
-  dnd     — set/clear/timed DND
-  status  — request current state snapshot
+  choose        — operator selects a call-handling action
+  dnd           — set/clear/timed DND
+  status        — request current state snapshot
+  turn          — dispatch text to Brain; returns ack when queued
+  stream_turn   — same as turn; ack key is 'stream_turn'
+  call_context  — return current contact_id, contact_name, in_call
 """
 from __future__ import annotations
 
@@ -25,6 +29,7 @@ import time
 from pathlib import Path
 
 from ._socket_path import daemon_socket_path
+from .brain_host import BrainHost
 from .posture import PostureManager
 
 _log = logging.getLogger(__name__)
@@ -104,9 +109,11 @@ class DaemonAPI:
         posture: PostureManager,
         engine: object,                         # HandlingEngine
         socket_path: Path | None = None,
+        brain_host: BrainHost | None = None,
     ) -> None:
         self._posture = posture
         self._engine = engine
+        self._brain_host = brain_host
         self._socket_path = socket_path or daemon_socket_path()
         self._clients: list[_ClientWriter] = []
         self._clients_lock = threading.Lock()
@@ -189,6 +196,12 @@ class DaemonAPI:
             self._handle_dnd(cmd, writer)
         elif kind == "status":
             self._handle_status(cmd, writer)
+        elif kind == "turn":
+            self._handle_turn(cmd, writer)
+        elif kind == "stream_turn":
+            self._handle_stream_turn(cmd, writer)
+        elif kind == "call_context":
+            self._handle_call_context(cmd, writer)
         else:
             writer.write({"ack": kind or "unknown", "ok": False,
                           "error": f"Unknown command: {kind!r}"})
@@ -249,6 +262,31 @@ class DaemonAPI:
                 "clients": self.client_count(),
             },
         })
+
+    def _handle_turn(self, cmd: dict, writer: _ClientWriter) -> None:
+        if self._brain_host is None:
+            writer.write({"ack": "turn", "ok": False, "error": "no brain"})
+            return
+        text = cmd.get("text", "")
+        speaker = cmd.get("speaker", "")
+        result = self._brain_host.async_turn(text, speaker)
+        writer.write(result)
+
+    def _handle_stream_turn(self, cmd: dict, writer: _ClientWriter) -> None:
+        if self._brain_host is None:
+            writer.write({"ack": "stream_turn", "ok": False, "error": "no brain"})
+            return
+        text = cmd.get("text", "")
+        speaker = cmd.get("speaker", "")
+        result = self._brain_host.async_turn(text, speaker)
+        writer.write({**result, "ack": "stream_turn"})
+
+    def _handle_call_context(self, cmd: dict, writer: _ClientWriter) -> None:
+        if self._brain_host is None:
+            writer.write({"ack": "call_context", "ok": False, "error": "no brain"})
+            return
+        ctx = self._brain_host.call_context_snapshot()
+        writer.write({"ack": "call_context", "ok": True, **ctx})
 
     # --- PostureManager subscriber ---
 
