@@ -11,7 +11,11 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock, patch
 
+from iris.capture.schemas import ActionItem, CapturedFact, FactType
 from iris.daemon.call_card_host import _DEFAULT_DISCLOSURE, CallCardHost
+from iris.daemon.engine import HandlingEngine
+from iris.daemon.policy import PolicyResolver, ResolveResult
+from iris.roster import Contact
 
 
 def _make_host():
@@ -227,3 +231,201 @@ def test_empty_id_resolves_to_active_session_for_ack_and_stop(mock_session_cls):
     ended = [c.args[0] for c in api.broadcast.call_args_list
              if c.args[0].get("event") == "call_card_ended"]
     assert ended and ended[0]["session_id"] == minted
+
+
+# ---------------------------------------------------------------------------
+# start_session / stop_session broadcast contract (ti-rnlqo.3.4)
+#
+# Carried forward from gc-validator-f7bde7842f0c commit dbb7480, updated for
+# the current CallCardHost API: transcript_store is now created internally
+# (no longer a constructor param) and start_session gained contact_id.
+# ---------------------------------------------------------------------------
+
+def _make_fact(session_id="sess-1"):
+    return CapturedFact(
+        session_id=session_id,
+        fact_type=FactType.PHONE,
+        raw_text="call me at 415-555-1234",
+        normalized_value="+14155551234",
+        transcript_turn_id=1,
+        transcript_offset_s=10.0,
+        speaker="far",
+        confidence=0.9,
+        critical=True,
+    )
+
+
+def _make_action_item(session_id="sess-1"):
+    return ActionItem(
+        session_id=session_id,
+        description="I'll call you back",
+        trigger="I'll",
+        owner="operator",
+        transcript_turn_id=2,
+        transcript_offset_s=20.0,
+        speaker="operator",
+        confidence=0.85,
+    )
+
+
+def _broadcast_events(api):
+    return [c.args[0] for c in api.broadcast.call_args_list]
+
+
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_start_session_broadcasts_started_and_disclosure_needed(mock_session_cls):
+    host, _store, api = _make_host()
+    mock_session_cls.return_value = MagicMock()
+    host.start_session("sess-1", "+15550001111")
+
+    names = [e.get("event") for e in _broadcast_events(api)]
+    assert "call_card_started" in names
+    assert "call_card_disclosure_needed" in names
+    assert names.index("call_card_started") < names.index("call_card_disclosure_needed"), (
+        "call_card_started must precede call_card_disclosure_needed"
+    )
+
+
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_start_session_started_event_carries_session_id(mock_session_cls):
+    host, _store, api = _make_host()
+    mock_session_cls.return_value = MagicMock()
+    host.start_session("sess-1", "+15550001111")
+
+    started = next(e for e in _broadcast_events(api) if e.get("event") == "call_card_started")
+    assert started["session_id"] == "sess-1"
+
+
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_start_session_disclosure_event_includes_script(mock_session_cls):
+    host, _store, api = _make_host()
+    mock_session_cls.return_value = MagicMock()
+    host.start_session("sess-1", "+15550001111")
+
+    disclosure = next(
+        e for e in _broadcast_events(api) if e.get("event") == "call_card_disclosure_needed"
+    )
+    assert disclosure["session_id"] == "sess-1"
+    assert disclosure.get("script")
+
+
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_start_session_reentrancy_guard_no_double_broadcast(mock_session_cls):
+    host, _store, api = _make_host()
+    mock_session_cls.return_value = MagicMock()
+    host.start_session("sess-1", "+15550001111")
+    first_count = api.broadcast.call_count
+    host.start_session("sess-1", "+15550001111")  # same session_id, still active
+    assert api.broadcast.call_count == first_count, (
+        "Second start_session while active must not broadcast additional events"
+    )
+
+
+@patch("iris.capture.enricher.PostCallEnricher")
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_stop_session_broadcasts_call_card_ended(mock_session_cls, _mock_enricher_cls):
+    host, _store, api = _make_host()
+    mock_session_cls.return_value = MagicMock()
+    host.start_session("sess-1", "+15550001111")
+    host._on_fact(_make_fact())
+    host._on_action_item(_make_action_item())
+    host._on_fact(_make_fact())
+
+    api.broadcast.reset_mock()
+    host.stop_session("sess-1")
+
+    ended = next(
+        (e for e in _broadcast_events(api) if e.get("event") == "call_card_ended"), None
+    )
+    assert ended is not None, "call_card_ended not broadcast"
+    assert ended["session_id"] == "sess-1"
+    assert ended["fact_count"] == 2
+    assert ended["action_item_count"] == 1
+
+
+def test_on_fact_broadcasts_call_card_fact():
+    host, _store, api = _make_host()
+    fact = _make_fact()
+    host._on_fact(fact)
+
+    fact_events = [e for e in _broadcast_events(api) if e.get("event") == "call_card_fact"]
+    assert len(fact_events) == 1
+    assert fact_events[0]["session_id"] == fact.session_id
+    assert fact_events[0]["fact"]["id"] == fact.id
+
+
+def test_on_action_item_broadcasts_call_card_action_item():
+    host, _store, api = _make_host()
+    item = _make_action_item()
+    host._on_action_item(item)
+
+    ai_events = [e for e in _broadcast_events(api) if e.get("event") == "call_card_action_item"]
+    assert len(ai_events) == 1
+    assert ai_events[0]["session_id"] == item.session_id
+    assert ai_events[0]["item"]["id"] == item.id
+
+
+# ---------------------------------------------------------------------------
+# HandlingEngine wiring: on_call_connected -> call_card_host.start_session
+# (ti-rnlqo.3.4). on_call_connected now takes only call_id -- caller_number
+# and contact_id come from _pending_contact, set by a prior on_incoming_call.
+# ---------------------------------------------------------------------------
+
+def _contact(*, id=42, display_name="Alice", phone_e164="+15550001111", handling_rule="screen"):
+    return Contact(
+        id=id,
+        display_name=display_name,
+        phone_e164=phone_e164,
+        handling_rule=handling_rule,
+        trust_tier="demo",
+        relationship_notes="",
+        created_at=0.0,
+        updated_at=0.0,
+    )
+
+
+def _mock_resolver(contact=None, verb="screen"):
+    resolver = MagicMock(spec=PolicyResolver)
+    resolver.resolve.return_value = ResolveResult(
+        verb=verb,
+        contact=contact,
+        event={
+            "event": "incoming_call",
+            "call_id": "call-123",
+            "caller_name": contact.display_name if contact else "",
+            "caller_number": contact.phone_e164 if contact else "+15550001111",
+            "verb": verb,
+            "choices": [],
+        },
+    )
+    return resolver
+
+
+def _make_engine(*, call_card_host=None, contact=None):
+    c = _contact() if contact is None else contact
+    return HandlingEngine(
+        ctrl=MagicMock(),
+        tts=None,
+        resolver=_mock_resolver(contact=c),
+        notify_sink=MagicMock(),
+        broadcast=MagicMock(),
+        call_card_host=call_card_host,
+    )
+
+
+def test_on_call_connected_no_host_does_not_raise():
+    """HandlingEngine.on_call_connected with call_card_host=None does not raise."""
+    engine = _make_engine(call_card_host=None)
+    engine.on_incoming_call("+15550001111", call_id="call-123")
+    engine.on_call_connected("call-123")  # must not raise
+
+
+def test_on_call_connected_with_host_calls_start_session():
+    """HandlingEngine.on_call_connected calls
+    call_card_host.start_session(call_id, caller_number, contact_id)."""
+    mock_host = MagicMock()
+    contact = _contact(id=7, phone_e164="+15550001111")
+    engine = _make_engine(call_card_host=mock_host, contact=contact)
+    engine.on_incoming_call("+15550001111", call_id="call-123")
+    engine.on_call_connected("call-123")
+    mock_host.start_session.assert_called_once_with("call-123", "+15550001111", 7)
