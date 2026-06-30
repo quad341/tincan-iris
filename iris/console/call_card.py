@@ -8,14 +8,21 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from enum import Enum
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import ScrollableContainer
 from textual.message import Message
+from textual.reactive import reactive
 from textual.widget import Widget
+from textual.widgets import Footer, Static
 
-from iris.capture.schemas import ActionItem, CapturedFact
+from iris.capture.schemas import ActionItem, CapturedFact, FactType
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -632,3 +639,192 @@ class ActionItemCard(Widget):
                 event.stop()
                 self.post_message(ActionItemConfirmed(self._item.id))
                 self.remove()
+
+
+# ─────────────────────────────────────────────────────────────────
+# CallCardView — full-screen Textual App (ti-rnlqo.6.4)
+# ─────────────────────────────────────────────────────────────────
+
+class _ParticipationLevel(Enum):
+    SILENT = 0
+    AMBIENT = 1
+    AUDIO_PRIVATE = 2
+    ON_CALL = 3
+
+
+class _CallCardFeed(ScrollableContainer):
+    """Scrollable card feed; newest card prepended at top."""
+    aria_role = "feed"
+    DEFAULT_CSS = """
+    _CallCardFeed {
+        height: 1fr;
+        overflow-y: scroll;
+    }
+    """
+
+
+def _fact_from_dict(d: dict) -> CapturedFact:
+    """Reconstruct a CapturedFact from a daemon event payload dict."""
+    return CapturedFact(
+        session_id=d["session_id"],
+        fact_type=FactType(d["fact_type"]),
+        raw_text=d["raw_text"],
+        normalized_value=d["normalized_value"],
+        transcript_turn_id=d.get("transcript_turn_id", 0),
+        transcript_offset_s=d.get("transcript_offset_s", 0.0),
+        speaker=d.get("speaker", ""),
+        confidence=d.get("confidence", 0.0),
+        critical=bool(d.get("critical", False)),
+        confirmed=d.get("confirmed"),
+        source_layer=d.get("source_layer", 1),
+        id=d.get("id", uuid4().hex),
+        created_at=d.get("created_at", time.time()),
+    )
+
+
+def _action_item_from_dict(d: dict) -> ActionItem:
+    """Reconstruct an ActionItem from a daemon event payload dict."""
+    return ActionItem(
+        session_id=d["session_id"],
+        description=d["description"],
+        trigger=d.get("trigger", ""),
+        owner=d.get("owner", ""),
+        transcript_turn_id=d.get("transcript_turn_id", 0),
+        transcript_offset_s=d.get("transcript_offset_s", 0.0),
+        speaker=d.get("speaker", ""),
+        confidence=d.get("confidence", 0.0),
+        due_date=d.get("due_date"),
+        confirmed=d.get("confirmed"),
+        source_layer=d.get("source_layer", 1),
+        id=d.get("id", uuid4().hex),
+        created_at=d.get("created_at", time.time()),
+    )
+
+
+class CallCardView(App):
+    """Full-screen Textual call card — DisclosureCard + live fact/action feeds.
+
+    Layout (top → bottom): header bar, DisclosureCard, card feed (CriticalFact /
+    Fact / ActionItem cards newest-first), enriching indicator, footer.
+
+    Call on_daemon_event(event_dict) from the daemon API connection thread to
+    feed live events into the UI. Thread-safe via Textual's call_from_thread.
+    """
+
+    CSS = """
+    Screen {
+        background: #0f172a;
+    }
+    #header-bar {
+        height: 1;
+        background: #1e293b;
+        color: $text;
+        content-align: left middle;
+        padding: 0 1;
+    }
+    #enriching {
+        height: 1;
+        background: #f59e0b;
+        color: #0f172a;
+        content-align: center middle;
+        display: none;
+    }
+    """
+
+    BINDINGS = [
+        Binding("q", "quit", "Quit"),
+        Binding("]", "participation_up", "Level↑"),
+        Binding("[", "participation_down", "Level↓"),
+    ]
+
+    participation_level: reactive[_ParticipationLevel] = reactive(
+        _ParticipationLevel.SILENT
+    )
+
+    def __init__(self, *, session_id: str = "", **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._session_id = session_id
+        self._caller_phone = ""
+        self._topic = ""
+        self._disclosure: DisclosureCard | None = None
+
+    def compose(self) -> ComposeResult:
+        yield Static("📞 Iris Call Card", id="header-bar")
+        self._disclosure = DisclosureCard(self._session_id or "default")
+        yield self._disclosure
+        yield _CallCardFeed(id="card-feed")
+        yield Static(
+            "⏳ Enriching...",
+            id="enriching",
+            markup=False,
+        )
+        yield Footer()
+
+    def _prepend_card(self, card: Widget) -> None:
+        feed = self.query_one("#card-feed", _CallCardFeed)
+        if feed.children:
+            feed.mount(card, before=feed.children[0])
+        else:
+            feed.mount(card)
+
+    # ── Daemon event router ───────────────────────────────────────
+
+    def on_daemon_event(self, event: dict) -> None:
+        """Route a daemon event dict; call from any thread via call_from_thread."""
+        ev = event.get("event", "")
+        if ev == "call_card_started":
+            self._handle_started(event)
+        elif ev == "call_card_fact":
+            self._handle_fact(event)
+        elif ev == "call_card_action_item":
+            self._handle_action_item(event)
+        elif ev == "call_card_ended":
+            self.call_from_thread(self._show_enriching)
+        elif ev == "call_card_enriched":
+            self.call_from_thread(self._hide_enriching)
+
+    def _handle_started(self, event: dict) -> None:
+        self._caller_phone = event.get("caller_phone", "")
+        self._topic = event.get("topic", "")
+        self._session_id = event.get("session_id", self._session_id)
+        header = f"📞 Iris Call Card | {self._caller_phone}"
+        if self._topic:
+            header += f" · {self._topic}"
+        self.call_from_thread(self.query_one("#header-bar", Static).update, header)
+
+    def _handle_fact(self, event: dict) -> None:
+        payload = event.get("fact", event)
+        try:
+            fact = _fact_from_dict(payload)
+        except (KeyError, ValueError):
+            return
+        card: Widget = CriticalFactCard(fact) if fact.critical else FactCard(fact)
+        self.call_from_thread(self._prepend_card, card)
+
+    def _handle_action_item(self, event: dict) -> None:
+        payload = event.get("action_item", event)
+        try:
+            item = _action_item_from_dict(payload)
+        except (KeyError, ValueError):
+            return
+        self.call_from_thread(self._prepend_card, ActionItemCard(item))
+
+    def _show_enriching(self) -> None:
+        self.query_one("#enriching").display = True
+
+    def _hide_enriching(self) -> None:
+        self.query_one("#enriching").display = False
+
+    # ── Participation level ───────────────────────────────────────
+
+    def action_participation_up(self) -> None:
+        levels = list(_ParticipationLevel)
+        idx = levels.index(self.participation_level)
+        if idx < len(levels) - 1:
+            self.participation_level = levels[idx + 1]
+
+    def action_participation_down(self) -> None:
+        levels = list(_ParticipationLevel)
+        idx = levels.index(self.participation_level)
+        if idx > 0:
+            self.participation_level = levels[idx - 1]
