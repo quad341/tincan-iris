@@ -242,7 +242,7 @@ def test_stream_turn_ack(streaming_api, tmp_sock):
         _send(wfile, {"cmd": "stream_turn", "text": "hi", "speaker": "operator"})
         # 5 lines: brain_turn_started + ack + chunk1 + chunk2 + brain_reply
         lines = _collect_lines(rfile, expected=5)
-        ack_lines = [l for l in lines if l.get("ack") == "stream_turn"]
+        ack_lines = [line for line in lines if line.get("ack") == "stream_turn"]
         assert ack_lines, f"No stream_turn ack found; got: {lines}"
         assert ack_lines[0]["ok"] is True
     finally:
@@ -257,19 +257,19 @@ def test_stream_turn_chunks_then_reply(streaming_api, tmp_sock):
         _send(wfile, {"cmd": "stream_turn", "text": "hi", "speaker": "operator"})
         lines = _collect_lines(rfile, expected=5)
 
-        event_types = [l.get("event") for l in lines if "event" in l]
+        event_types = [line.get("event") for line in lines if "event" in line]
         assert "brain_chunk" in event_types, f"Missing brain_chunk; lines={lines}"
         assert "brain_reply" in event_types, f"Missing brain_reply; lines={lines}"
 
-        chunk_idxs = [i for i, l in enumerate(lines) if l.get("event") == "brain_chunk"]
-        reply_idxs = [i for i, l in enumerate(lines) if l.get("event") == "brain_reply"]
+        chunk_idxs = [i for i, line in enumerate(lines) if line.get("event") == "brain_chunk"]
+        reply_idxs = [i for i, line in enumerate(lines) if line.get("event") == "brain_reply"]
         assert chunk_idxs, "No brain_chunk events found"
         assert reply_idxs, "No brain_reply event found"
         assert max(chunk_idxs) < reply_idxs[0], (
             "brain_reply must arrive after all brain_chunk events"
         )
 
-        reply = next(l for l in lines if l.get("event") == "brain_reply")
+        reply = next(line for line in lines if line.get("event") == "brain_reply")
         assert reply["text"] == "Hello world."
         assert reply["lane"] == "tier0"
     finally:

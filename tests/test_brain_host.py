@@ -10,8 +10,6 @@ import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import pytest
-
 from iris.daemon.brain_host import BrainHost
 
 
@@ -122,7 +120,9 @@ def test_brain_turn_started_fires_before_lock_acquired(tmp_path):
         def release(self):
             self._real.release()
 
-    broadcast = lambda ev: order.append(ev.get("event", "?"))
+    def broadcast(ev):
+        order.append(ev.get("event", "?"))
+
     brain = _mock_brain()
     host = BrainHost(brain=brain, db_path=tmp_path / "test.db", broadcast=broadcast)
     host._turn_lock = _TrackedLock()
