@@ -107,7 +107,7 @@ class CallCardHost:
             "fact_count": fact_count,
             "action_item_count": action_item_count,
         })
-        # Stub: enrichment will be wired in ti-rnlqo.5
+        # Stub until ti-rnlqo.5.4 wires PostCallEnricher.start()
         _log.info("PostCallEnricher: enrichment not yet implemented (session=%s)", session_id)
 
     # ── Fact / action-item callbacks (called from audio threads) ─────────────
