@@ -80,6 +80,7 @@ class HandlingEngine:
         notify_sink: DesktopNotifySink,
         broadcast: Callable[[dict], None],
         call_card_host: object | None = None,
+        brain_host: object | None = None,
     ) -> None:
         self._ctrl = ctrl
         self._tts = tts
@@ -87,6 +88,8 @@ class HandlingEngine:
         self._notify = notify_sink
         self._broadcast = broadcast
         self._call_card_host = call_card_host
+        self._brain_host = brain_host
+        self._pending_contact: object | None = None
         self._attention = AttentionLock()
 
     # --- public entry points ---
@@ -114,6 +117,7 @@ class HandlingEngine:
             return
 
         result = self._resolver.resolve(caller_number, call_id)
+        self._pending_contact = result.contact
         verb = result.verb
         caller_name = result.contact.display_name if result.contact else caller_number
 
@@ -142,16 +146,31 @@ class HandlingEngine:
         _log.info("Operator chose %r for call %s", action_id, call_id)
         # Flow dispatch on choices is wired in ti-gxpt.5.
 
-    def on_call_connected(self, call_id: str, caller_number: str) -> None:
-        """Notify call-card host that the call has been answered."""
+    def on_call_connected(self, call_id: str) -> None:
+        """Set brain call context and notify call-card host that the call has been answered."""
+        contact = self._pending_contact
+        caller_number = (
+            getattr(contact, "phone_e164", None) or ""
+        ) if contact is not None else ""
+
+        if self._brain_host is not None and contact is not None:
+            self._brain_host.set_call_context(  # type: ignore[union-attr]
+                contact.id,  # type: ignore[union-attr]
+                contact.display_name,  # type: ignore[union-attr]
+                caller_number,
+            )
+
         if self._call_card_host is not None:
             self._call_card_host.start_session(call_id, caller_number)  # type: ignore[union-attr]
 
     def on_call_ended(self, call_id: str) -> None:
-        """Release the attention lock when a call ends."""
+        """Release the attention lock and clear brain call context when a call ends."""
         if self._call_card_host is not None:
             self._call_card_host.stop_session(call_id)  # type: ignore[union-attr]
         self._attention.release(call_id)
+        self._pending_contact = None
+        if self._brain_host is not None:
+            self._brain_host.clear_call_context()  # type: ignore[union-attr]
 
     # --- private dispatch ---
 
