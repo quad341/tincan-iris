@@ -9,7 +9,7 @@ After=iris-llama.service iris-whisper.service iris-kokoro.service
 [Service]
 Type=simple
 WorkingDirectory={REPO_PATH}
-ExecStart={REPO_PATH}/.venv/bin/python -m iris.voice
+ExecStart={REPO_PATH}/.venv/bin/python -m iris.daemon
 Restart=on-failure
 RestartSec=5
 
