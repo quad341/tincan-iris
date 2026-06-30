@@ -79,12 +79,14 @@ class HandlingEngine:
         resolver: PolicyResolver,
         notify_sink: DesktopNotifySink,
         broadcast: Callable[[dict], None],
+        call_card_host: object | None = None,
     ) -> None:
         self._ctrl = ctrl
         self._tts = tts
         self._resolver = resolver
         self._notify = notify_sink
         self._broadcast = broadcast
+        self._call_card_host = call_card_host
         self._attention = AttentionLock()
 
     # --- public entry points ---
@@ -140,8 +142,15 @@ class HandlingEngine:
         _log.info("Operator chose %r for call %s", action_id, call_id)
         # Flow dispatch on choices is wired in ti-gxpt.5.
 
+    def on_call_connected(self, call_id: str, caller_number: str) -> None:
+        """Notify call-card host that the call has been answered."""
+        if self._call_card_host is not None:
+            self._call_card_host.start_session(call_id, caller_number)  # type: ignore[union-attr]
+
     def on_call_ended(self, call_id: str) -> None:
         """Release the attention lock when a call ends."""
+        if self._call_card_host is not None:
+            self._call_card_host.stop_session(call_id)  # type: ignore[union-attr]
         self._attention.release(call_id)
 
     # --- private dispatch ---

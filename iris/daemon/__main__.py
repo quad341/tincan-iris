@@ -17,6 +17,7 @@ import threading
 from pathlib import Path
 
 from .api import DaemonAPI
+from .call_card_host import CallCardHost
 from .engine import HandlingEngine
 from .policy import PolicyResolver
 from .posture import PostureManager, PostureWatcher
@@ -69,9 +70,26 @@ def main() -> int:
         broadcast=lambda ev: None,  # rewired after api is built
     )
 
-    api = DaemonAPI(posture=posture, engine=engine)
+    # Construct CallCardHost when IRIS_CALL_CARD=1; None otherwise (section absent).
+    call_card_host: CallCardHost | None = None
+    if os.environ.get("IRIS_CALL_CARD") == "1":
+        from iris.capture.processor import L1CaptureProcessor
+        from iris.capture.store import CallCardStore
+        from iris.capture.transcript import TranscriptStore
+        call_card_host = CallCardHost(
+            store=CallCardStore(),
+            transcript_store=TranscriptStore(),
+            processor=L1CaptureProcessor(),
+            api=None,       # patched below after api is built
+            cfg=None,
+        )
+        engine._call_card_host = call_card_host
+
+    api = DaemonAPI(posture=posture, engine=engine, call_card_host=call_card_host)
     # Rewire broadcast so engine uses the real API broadcast
     engine._broadcast = api.broadcast
+    if call_card_host is not None:
+        call_card_host._api = api
 
     _write_pid(_PID_PATH)
     _log.info("iris daemon starting (pid=%d)", os.getpid())
