@@ -101,8 +101,12 @@ class BrainHost:
             finally:
                 self._turn_lock.release()
 
-        t = threading.Thread(target=_run, name="brain-turn", daemon=True)
-        t.start()
+        try:
+            t = threading.Thread(target=_run, name="brain-turn", daemon=True)
+            t.start()
+        except BaseException:
+            self._turn_lock.release()
+            raise
         return {"ack": "turn", "ok": True}
 
     # --- call context ---
