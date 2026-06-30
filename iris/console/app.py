@@ -437,6 +437,7 @@ class IrisConsole(App):
         self._dnd_expires: float | None = None
         self._proxy: DaemonProxy | None = None  # set in on_mount if daemon is running
         self._mode: str = "direct"  # "proxy" or "direct"; set in on_mount
+        self._thinking: bool = False  # True while daemon brain is processing a turn
         self._incoming_call_id: str | None = None
         self._incoming_verb: str | None = None
         self._incoming_choices: list[dict] = []
@@ -694,7 +695,33 @@ class IrisConsole(App):
     def _on_daemon_event(self, ev: dict) -> None:
         """Handle a JSON event received from DaemonProxy."""
         event_type = ev.get("event", "")
-        if event_type == "incoming_call":
+        if event_type == "brain_turn_started":
+            self._thinking = True
+            self._note = "⏳ thinking…"
+            self._w("[dim]⟨iris thinking…⟩[/]")
+            self._refresh_status()
+        elif event_type == "brain_chunk":
+            text = ev.get("text", "")
+            if text:
+                self._w(f"[dim cyan]iris ›… {text}[/]")
+        elif event_type == "brain_reply":
+            self._thinking = False
+            text = ev.get("text", "")
+            lane = ev.get("lane", "")
+            skill = ev.get("skill") or ""
+            tag = lane + (f"/{skill}" if skill else "")
+            self._w(f"[bold cyan]iris[/] › {text}")
+            if tag:
+                self._w(f"        [dim]⟮{tag}⟯[/]")
+            self._note = ""
+            self._refresh_status()
+            self._await_answer = bool(text) and text.rstrip().endswith("?")
+        elif event_type == "error":
+            self._thinking = False
+            self._w(f"[red]✗ {ev.get('message', 'daemon error')}[/]")
+            self._note = ""
+            self._refresh_status()
+        elif event_type == "incoming_call":
             self._incoming_call_id = ev.get("call_id")
             self._incoming_verb = ev.get("verb", "")
             self._incoming_choices = ev.get("choices", [])
@@ -732,11 +759,20 @@ class IrisConsole(App):
             self._dnd_expires = ev.get("expires_in_s")
             self._refresh_status()
         elif event_type == "disconnected":
-            self._w("[yellow]Daemon disconnected — switched to direct mode[/]")
-            self._proxy = None
-            self._mode = "direct"
-            self.ctrl.start()
-            self._posture.subscribe(lambda e: self.events.put(("posture_changed", e)))
+            self._switch_to_direct()
+
+    def _switch_to_direct(self) -> None:
+        """Switch from proxy to direct mode (idempotent). Called on disconnect event or send error."""
+        if self._mode == "direct":
+            return
+        self._w("[yellow]Daemon disconnected — switched to direct mode[/]")
+        self._proxy = None
+        self._mode = "direct"
+        self._thinking = False
+        self._note = ""
+        self.ctrl.start()
+        self._posture.subscribe(lambda e: self.events.put(("posture_changed", e)))
+        self._refresh_status()
 
     # --- ti-veyx: seamless phone-call ride-along (adopt the live SCO endpoint) ---
 
@@ -857,6 +893,13 @@ class IrisConsole(App):
 
     def _dispatch(self, cmd: str, speaker: str = "") -> bool:
         """Run an addressed command if Iris is free. Returns True if dispatched."""
+        if self._mode == "proxy" and self._proxy is not None:
+            try:
+                self._proxy.send({"cmd": "stream_turn", "text": cmd, "speaker": speaker})
+            except DaemonNotRunning:
+                self._switch_to_direct()
+                return False
+            return True
         if self.conductor.state is State.IDLE:
             self.run_worker(
                 lambda c=cmd, s=speaker: self.conductor.respond_to(c, speaker=s),
@@ -864,6 +907,35 @@ class IrisConsole(App):
             )
             return True
         return False
+
+    def _proxy_stop_and_respond(self) -> None:
+        """Push-to-talk stop in proxy mode: transcribe locally, send stream_turn to daemon."""
+        c = self.conductor
+        if c.state is not State.RECORDING or c._rec is None:
+            return
+        wav = c._rec.stop()
+        c._rec = None
+        c._set_state(State.TRANSCRIBING)
+        t0 = time.monotonic()
+        try:
+            text = c.stt.transcribe(wav)
+        except Exception as exc:  # noqa: BLE001
+            self.events.put(("error", f"stt: {exc}"))
+            c._set_state(State.IDLE)
+            return
+        stt_ms = (time.monotonic() - t0) * 1000
+        if c._cancel.is_set():
+            c._set_state(State.IDLE)
+            return
+        self.events.put(("transcript", text, stt_ms))
+        c._set_state(State.IDLE)  # conductor returns to idle; daemon tracks thinking state
+        if not text:
+            return
+        try:
+            if self._proxy is not None:
+                self._proxy.send({"cmd": "stream_turn", "text": text, "speaker": ""})
+        except DaemonNotRunning:
+            self.events.put(("error", "Daemon disconnected — turn not sent"))
 
     def _on_heard_main(self, text: str, speaker: str = "") -> None:
         """A streamed utterance from YOU (main thread): act only if addressed."""
@@ -973,7 +1045,10 @@ class IrisConsole(App):
             c.start_recording()
             self._refresh_status()
         elif c.state is State.RECORDING:
-            self.run_worker(c.stop_and_respond, thread=True, exclusive=True)
+            if self._mode == "proxy" and self._proxy is not None:
+                self.run_worker(self._proxy_stop_and_respond, thread=True, exclusive=True)
+            else:
+                self.run_worker(c.stop_and_respond, thread=True, exclusive=True)
 
     def action_listen(self) -> None:
         if self._stream is not None:
