@@ -1,15 +1,20 @@
 """Call Card widgets for iris/console — ti-rnlqo.6 (builder phase).
 
 ti-rnlqo.6.1: DisclosureCard — focus-trapped modal gate with disk state persistence
+ti-rnlqo.6.2: CriticalFactCard, FactCard — confidence bar, edit mode, CapturedFact schema
 """
 from __future__ import annotations
 
 import json
+import os
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from textual.message import Message
 from textual.widget import Widget
+
+from iris.capture.schemas import CapturedFact
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -233,3 +238,243 @@ class DisclosureCard(Widget):
     @property
     def state(self) -> DisclosureState:
         return self._state
+
+
+# ─────────────────────────────────────────────────────────────────
+# Confidence bar (shared by CriticalFactCard and FactCard)
+# ─────────────────────────────────────────────────────────────────
+
+_BAR_WIDTH = 10
+
+
+def _render_confidence_bar(confidence: float) -> str:
+    """Render a rounded-integer confidence bar with bucket colour.
+
+    Operator decision (2026-06-30): show coarse bucket colour + integer %, not
+    a raw float. Buckets: >=85% green, 60-84% amber (#f59e0b), <60% red.
+    """
+    pct = round(confidence * 100)
+    filled = round(pct * _BAR_WIDTH / 100)
+    bar = "▓" * filled + "░" * (_BAR_WIDTH - filled)
+    if pct >= 85:
+        color = "green"
+    elif pct >= 60:
+        color = "#f59e0b"
+    else:
+        color = "red"
+    return f"[{color}]{pct}% {bar}[/{color}]"
+
+
+# ─────────────────────────────────────────────────────────────────
+# Messages — posted to parent on fact card actions
+# ─────────────────────────────────────────────────────────────────
+
+class FactConfirmed(Message):
+    """Operator confirmed the captured fact as-is."""
+
+    def __init__(self, fact_id: str) -> None:
+        super().__init__()
+        self.fact_id = fact_id
+
+
+class FactDismissed(Message):
+    """Operator dismissed (rejected) the captured fact."""
+
+    def __init__(self, fact_id: str) -> None:
+        super().__init__()
+        self.fact_id = fact_id
+
+
+class FactValueOverride(Message):
+    """Operator corrected the normalized value via CriticalFactCard edit mode."""
+
+    def __init__(self, fact_id: str, new_value: str) -> None:
+        super().__init__()
+        self.fact_id = fact_id
+        self.new_value = new_value
+
+
+# ─────────────────────────────────────────────────────────────────
+# _FactBaseCard — base for CriticalFactCard and FactCard
+# ─────────────────────────────────────────────────────────────────
+
+class _FactBaseCard(Widget):
+    """Base for fact-feed cards; holds a CapturedFact and handles dismiss/confirm."""
+
+    aria_role = "article"
+
+    DEFAULT_CSS = """
+    _FactBaseCard {
+        height: auto;
+        padding: 1;
+        margin-bottom: 1;
+    }
+    """
+
+    def __init__(self, fact: CapturedFact, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._fact = fact
+
+    def action_confirm(self) -> None:
+        self.post_message(FactConfirmed(self._fact.id))
+        self.remove()
+
+    def action_dismiss(self) -> None:
+        self.post_message(FactDismissed(self._fact.id))
+        self.remove()
+
+
+# ─────────────────────────────────────────────────────────────────
+# CriticalFactCard — amber border, pulsing animation, edit mode
+# ─────────────────────────────────────────────────────────────────
+
+class CriticalFactCard(_FactBaseCard):
+    """High-urgency fact card: amber border, pulsing mount animation, inline edit.
+
+    Actions: [D] Confirm, [E] Edit (inline, Enter=save / Esc=cancel), [X] Dismiss.
+    ARIA: aria-live=assertive.
+    Edit mode posts FactValueOverride to the app; Confirm/Dismiss post their own messages.
+    Pulsing animation stops after 4 cycles (4.8 s) or on first focus.
+    Set PREFERS_REDUCED_MOTION=1 to disable the animation entirely.
+    """
+
+    aria_role = "article"
+
+    DEFAULT_CSS = """
+    CriticalFactCard {
+        border: heavy #f59e0b;
+        height: auto;
+        padding: 1;
+        margin-bottom: 1;
+    }
+    CriticalFactCard.-pulse-dim {
+        border: heavy #7c5308;
+    }
+    """
+
+    def __init__(self, fact: CapturedFact, **kwargs: Any) -> None:
+        super().__init__(fact, **kwargs)
+        self._editing: bool = False
+        self._edit_buffer: str = ""
+        self._pulse_timer: Any = None
+        self._pulse_count: int = 0
+        self._pulse_bright: bool = True
+
+    def on_mount(self) -> None:
+        if os.environ.get("PREFERS_REDUCED_MOTION", "0") == "1":
+            return
+        self._pulse_timer = self.set_interval(0.6, self._pulse_tick)
+
+    def _pulse_tick(self) -> None:
+        self._pulse_count += 1
+        self._pulse_bright = not self._pulse_bright
+        if self._pulse_bright:
+            self.remove_class("-pulse-dim")
+        else:
+            self.add_class("-pulse-dim")
+        if self._pulse_count >= 8:  # 4 cycles × 2 ticks
+            self._pulse_timer.stop()
+            self.remove_class("-pulse-dim")
+
+    def on_focus(self) -> None:
+        if self._pulse_timer is not None:
+            self._pulse_timer.stop()
+            self._pulse_timer = None
+        self.remove_class("-pulse-dim")
+
+    def render(self) -> str:
+        conf_bar = _render_confidence_bar(self._fact.confidence)
+        header = f"[bold #f59e0b]⚡ CRITICAL FACT[/bold #f59e0b]  {conf_bar}"
+
+        if self._editing:
+            cursor = "▋"
+            return (
+                f"{header}\n"
+                f"[dim]{self._fact.raw_text}[/dim]\n"
+                f"[bold white]{self._edit_buffer}{cursor}[/bold white]\n"
+                f"[dim]Enter to confirm  •  Esc to cancel[/dim]"
+            )
+
+        return (
+            f"{header}\n"
+            f"[dim]{self._fact.raw_text}[/dim]\n"
+            f"[bold white]{self._fact.normalized_value}[/bold white]\n"
+            f"[dim]\\[D] Confirm  \\[E] Edit  \\[X] Dismiss[/dim]"
+        )
+
+    def on_key(self, event: Any) -> None:
+        if self._editing:
+            event.stop()
+            event.prevent_default()
+            if event.key == "escape":
+                self._editing = False
+                self._edit_buffer = ""
+                self.refresh()
+            elif event.key == "enter":
+                self._commit_edit()
+            elif event.key == "backspace":
+                self._edit_buffer = self._edit_buffer[:-1]
+                self.refresh()
+            elif event.character and event.character.isprintable():
+                self._edit_buffer += event.character
+                self.refresh()
+        else:
+            if event.key == "e":
+                event.stop()
+                self._editing = True
+                self._edit_buffer = self._fact.normalized_value
+                self.refresh()
+            elif event.key == "d":
+                event.stop()
+                self.action_confirm()
+            elif event.key == "x":
+                event.stop()
+                self.action_dismiss()
+
+    def _commit_edit(self) -> None:
+        new_value = self._edit_buffer.strip()
+        if new_value:
+            self.post_message(FactValueOverride(self._fact.id, new_value))
+        self._editing = False
+        self._edit_buffer = ""
+        self.remove()
+
+
+# ─────────────────────────────────────────────────────────────────
+# FactCard — teal border, confirm/dismiss only (no edit)
+# ─────────────────────────────────────────────────────────────────
+
+class FactCard(_FactBaseCard):
+    """Normal-confidence fact card: teal border, confirm/dismiss only.
+
+    Actions: [D] Confirm, [X] Dismiss. No edit mode (deferred to ti-tr1m5).
+    ARIA: aria-live=polite.
+    """
+
+    aria_role = "article"
+
+    DEFAULT_CSS = """
+    FactCard {
+        border: solid #14b8a6;
+        height: auto;
+        padding: 1;
+        margin-bottom: 1;
+    }
+    """
+
+    def render(self) -> str:
+        conf_bar = _render_confidence_bar(self._fact.confidence)
+        return (
+            f"[bold #14b8a6]● FACT[/bold #14b8a6]  {conf_bar}\n"
+            f"[dim]{self._fact.raw_text}[/dim]\n"
+            f"[bold white]{self._fact.normalized_value}[/bold white]\n"
+            f"[dim]\\[D] Confirm  \\[X] Dismiss[/dim]"
+        )
+
+    def on_key(self, event: Any) -> None:
+        if event.key == "d":
+            event.stop()
+            self.action_confirm()
+        elif event.key == "x":
+            event.stop()
+            self.action_dismiss()
