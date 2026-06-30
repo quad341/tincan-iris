@@ -436,6 +436,7 @@ class IrisConsole(App):
         self._dnd: bool = False
         self._dnd_expires: float | None = None
         self._proxy: DaemonProxy | None = None  # set in on_mount if daemon is running
+        self._mode: str = "direct"  # "proxy" or "direct"; set in on_mount
         self._incoming_call_id: str | None = None
         self._incoming_verb: str | None = None
         self._incoming_choices: list[dict] = []
@@ -475,17 +476,19 @@ class IrisConsole(App):
         try:
             proxy.connect()
             self._proxy = proxy
+            self._mode = "proxy"
             proxy.start_event_reader(
                 on_event=lambda ev: self.events.put(("daemon_event", ev)),
                 on_disconnect=lambda: self.events.put(("daemon_event", {"event": "disconnected"})),
             )
-            self._w("[dim]Daemon connected — using daemon mode[/]")
+            self._w("[dim]Daemon connected — brain turns via socket[/]")
             eff = self._posture.effective()
             self._dnd = eff["dnd"]
             self._refresh_status()
         except DaemonNotRunning:
             proxy.close()
             self._proxy = None
+            self._mode = "direct"
             self._w("[yellow]Daemon not running — using direct mode (iris daemon start)[/]")
             self.ctrl.start()  # direct TincanCallControl
             self._posture.subscribe(lambda ev: self.events.put(("posture_changed", ev)))
@@ -729,8 +732,9 @@ class IrisConsole(App):
             self._dnd_expires = ev.get("expires_in_s")
             self._refresh_status()
         elif event_type == "disconnected":
-            self._w("[yellow]Daemon disconnected — returning to direct mode[/]")
+            self._w("[yellow]Daemon disconnected — switched to direct mode[/]")
             self._proxy = None
+            self._mode = "direct"
             self.ctrl.start()
             self._posture.subscribe(lambda e: self.events.put(("posture_changed", e)))
 
@@ -919,7 +923,8 @@ class IrisConsole(App):
     def _refresh_status(self) -> None:
         import os as _os  # noqa: PLC0415
         c = self.conductor
-        parts = [c.state.value.upper()]
+        mode_pill = "🟢 daemon" if self._mode == "proxy" else "🟡 direct"
+        parts = [mode_pill, c.state.value.upper()]
         if c.muted:
             parts.append("[b]MUTED[/]")
         # Audio mode label (startup-time env var)
