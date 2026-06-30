@@ -75,10 +75,8 @@ def main() -> int:
     if os.environ.get("IRIS_CALL_CARD") == "1":
         from iris.capture.processor import L1CaptureProcessor
         from iris.capture.store import CallCardStore
-        from iris.capture.transcript import TranscriptStore
         call_card_host = CallCardHost(
             store=CallCardStore(),
-            transcript_store=TranscriptStore(),
             processor=L1CaptureProcessor(),
             api=None,       # patched below after api is built
             cfg=None,

@@ -1,10 +1,11 @@
-"""CallCardHost — top-level call-card lifecycle controller (ti-rnlqo.3.3)."""
+"""CallCardHost — top-level call-card lifecycle controller (ti-rnlqo.3.3+5.4)."""
 from __future__ import annotations
 
 import logging
 import threading
 from dataclasses import asdict
 
+from iris.capture.enricher import PostCallEnricher
 from iris.capture.processor import L1CaptureProcessor
 from iris.capture.schemas import ActionItem, CapturedFact
 from iris.capture.session import CaptureSession
@@ -30,13 +31,11 @@ class CallCardHost:
         self,
         *,
         store: CallCardStore,
-        transcript_store: TranscriptStore,
         processor: L1CaptureProcessor,
         api: object,      # DaemonAPI — typed as object to avoid circular import
         cfg: object,      # iris config; host reads cfg.call_card.disclosure_script
     ) -> None:
         self._store = store
-        self._transcript_store = transcript_store
         self._processor = processor
         self._api = api
         self._cfg = cfg
@@ -46,6 +45,7 @@ class CallCardHost:
         self._caller_number: str = ""
         self._fact_count: int = 0
         self._action_item_count: int = 0
+        self._session_transcript: TranscriptStore | None = None
 
     @property
     def _disclosure_script(self) -> str:
@@ -68,10 +68,12 @@ class CallCardHost:
             self._caller_number = caller_number
             self._fact_count = 0
             self._action_item_count = 0
+            transcript_store = TranscriptStore()
+            self._session_transcript = transcript_store
             self._store.load_or_create(session_id, caller_number)
             session = CaptureSession(
                 session_id=session_id,
-                transcript_store=self._transcript_store,
+                transcript_store=transcript_store,
                 processor=self._processor,
                 store=self._store,
                 on_fact=self._on_fact,
@@ -94,10 +96,12 @@ class CallCardHost:
                 )
                 return
             session = self._session
+            transcript_store = self._session_transcript
             fact_count = self._fact_count
             action_item_count = self._action_item_count
             self._session = None
             self._session_id = None
+            self._session_transcript = None
 
         session.stop()
         self._store.mark_ended(session_id)
@@ -107,8 +111,15 @@ class CallCardHost:
             "fact_count": fact_count,
             "action_item_count": action_item_count,
         })
-        # Stub until ti-rnlqo.5.4 wires PostCallEnricher.start()
-        _log.info("PostCallEnricher: enrichment not yet implemented (session=%s)", session_id)
+        enricher = PostCallEnricher(
+            session_id=session_id,
+            store=self._store,
+            transcript_store=transcript_store,
+            api=self._api,
+            cfg=self._cfg,
+        )
+        enricher.start()
+        # enricher is daemon=True; reference released so GC can collect when it finishes
 
     # ── Fact / action-item callbacks (called from audio threads) ─────────────
 
