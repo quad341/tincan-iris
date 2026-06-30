@@ -13,6 +13,10 @@ feed.query("*") in DFS order returns the card widgets themselves — not
 interleaved with sub-widget noise — enabling the ordering test to hold.
 CaptureCard exposes virtual proxy objects for #save-btn and #readback-caller
 via a query_one() override.
+
+ti-rnlqo.6.5: ActionItemCard replaced with import from iris.console.call_card
+(owner + due_date + edit mode). add_fact() routes CapturedFact to
+CriticalFactCard / FactCard (also from call_card).
 """
 from __future__ import annotations
 
@@ -26,6 +30,13 @@ from textual.containers import ScrollableContainer
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Footer, Header, Static
+
+from iris.capture.schemas import ActionItem, CapturedFact
+from iris.console.call_card import (
+    ActionItemCard,
+    CriticalFactCard,
+    FactCard,
+)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -350,29 +361,6 @@ class CommitmentCard(_BaseCard):
         self.remove()
 
 
-class ActionItemCard(_BaseCard):
-    """Detected speaker action item / promise."""
-
-    DEFAULT_CSS = """
-    ActionItemCard {
-        height: auto;
-        border: round orange;
-        padding: 1;
-        margin-bottom: 1;
-    }
-    """
-
-    def render(self) -> str:
-        return f"[bold orange1]ACTION ITEM[/bold orange1]  {self._value}"
-
-    def action_create_reminder(self) -> None:
-        hook = getattr(self.app, "reminder_hook", None)
-        if hook is not None:
-            hook.create_reminder(self._value)
-
-    def action_dismiss(self) -> None:
-        self.remove()
-
 
 class FlagCard(_BaseCard):
     """Detected contradiction or flag — informational, no action buttons."""
@@ -526,7 +514,7 @@ class RideAlongConsole(App):
             self.participation_level = levels[idx - 1]
 
     def add_card(self, card_type: CardType, value: str) -> None:
-        card: _BaseCard
+        card: Widget
         if card_type is CardType.CAPTURE:
             card = CaptureCard(value)
         elif card_type is CardType.CONTEXT:
@@ -534,11 +522,25 @@ class RideAlongConsole(App):
         elif card_type is CardType.COMMITMENT:
             card = CommitmentCard(value)
         elif card_type is CardType.ACTION_ITEM:
-            card = ActionItemCard(value)
+            ai = ActionItem(
+                session_id="", description=value, trigger="", owner="",
+                transcript_turn_id=0, transcript_offset_s=0.0, speaker="",
+                confidence=1.0,
+            )
+            card = ActionItemCard(ai)
         elif card_type is CardType.FLAG:
             card = FlagCard(value)
         else:
             return
+        feed = self.query_one(CardFeed)
+        if feed.children:
+            feed.mount(card, before=feed.children[0])
+        else:
+            feed.mount(card)
+
+    def add_fact(self, fact: CapturedFact) -> None:
+        """Route a CapturedFact to CriticalFactCard (critical) or FactCard."""
+        card: Widget = CriticalFactCard(fact) if fact.critical else FactCard(fact)
         feed = self.query_one(CardFeed)
         if feed.children:
             feed.mount(card, before=feed.children[0])
