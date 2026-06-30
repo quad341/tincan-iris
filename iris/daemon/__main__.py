@@ -82,7 +82,7 @@ def main() -> int:
     posture = PostureManager(path=db_path)
     watcher = PostureWatcher(posture)
 
-    notes = NotesStore(db_path)
+    notes = NotesStore()  # uses default ~/.local/share/iris/notes.json, NOT roster.db
     prefs = PreferencesStore()
 
     # Create TCC with null emit placeholder; emit is wired after brain_host is ready.

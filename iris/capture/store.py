@@ -79,6 +79,7 @@ class CallCardStore:
         self._lock = threading.Lock()
         with self._lock:
             self._conn.executescript("PRAGMA journal_mode=WAL;")
+            self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(_DDL)
             self._conn.commit()
 
@@ -112,7 +113,7 @@ class CallCardStore:
             )
             self._conn.commit()
 
-    def mark_disclosure_ack(self, session_id: str, skipped: bool = False) -> None:
+    def mark_disclosure_ack(self, session_id: str) -> None:
         with self._lock:
             self._conn.execute(
                 "UPDATE call_cards SET disclosure_ack=?, disclosure_ack_ts=? WHERE session_id=?",

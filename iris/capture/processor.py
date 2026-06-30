@@ -192,10 +192,11 @@ def _search_dates_with_fallback(
 class L1CaptureProcessor:
     """Deterministic L1 extractor; no LLM, target ≤50 ms per turn."""
 
-    def __init__(self, roster: ContactRoster | None = None) -> None:
+    def __init__(self, roster: ContactRoster | None = None, now: date | None = None) -> None:
         self.session_id: str = ""
         self._roster: ContactRoster = roster or frozenset()
         self._cue_ctx: deque[str] = deque(maxlen=2)
+        self._now: date | None = now
 
     def process(
         self,
@@ -340,7 +341,7 @@ class L1CaptureProcessor:
     def _extract_dates(
         self, text: str, speaker: str, turn_id: int, offset_s: float
     ) -> list[CapturedFact]:
-        today = date.today()
+        today = self._now or date.today()
         settings = {
             "RETURN_TIME_AS_PERIOD": True,
             "PREFER_DATES_FROM": "future",

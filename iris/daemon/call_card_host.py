@@ -162,8 +162,8 @@ class CallCardHost:
     ) -> None:
         self._store.confirm_action_item(item_id, confirmed, description, due_date)
 
-    def disclosure_ack(self, session_id: str, skipped: bool = False) -> None:
-        self._store.mark_disclosure_ack(session_id, skipped)
+    def disclosure_ack(self, session_id: str) -> None:
+        self._store.mark_disclosure_ack(session_id)
 
     def get_call_card(self, session_id: str | None = None) -> dict:
         with self._lock:

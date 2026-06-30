@@ -343,8 +343,7 @@ class DaemonAPI:
         if not session_id:
             writer.write({"ack": "disclosure_ack", "ok": False, "error": "Missing session_id"})
             return
-        skipped = bool(cmd.get("skipped", False))
-        self._call_card_host.disclosure_ack(session_id, skipped)  # type: ignore[attr-defined]
+        self._call_card_host.disclosure_ack(session_id)  # type: ignore[attr-defined]
         writer.write({"ack": "disclosure_ack", "ok": True})
 
     def _handle_get_call_card(self, cmd: dict, writer: _ClientWriter) -> None:
