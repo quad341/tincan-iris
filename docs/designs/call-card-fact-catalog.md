@@ -132,3 +132,43 @@ ones that actually decide product trust:
 **Cross-cutting:** every fact carries `transcript_turn_id` + `transcript_offset_s`
 provenance from day one (tap-to-replay), and every item renders as an **editable**
 suggestion. These aren't per-fact — they're invariants of the store + UI.
+
+---
+
+## Part 4 — Validation findings (libraries probed 2026-06-30)
+
+Ran the proposed L1 stack (`phonenumbers`, `dateparser`, the regexes) against the
+fixtures above, base date pinned to 2026-06-30. **The point: the real extractors are
+fiddlier than the strawman's one-line regexes — this is the actual work of slice 1,
+and exactly why it must be a representative build, not a spike.**
+
+**Holds out of the box:**
+- `phonenumbers` → `+14155551234` from "call me back at 415-555-1234" *and* bare
+  "415 555 1234". Solid.
+- `dateparser` with `RELATIVE_BASE` + `PREFER_DATES_FROM=future`: "by Friday" →
+  `2026-07-03` (the "by" preposition is handled), "in two weeks" → `2026-07-14`,
+  "today" → base. The dossier's "beats regex on relative dates" claim holds.
+- Amount regex on digit forms (`$129.00` → `129.00`). Cue-ID on the *clean* forms
+  ("confirmation number is **REF-88211**", "case id: **AB-9921**"), and it correctly
+  ignores a non-cue sentence (no false positive).
+
+**Breaks — these become slice-1 acceptance criteria, not afterthoughts:**
+1. **`dateparser` returns `None` for "next Tuesday at 2"** (fixture #6) — the
+   weekday+bare-hour combo defeats it. And bare **"the 15th" resolves to the *past***
+   (`2026-06-15`) even with prefer-future. → Appointments need: split date/time, coerce
+   bare hours to am/pm, and roll day-of-month forward for deadlines. Datetime is the
+   least-free of the "free" extractors.
+2. **The naive cue-ID regex is wrong on real STT output.** On "reference number,
+   that's 8 8 2 1 1" (fixture #2) it captured the literal word **"number"** — the
+   case-insensitive char class matches letters, and it has no handling for
+   **spaced / spelled-out digit runs**, which is exactly how STT renders dictated IDs.
+   The cue-ID extractor must: (a) require ≥1 digit in the value, (b) exclude the
+   cue-type token itself, (c) normalize spaced/spelled digit runs ("8 8 2 1 1" → 88211,
+   "R as in Romeo" → R). **This is the heart of slice 1** — the one fact we're proving.
+3. **Spoken amounts** ("forty-seven fifty", "forty seven dollars") → not caught by the
+   digit regex. Needs a word→number pass for the spoken case.
+
+**Takeaway:** the ADOPT thesis is sound (phone + relative-date are genuinely free), but
+the two facts the call-averse care about most — **reference numbers and amounts/dates** —
+are precisely the STT-fragile, parser-fiddly ones. That reinforces both the read-back
+requirement and the choice of the cue-ID path as the representative slice-1 proof.
