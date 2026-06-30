@@ -47,6 +47,12 @@ class BrainHost:
         self._db_path = Path(db_path)
         self._broadcast = broadcast
         self._turn_lock = threading.Lock()
+        self._ctx: dict[str, str] = {
+            "contact_id": "",
+            "contact_name": "",
+            "contact_number": "",
+            "in_call": "0",
+        }
         self._ensure_table()
         self._restore_context()
 
@@ -101,6 +107,15 @@ class BrainHost:
 
     # --- call context ---
 
+    def call_context_snapshot(self) -> dict:
+        """Return current call context as a plain dict (in_call as bool)."""
+        return {
+            "contact_id":     self._ctx["contact_id"],
+            "contact_name":   self._ctx["contact_name"],
+            "contact_number": self._ctx["contact_number"],
+            "in_call":        self._ctx["in_call"] == "1",
+        }
+
     def set_call_context(
         self,
         contact_id: str,
@@ -109,22 +124,26 @@ class BrainHost:
     ) -> None:
         """Set in-call context on the Brain and persist to BRAIN_CONTEXT."""
         self._brain.call_context = contact_id  # type: ignore[attr-defined]
-        self._write_context({
+        values = {
             "contact_id":     contact_id,
             "contact_name":   contact_name,
             "contact_number": contact_number,
             "in_call":        "1",
-        })
+        }
+        self._ctx.update(values)
+        self._write_context(values)
 
     def clear_call_context(self) -> None:
         """Clear in-call context on the Brain and persist to BRAIN_CONTEXT."""
         self._brain.call_context = ""  # type: ignore[attr-defined]
-        self._write_context({
+        values = {
             "contact_id":     "",
             "contact_name":   "",
             "contact_number": "",
             "in_call":        "0",
-        })
+        }
+        self._ctx.update(values)
+        self._write_context(values)
 
     # --- DB helpers ---
 
@@ -164,6 +183,7 @@ class BrainHost:
             return
 
         ctx = {row["key"]: row["value"] for row in rows}
+        self._ctx.update({k: ctx.get(k, v) for k, v in self._ctx.items()})
         if ctx.get("in_call") == "1":
             self._brain.call_context = ctx.get("contact_id", "")  # type: ignore[attr-defined]
             _log.info(
