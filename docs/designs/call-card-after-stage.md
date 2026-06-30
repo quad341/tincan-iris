@@ -20,18 +20,23 @@ profiles — keep them separate:
    §F, §8 — "next call's prep gets better because iris remembers what the last rep
    promised"). This is the defensible edge.
 
-**Load-bearing principle: only confirmed facts compound.** DURING captures
-liberally and ungated; AFTER writes back only operator-verified items. A
-confidently-wrong reference number that *compounds into next call's prep* is the
-worst-case version of iris's core failure — so the verification gate is the wall
-between capture and the moat.
+**Load-bearing principle (operator): record, then verify — lose nothing.** Every
+call persists a raw record *immediately and ungated* — the STT log plus the raw
+captured facts. If the operator slams the laptop shut mid-call, **nothing is lost.**
+Verification/confirmation then *upgrades* that raw record's quality; it is **not a
+gate on whether anything is kept.** The compounding layer favors verified data (a
+confidently-wrong reference number that compounds into next call's prep is the worst
+version of iris's core failure) — but verification is a *quality dial on an
+always-present record*, not an on/off switch for persistence.
 
 ---
 
 ## 1. Scope
 
-**v1-AFTER:** the post-call record; the durable `call_log` + `commitment` +
-`contact_fact` writeback (confirmed-only); and the BEFORE-facing query that
+**v1-AFTER:** the always-on raw record (STT eval log, §2.1); the post-call record;
+the durable `call_log` + `commitment` + `contact_fact` writeback (verified items
+compound, raw is the floor); a **"from this call…" delta view** (§3.1) so the operator
+can see exactly what this call added to the DB; and the BEFORE-facing query that
 surfaces open commitments on the next call. The core compounding loop, end to end.
 
 **Deferred (AFTER.2):** proactive due-date nudges ("Acme refund was due today —
@@ -83,6 +88,17 @@ contact_fact        -- durable identity facts that pre-populate next call's §B
 Per-call, transient facts (this call's hold time, a one-off case number that isn't
 an identity) stay in the DURING `CALL_CARD` and do **not** get promoted.
 
+### 2.1 Raw STT eval log (write-only, high-PII)
+
+Every call's full STT transcript is persisted for evaluation — but a transcript of
+the call-averse calling medical / financial / legal lines is *ungodly PII*. Design
+it **write-only**: the daemon holds only a **public key** and appends each call's
+transcript **encrypted (and compressed)**; the **private key lives only in the
+offline eval environment** the operator controls. The live system can *write* the
+log but **cannot read it back** — no UI or normal-operation read path exists. This
+yields the eval corpus without widening the live read surface. (In-session
+tap-to-replay reads the *current* call's `TranscriptStore`, not this durable log.)
+
 ---
 
 ## 3. Writeback flow
@@ -103,14 +119,26 @@ flowchart TD
     I --> K
 ```
 
-- **`call_log` is always written** (the dated record is low-stakes and useful even
-  if nothing else is confirmed). **`commitment` / `contact_fact` are confirm-gated.**
+- **Always written, ungated (the raw floor — lose nothing): the STT eval log + the
+  `call_log` row.** Promotion of `commitment` / `contact_fact` into durable contact
+  memory is what the post-call review confirms — but with zero review the raw record
+  still persists and can be revisited later.
 - **Mapping:** `ACTION_ITEM.owner == 'far'` → `commitment(they_promised)`;
   `owner == 'operator'` → `commitment(i_promised)` **and** a NotesStore follow-up
   (so the operator's own to-dos land in the existing capture→list→done lifecycle).
 - The L3 enricher already runs an LLM pass — reuse it to emit `outcome_summary`,
-  **strictly grounded in the captured facts** (no new entities; the recap restates,
-  it doesn't re-extract). See §7-C for the template-vs-LLM call.
+  **grounded** (it restates what was captured; it does not re-extract or invent, and
+  any critical value it shows comes from the captured/verified facts, never a fresh
+  guess). LLM, not a template (§7-C).
+
+### 3.1 The "from this call…" view
+
+Right after a call, show a plain **delta** — *what this call added to the database*:
+the new/updated `contact_fact`s, the `commitment`s (direction + due date), and the
+`call_log` entry, each tagged verified / unverified. It is the operator's
+**feedback surface** ("did iris capture the right things?"), doubles as the
+confirm/review point, and is the one place to watch the moat grow. Keep it simple:
+a labelled "this call → [Contact]'s record" list. No new mechanism.
 
 ---
 
@@ -145,10 +173,11 @@ AFTER drops in without rework:
 5. **Provenance (`transcript_turn_id`, `transcript_offset_s`)** flows into
    `commitment.source_*` so a compounded commitment is still tap-to-replay-able a
    call later.
-6. **A way to tell durable-identity facts from transient ones** — so AFTER knows
-   what to promote to `contact_fact`. Either a fact_type subset rule
-   (`account_id|member_id|policy_id|address|email` are durable) or a `durable` flag.
-   *This is the one seam not yet in the DURING model — worth adding now.*
+6. **Durable-vs-transient is AFTER's call, inferred from `fact_type`** — *no DURING
+   schema change needed.* AFTER promotes the durable-identity types
+   (`account_id|member_id|policy_id|address|email`) to `contact_fact`; the rest stay
+   per-call. Record-then-verify keeps the raw regardless, so promotion is just the
+   clean layer — DURING only needs to emit `fact_type`, which it already does.
 
 ---
 
@@ -164,18 +193,24 @@ AFTER drops in without rework:
 
 ---
 
-## 7. Open decisions (operator)
+## 7. Decisions (resolved with operator, 2026-06-30)
 
-- **A — Writeback gating.** Proposed: `call_log` always written; `commitment` /
-  `contact_fact` written on explicit one-tap **"Save to [Contact]"** after review.
-  Alt: auto-save all confirmed items after a grace period (less friction, less control).
-- **B — `i_promised` items.** Proposed: write a `commitment(i_promised)` **and** a
-  NotesStore follow-up (operator's to-do). Alt: commitment only (don't touch Notes).
-- **C — Summary generation.** Proposed: reuse the L3 enricher's LLM, strictly
-  grounded (restate, don't re-extract). Alt: deterministic template (fully private,
-  no extra LLM call) for v1.
-- **D — Store home.** Proposed: new tables in the **roster DB** (real FK to
-  `contacts(id)`). Alt: a separate `contact_memory.db` (cleaner separation, no
-  cross-DB FK).
-- **E — v1 boundary.** Proposed v1 = record + writeback + BEFORE-surfacing; defer
-  nudges/auto-resolution to AFTER.2. Confirm that's the right cut.
+- **Spine — record, then verify (lose nothing).** Raw record (STT log + raw facts)
+  persisted immediately and ungated; verification *upgrades* quality, it does not
+  gate persistence. A slam-the-laptop-shut call loses nothing.
+- **A — STT eval log:** written **every call**, **write-only** (asymmetric-encrypted —
+  daemon can append but can't read it back; private key offline), compressed.
+  Structured memory lives separately (D).
+- **B — your own promises:** a `commitment(i_promised)`, **marked, no reminder action
+  in v1.** We have no "secretary-remind-you" mechanism and won't build one now — just
+  record it, plainly marked; wire it to such a mechanism later if one exists.
+- **C — summary:** **LLM, no template** (no confidence a template could ever be good
+  enough). *Grounded* = the model restates what was captured; it does not re-extract
+  or invent, and any critical value it surfaces comes from the captured/verified
+  facts, never a fresh guess — so the recap can't introduce a new wrong number.
+- **D — store home:** structured memory (`call_log`/`commitment`/`contact_fact`) in
+  the **roster DB** (real FKs to `contacts(id)`); the high-PII STT eval log in its
+  **own write-only store** (§2.1). Split by *sensitivity*, not just concern.
+- **E — v1 includes a "from this call…" view** (§3.1) so the operator can see what
+  this call added to the DB (feedback/trust). Due-date nudges + auto-resolution →
+  AFTER.2.
