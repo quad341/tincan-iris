@@ -640,6 +640,16 @@ class ActionItemCard(Widget):
                 self.post_message(ActionItemConfirmed(self._item.id))
                 self.remove()
 
+    def action_dismiss(self) -> None:
+        """Remove the card (backward-compat with ride_along.py ActionItemCard API)."""
+        self.remove()
+
+    def action_create_reminder(self) -> None:
+        """Delegate to app.reminder_hook (backward-compat with ride_along.py API)."""
+        hook = getattr(self.app, "reminder_hook", None)
+        if hook is not None:
+            hook.create_reminder(self._item.description)
+
 
 # ─────────────────────────────────────────────────────────────────
 # CallCardView — full-screen Textual App (ti-rnlqo.6.4)
