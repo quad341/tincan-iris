@@ -21,6 +21,7 @@ from .api import DaemonAPI
 from .brain_host import BrainHost
 from .engine import HandlingEngine
 from .policy import PolicyResolver
+from .wake_word import WakeWordSource
 from .posture import PostureManager, PostureWatcher
 from ..brain import Brain
 from ..call_control import TincanCallControl
@@ -119,6 +120,12 @@ def main() -> int:
     ctrl.emit = _on_tcc_event
     ctrl.start()
 
+    wake: WakeWordSource | None = None
+    if os.environ.get("IRIS_WAKE_WORD") == "1":
+        wake = WakeWordSource(brain_host)
+        wake.start()
+        _log.info("iris daemon: WakeWordSource started")
+
     _write_pid(_PID_PATH)
     _log.info("iris daemon starting (pid=%d)", os.getpid())
 
@@ -138,6 +145,8 @@ def main() -> int:
         stop_event.wait()
     finally:
         _log.info("iris daemon stopping")
+        if wake is not None:
+            wake.stop()
         ctrl.stop()
         api.stop()
         watcher.stop()
