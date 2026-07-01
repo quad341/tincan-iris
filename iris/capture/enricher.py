@@ -162,7 +162,6 @@ class PostCallEnricher(threading.Thread):
             return future.result(timeout=_TIMEOUT_S)
 
     def _apply_result(self, session_id: str, result: EnrichmentSchema) -> None:
-        from uuid import uuid4
 
         for fe in result.new_facts:
             try:
