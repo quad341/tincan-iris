@@ -23,6 +23,7 @@ from textual.widget import Widget
 from textual.widgets import Footer, Static
 
 from iris.capture.schemas import ActionItem, CapturedFact, FactType
+from iris.console._confidence_bar import render_confidence_bar as _render_confidence_bar
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -251,26 +252,7 @@ class DisclosureCard(Widget):
 # ─────────────────────────────────────────────────────────────────
 # Confidence bar (shared by CriticalFactCard and FactCard)
 # ─────────────────────────────────────────────────────────────────
-
-_BAR_WIDTH = 10
-
-
-def _render_confidence_bar(confidence: float) -> str:
-    """Render a rounded-integer confidence bar with bucket colour.
-
-    Operator decision (2026-06-30): show coarse bucket colour + integer %, not
-    a raw float. Buckets: >=85% green, 60-84% amber (#f59e0b), <60% red.
-    """
-    pct = round(confidence * 100)
-    filled = round(pct * _BAR_WIDTH / 100)
-    bar = "▓" * filled + "░" * (_BAR_WIDTH - filled)
-    if pct >= 85:
-        color = "green"
-    elif pct >= 60:
-        color = "#f59e0b"
-    else:
-        color = "red"
-    return f"[{color}]{pct}% {bar}[/{color}]"
+# _render_confidence_bar and _BAR_WIDTH imported from _confidence_bar above.
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -441,8 +423,13 @@ class CriticalFactCard(_FactBaseCard):
 
     def _commit_edit(self) -> None:
         new_value = self._edit_buffer.strip()
-        if new_value:
-            self.post_message(FactValueOverride(self._fact.id, new_value))
+        if not new_value:
+            # Empty buffer = user changed their mind; treat as cancel
+            self._editing = False
+            self._edit_buffer = ""
+            self.refresh()
+            return
+        self.post_message(FactValueOverride(self._fact.id, new_value))
         self._editing = False
         self._edit_buffer = ""
         self.remove()
@@ -600,7 +587,7 @@ class ActionItemCard(Widget):
                 f"[bold #818cf8]✓ ACTION ITEM[/bold #818cf8]  [dim]Owner: {self._edit_owner}{cursor if self._edit_field == 2 else ''}[/dim]",
                 f"[bold white]{self._edit_desc}{cursor if self._edit_field == 0 else ''}[/bold white]",
                 f"[dim]Due: {self._edit_due}{cursor if self._edit_field == 1 else ''}[/dim]",
-                f"[dim]Tab to switch field  •  Enter to save  •  Esc to cancel[/dim]",
+                "[dim]Tab to switch field  •  Enter to save  •  Esc to cancel[/dim]",
             ]
             return "\n".join(lines)
 
