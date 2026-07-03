@@ -72,6 +72,23 @@ def _api_key(cfg: object) -> str:
     return os.environ.get("IRIS_ANTHROPIC_API_KEY", "") or os.environ.get("ANTHROPIC_API_KEY", "")
 
 
+def _cloud_enrichment_enabled(cfg: object) -> bool:
+    """Explicit opt-in, independent of whether an API key is resolvable.
+
+    Fails closed (False) when cfg doesn't carry the flag at all — matching the
+    no-cloud-by-default posture rather than assuming consent from key presence.
+    """
+    try:
+        return bool(cfg.call_card_cloud_enrichment_enabled)  # type: ignore[union-attr]
+    except AttributeError:
+        pass
+    try:
+        return bool(cfg.call_card.call_card_cloud_enrichment_enabled)  # type: ignore[union-attr]
+    except AttributeError:
+        pass
+    return False
+
+
 # ── Thread ────────────────────────────────────────────────────────────────────
 
 class PostCallEnricher(threading.Thread):
@@ -95,6 +112,9 @@ class PostCallEnricher(threading.Thread):
 
     def run(self) -> None:
         session_id = self._session_id
+        if not _cloud_enrichment_enabled(self._cfg):
+            _log.debug("PostCallEnricher: cloud enrichment disabled by config, skipping")
+            return
         api_key = _api_key(self._cfg)
         if not api_key:
             _log.warning("PostCallEnricher: no api_key configured, skipping")

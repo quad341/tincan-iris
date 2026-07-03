@@ -54,6 +54,13 @@ class Config:
         "warm, spoken sentence (under ~30 words). No markdown, no lists, no preamble."
     )
 
+    # --- Call Card L3 enrichment (post-call transcript re-scan, see
+    # iris/capture/enricher.py). Independent of haiku_enabled above — that gates
+    # the live in-call raw-text lane; this gates a separate, after-the-call cloud
+    # pass. A resolvable API key alone must not be sufficient to enable cloud
+    # egress; this flag must also be explicitly True.
+    call_card_cloud_enrichment_enabled: bool = False
+
     # --- Memory / embedding (ADR-0003). embedding_model is the GGUF model name for
     # the llama.cpp slot; embedding_dim must match its output dimension.
     # sqlite_vec_path="" means use the system default. db_path="" defaults to
