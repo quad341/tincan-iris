@@ -13,8 +13,10 @@ from __future__ import annotations
 import logging
 import os
 import signal
+import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -40,6 +42,7 @@ if TYPE_CHECKING:
 _PID_PATH = Path.home() / ".local" / "run" / "iris" / "daemon.pid"
 _LOG_PATH = Path.home() / ".local" / "state" / "iris" / "daemon.log"
 _DEFAULT_DB = Path.home() / ".local" / "share" / "iris" / "roster.db"
+_AEC_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "aec_audio.sh"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,6 +50,41 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 _log = logging.getLogger("iris.daemon")
+
+
+def _run_aec_async(action: str) -> None:
+    """Best-effort WebRTC AEC bridge on a live call, in a background thread.
+
+    In proxy mode the daemon (not the console) owns the call, so it must wire the
+    live SCO nodes into the canceller — otherwise the operator's mic isn't echo-
+    cancelled and the far party hears echo. No-op if the script or the canceller
+    isn't present. The SCO nodes can lag ``call_connected``, so ``bridge`` retries.
+    """
+    if not _AEC_SCRIPT.exists():
+        return
+
+    def _run() -> None:
+        attempts = 4 if action == "bridge" else 1
+        for i in range(attempts):
+            try:
+                result = subprocess.run(
+                    ["bash", str(_AEC_SCRIPT), action],
+                    capture_output=True, text=True, timeout=15,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                _log.warning("iris daemon: aec %s failed: %s", action, exc)
+                return
+            if result.returncode == 0:
+                _log.info("iris daemon: aec %s ok", action)
+                return
+            if i + 1 < attempts:
+                time.sleep(0.7)  # SCO nodes may not be up yet right after connect
+        _log.info(
+            "iris daemon: aec %s did not complete (SCO nodes not ready / AEC not loaded)",
+            action,
+        )
+
+    threading.Thread(target=_run, name=f"aec-{action}", daemon=True).start()
 
 
 def _start_dbus_components(ctrl: object, mes: object) -> None:
@@ -118,9 +156,9 @@ def main() -> int:
             from iris.capture.processor import L1CaptureProcessor  # noqa: PLC0415
             from iris.capture.store import CallCardStore  # noqa: PLC0415
         except ImportError as exc:
-            _log.info(
-                "Call Card capture off — `call-card` extra not installed (%s); "
-                "run `pip install -e '.[call-card]'` to enable.", exc,
+            _log.warning(
+                "Call Card capture DISABLED — required deps missing (%s). This "
+                "should not happen on a normal install; run `pip install -e .`.", exc,
             )
         else:
             call_card_host = CallCardHost(
@@ -130,6 +168,7 @@ def main() -> int:
                 cfg=None,
             )
             engine._call_card_host = call_card_host
+            _log.info("iris daemon: Call Card capture ENABLED")
 
     brain_host = BrainHost(brain=brain, db_path=db_path, broadcast=lambda ev: None)
     api = DaemonAPI(
@@ -158,9 +197,11 @@ def main() -> int:
             caller_number = str(ev[2]) if len(ev) > 2 else ""
             engine.on_incoming_call(caller_number=caller_number)
         elif kind == "call_connected":
+            _run_aec_async("bridge")  # feedback-free speakerphone — daemon owns the proxy call
             engine.on_call_connected("")
         elif kind == "call_ended":
             engine.on_call_ended(str(ev[1]) if len(ev) > 1 else "")
+            _run_aec_async("unbridge")
 
     ctrl.emit = _on_tcc_event
 

@@ -3,17 +3,22 @@ name = "tincan-iris"
 version = "0.0.1"
 description = "Iris — a local-first voice-agent brain that rides tincan."
 requires-python = ">=3.11"
-# The brain + voice loop are zero-dependency (stdlib urllib -> local llama-server;
-# TTS/STT shell out to espeak-ng / Kokoro / faster-whisper, each in its own venv).
-# The operator console (TUI) is the one optional dependency — install the
-# `console` extra (Textual) for `python -m iris.console`.
-dependencies = []
+# The brain + voice loop lean on stdlib (urllib -> local llama-server; TTS/STT
+# shell out to espeak-ng / Kokoro / faster-whisper in their own venvs). Deps for
+# on-by-default features live in `dependencies` (a default `pip install -e .`
+# ships a working product); only genuinely-optional/heavy things are extras.
+dependencies = [
+    # L1 Call Card capture (deterministic, on by default) — core, not an extra,
+    # so capture is never silently off because an opt-in extra was skipped.
+    "phonenumbers>=8.13",
+    "dateparser>=1.2",
+]
 
 [project.optional-dependencies]
 console = ["textual>=8"]
+# L3 post-call enrichment: an OPTIONAL cloud LLM pass. L1 capture works without
+# it; when absent, the daemon logs a warning and skips enrichment (never silent).
 call-card = [
-    "phonenumbers>=8.13",
-    "dateparser>=1.2",
     "instructor[anthropic]>=1.0",
 ]
 
