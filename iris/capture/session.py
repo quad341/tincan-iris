@@ -75,8 +75,26 @@ class CaptureSession:
     def start(self) -> None:
         self._processor.session_id = self._session_id
         self._start_time = time.time()
+        # Operator channel captures the default source. With ambient AEC that is
+        # `iris_aec_src` (the echo-cancelled mic); without it, the raw mic — either
+        # way, the operator's own voice.
         self._op.start()
-        self._far.start()
+        # The far channel MUST target the live SCO downlink (bluez_input). The
+        # default source is the operator's mic, so a bare default capture would
+        # double-record the operator instead of the far party. The SCO nodes only
+        # exist while a call is connected, so discover them here at start time.
+        from iris.audio.endpoint import discover_sco_nodes  # noqa: PLC0415
+
+        _sink, downlink = discover_sco_nodes()
+        if downlink:
+            self._far.source = downlink
+            self._far.start()
+        else:
+            _log.warning(
+                "CaptureSession %s: no SCO downlink found — far-party capture "
+                "disabled (is an HFP call connected on the dongle?)",
+                self._session_id,
+            )
 
     def stop(self) -> None:
         self._op.stop()
