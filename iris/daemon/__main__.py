@@ -107,19 +107,29 @@ def main() -> int:
         broadcast=lambda ev: None,  # rewired after api is built
     )
 
-    # Construct CallCardHost when IRIS_CALL_CARD=1; None otherwise (section absent).
+    # Call Card capture is ON by default — a local, silent capture that hurts
+    # nothing, so it doesn't hide behind an opt-in flag. Set IRIS_CALL_CARD=0 to
+    # disable. Skips gracefully if the `call-card` extra (phonenumbers/dateparser)
+    # isn't installed, so the base daemon still runs (NFR-03).
     call_card_host: CallCardHost | None = None
-    if os.environ.get("IRIS_CALL_CARD") == "1":
-        from .call_card_host import CallCardHost  # noqa: PLC0415
-        from iris.capture.processor import L1CaptureProcessor  # noqa: PLC0415
-        from iris.capture.store import CallCardStore  # noqa: PLC0415
-        call_card_host = CallCardHost(
-            store=CallCardStore(),
-            processor=L1CaptureProcessor(),
-            api=None,       # patched below after api is built
-            cfg=None,
-        )
-        engine._call_card_host = call_card_host
+    if os.environ.get("IRIS_CALL_CARD", "1").strip().lower() not in ("0", "false", "no", "off"):
+        try:
+            from .call_card_host import CallCardHost  # noqa: PLC0415
+            from iris.capture.processor import L1CaptureProcessor  # noqa: PLC0415
+            from iris.capture.store import CallCardStore  # noqa: PLC0415
+        except ImportError as exc:
+            _log.info(
+                "Call Card capture off — `call-card` extra not installed (%s); "
+                "run `pip install -e '.[call-card]'` to enable.", exc,
+            )
+        else:
+            call_card_host = CallCardHost(
+                store=CallCardStore(),
+                processor=L1CaptureProcessor(),
+                api=None,       # patched below after api is built
+                cfg=None,
+            )
+            engine._call_card_host = call_card_host
 
     brain_host = BrainHost(brain=brain, db_path=db_path, broadcast=lambda ev: None)
     api = DaemonAPI(
