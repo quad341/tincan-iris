@@ -8,14 +8,20 @@ Socket: ~/.local/run/iris/daemon.sock (mode 0600); override with $IRIS_DAEMON_SO
 Event types broadcast to all connected clients:
   incoming_call, screen_intro, call_connected, call_ended, posture, take_message_done
   brain_turn_started, brain_chunk, brain_reply
+  call_card_started, call_card_disclosure_needed, call_card_fact, call_card_action_item,
+  call_card_ended, call_card_enriched
 
 Commands accepted from clients:
-  choose        — operator selects a call-handling action
-  dnd           — set/clear/timed DND
-  status        — request current state snapshot
-  turn          — dispatch text to Brain; returns ack when queued
-  stream_turn   — same as turn; ack key is 'stream_turn'
-  call_context  — return current contact_id, contact_name, in_call
+  choose              — operator selects a call-handling action
+  dnd                 — set/clear/timed DND
+  status              — request current state snapshot
+  turn                — dispatch text to Brain; returns ack when queued
+  stream_turn         — same as turn; ack key is 'stream_turn'
+  call_context        — return current contact_id, contact_name, in_call
+  confirm_fact        — operator confirms/edits a captured fact (requires call_card_host)
+  confirm_action_item — operator confirms/edits an action item (requires call_card_host)
+  disclosure_ack      — operator acknowledged AI disclosure (requires call_card_host)
+  get_call_card       — return current call card snapshot (requires call_card_host)
 """
 from __future__ import annotations
 
@@ -110,10 +116,12 @@ class DaemonAPI:
         engine: object,                         # HandlingEngine
         socket_path: Path | None = None,
         brain_host: BrainHost | None = None,
+        call_card_host: object | None = None,   # CallCardHost
     ) -> None:
         self._posture = posture
         self._engine = engine
         self._brain_host = brain_host
+        self._call_card_host = call_card_host
         self._socket_path = socket_path or daemon_socket_path()
         self._clients: list[_ClientWriter] = []
         self._clients_lock = threading.Lock()
@@ -202,6 +210,14 @@ class DaemonAPI:
             self._handle_stream_turn(cmd, writer)
         elif kind == "call_context":
             self._handle_call_context(cmd, writer)
+        elif kind == "confirm_fact":
+            self._handle_confirm_fact(cmd, writer)
+        elif kind == "confirm_action_item":
+            self._handle_confirm_action_item(cmd, writer)
+        elif kind == "disclosure_ack":
+            self._handle_disclosure_ack(cmd, writer)
+        elif kind == "get_call_card":
+            self._handle_get_call_card(cmd, writer)
         else:
             writer.write({"ack": kind or "unknown", "ok": False,
                           "error": f"Unknown command: {kind!r}"})
@@ -287,6 +303,56 @@ class DaemonAPI:
             return
         ctx = self._brain_host.call_context_snapshot()
         writer.write({"ack": "call_context", "ok": True, **ctx})
+
+    # --- Call Card command handlers ---
+
+    def _handle_confirm_fact(self, cmd: dict, writer: _ClientWriter) -> None:
+        if self._call_card_host is None:
+            writer.write({"ack": "confirm_fact", "ok": False, "error": "call_card not configured"})
+            return
+        session_id = cmd.get("session_id", "")
+        fact_id = cmd.get("fact_id", "")
+        if not session_id or not fact_id:
+            writer.write({"ack": "confirm_fact", "ok": False, "error": "Missing session_id or fact_id"})
+            return
+        confirmed = bool(cmd.get("confirmed", True))
+        normalized_value = cmd.get("normalized_value")
+        self._call_card_host.confirm_fact(session_id, fact_id, confirmed, normalized_value)  # type: ignore[attr-defined]
+        writer.write({"ack": "confirm_fact", "ok": True})
+
+    def _handle_confirm_action_item(self, cmd: dict, writer: _ClientWriter) -> None:
+        if self._call_card_host is None:
+            writer.write({"ack": "confirm_action_item", "ok": False, "error": "call_card not configured"})
+            return
+        session_id = cmd.get("session_id", "")
+        item_id = cmd.get("item_id", "")
+        if not session_id or not item_id:
+            writer.write({"ack": "confirm_action_item", "ok": False, "error": "Missing session_id or item_id"})
+            return
+        confirmed = bool(cmd.get("confirmed", True))
+        description = cmd.get("description")
+        due_date = cmd.get("due_date")
+        self._call_card_host.confirm_action_item(session_id, item_id, confirmed, description, due_date)  # type: ignore[attr-defined]
+        writer.write({"ack": "confirm_action_item", "ok": True})
+
+    def _handle_disclosure_ack(self, cmd: dict, writer: _ClientWriter) -> None:
+        if self._call_card_host is None:
+            writer.write({"ack": "disclosure_ack", "ok": False, "error": "call_card not configured"})
+            return
+        session_id = cmd.get("session_id", "")
+        if not session_id:
+            writer.write({"ack": "disclosure_ack", "ok": False, "error": "Missing session_id"})
+            return
+        self._call_card_host.disclosure_ack(session_id)  # type: ignore[attr-defined]
+        writer.write({"ack": "disclosure_ack", "ok": True})
+
+    def _handle_get_call_card(self, cmd: dict, writer: _ClientWriter) -> None:
+        if self._call_card_host is None:
+            writer.write({"ack": "get_call_card", "ok": False, "error": "call_card not configured"})
+            return
+        session_id = cmd.get("session_id")
+        result = self._call_card_host.get_call_card(session_id=session_id)  # type: ignore[attr-defined]
+        writer.write({"ack": "get_call_card", "ok": True, "call_card": result})
 
     # --- PostureManager subscriber ---
 
