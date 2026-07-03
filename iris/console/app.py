@@ -374,7 +374,7 @@ class IrisConsole(App):
         Binding("space", "talk", "talk/stop", priority=True),
         Binding("l", "listen", "hear you"),
         Binding("L", "list_panel", "list"),
-        Binding("C", "call_card_panel", "call card"),
+        Binding("V", "call_card_panel", "call card"),
         Binding("f", "far", "hear them"),
         Binding("g", "grant", "grant", priority=True),
         Binding("a", "approve", "approve"),
