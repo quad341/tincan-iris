@@ -3,7 +3,7 @@
 The daemon:
   1. Opens RosterStore + PostureManager
   2. Builds PolicyResolver + HandlingEngine
-  3. Starts TincanCallControl (D-Bus call signals)
+  3. Starts TincanCallControl (D-Bus call signals) + MessageEventSource (ANCS)
   4. Starts DaemonAPI (Unix socket server)
   5. Writes PID to ~/.local/run/iris/daemon.pid
   6. Blocks on SIGTERM / SIGINT for graceful shutdown
@@ -16,10 +16,12 @@ import signal
 import sys
 import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .api import DaemonAPI
 from .brain_host import BrainHost
 from .engine import HandlingEngine
+from .message_event_source import MessageEventSource
 from .policy import PolicyResolver
 from .posture import PostureManager, PostureWatcher
 from ..brain import Brain
@@ -27,7 +29,13 @@ from ..call_control import TincanCallControl
 from ..notes import NotesStore
 from ..notify_sink import DesktopNotifySink
 from ..prefs import PreferencesStore
+from ..proactive_store import ProactiveStore
 from ..roster import RosterStore
+
+if TYPE_CHECKING:
+    # Runtime import is deferred into the IRIS_CALL_CARD block below so the base
+    # daemon starts without the `call-card` optional extra (NFR-03).
+    from .call_card_host import CallCardHost
 
 _PID_PATH = Path.home() / ".local" / "run" / "iris" / "daemon.pid"
 _LOG_PATH = Path.home() / ".local" / "state" / "iris" / "daemon.log"
@@ -39,6 +47,25 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 _log = logging.getLogger("iris.daemon")
+
+
+def _start_dbus_components(ctrl: object, mes: object) -> None:
+    """Start TincanCallControl then MessageEventSource; log gracefully on D-Bus failure.
+
+    Wires the shared SessionBus (ctrl._bus) into mes before calling mes.start() so
+    MessageEventSource can subscribe on the existing bus without opening a second one.
+    """
+    try:
+        ctrl.start()  # type: ignore[union-attr]
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("D-Bus unavailable — dbus_absent: %s", exc, extra={"dbus_absent": True})
+    bus = getattr(ctrl, "_bus", None)
+    if bus is not None:
+        mes._bus = bus  # type: ignore[union-attr]
+    try:
+        mes.start()  # type: ignore[union-attr]
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("D-Bus unavailable — dbus_absent: %s", exc, extra={"dbus_absent": True})
 
 
 def _write_pid(path: Path) -> None:
@@ -60,7 +87,7 @@ def main() -> int:
     posture = PostureManager(path=db_path)
     watcher = PostureWatcher(posture)
 
-    notes = NotesStore(db_path)
+    notes = NotesStore()  # uses default ~/.local/share/iris/notes.json, NOT roster.db
     prefs = PreferencesStore()
 
     # Create TCC with null emit placeholder; emit is wired after brain_host is ready.
@@ -80,15 +107,34 @@ def main() -> int:
         broadcast=lambda ev: None,  # rewired after api is built
     )
 
-    api = DaemonAPI(posture=posture, engine=engine)
+    # Construct CallCardHost when IRIS_CALL_CARD=1; None otherwise (section absent).
+    call_card_host: CallCardHost | None = None
+    if os.environ.get("IRIS_CALL_CARD") == "1":
+        from .call_card_host import CallCardHost  # noqa: PLC0415
+        from iris.capture.processor import L1CaptureProcessor  # noqa: PLC0415
+        from iris.capture.store import CallCardStore  # noqa: PLC0415
+        call_card_host = CallCardHost(
+            store=CallCardStore(),
+            processor=L1CaptureProcessor(),
+            api=None,       # patched below after api is built
+            cfg=None,
+        )
+        engine._call_card_host = call_card_host
+
+    brain_host = BrainHost(brain=brain, db_path=db_path, broadcast=lambda ev: None)
+    api = DaemonAPI(
+        posture=posture,
+        engine=engine,
+        brain_host=brain_host,
+        call_card_host=call_card_host,
+    )
     engine._broadcast = api.broadcast
+    brain_host._broadcast = api.broadcast
+    engine._brain_host = brain_host
+    if call_card_host is not None:
+        call_card_host._api = api
 
-    brain_host = BrainHost(brain=brain, db_path=db_path, broadcast=api.broadcast)
-    api._brain_host = brain_host
     _log.info("iris daemon: Brain and BrainHost initialized")
-
-    # Caller info cache: populated on incoming_call, consumed on call_connected.
-    _caller: dict[str, str] = {"id": "", "name": "", "number": ""}
 
     def _on_tcc_event(ev: tuple) -> None:  # called from the tincan-dbus thread
         kind = ev[0]
@@ -99,25 +145,23 @@ def main() -> int:
                 extra={"dbus_absent": True},
             )
         elif kind == "incoming_call":
-            caller_name, caller_number = str(ev[1]), str(ev[2])
-            result = resolver.resolve(caller_number, "")
-            contact = result.contact
-            _caller["id"] = str(contact.id) if contact else ""
-            _caller["name"] = contact.display_name if contact else caller_name
-            _caller["number"] = contact.phone_e164 or caller_number if contact else caller_number
+            caller_number = str(ev[2]) if len(ev) > 2 else ""
             engine.on_incoming_call(caller_number=caller_number)
         elif kind == "call_connected":
-            brain_host.set_call_context(
-                contact_id=_caller["id"],
-                contact_name=_caller["name"],
-                contact_number=_caller["number"],
-            )
+            engine.on_call_connected("")
         elif kind == "call_ended":
-            engine.on_call_ended(str(ev[1]))
-            brain_host.clear_call_context()
+            engine.on_call_ended(str(ev[1]) if len(ev) > 1 else "")
 
     ctrl.emit = _on_tcc_event
-    ctrl.start()
+
+    proactive_store = ProactiveStore()
+    mes = MessageEventSource(
+        proactive_store=proactive_store,
+        broadcast=api.broadcast,
+        _bus=None,  # wired to ctrl._bus inside _start_dbus_components
+    )
+
+    _start_dbus_components(ctrl, mes)
 
     _write_pid(_PID_PATH)
     _log.info("iris daemon starting (pid=%d)", os.getpid())
@@ -138,6 +182,7 @@ def main() -> int:
         stop_event.wait()
     finally:
         _log.info("iris daemon stopping")
+        mes.stop()
         ctrl.stop()
         api.stop()
         watcher.stop()
