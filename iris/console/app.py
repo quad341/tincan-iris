@@ -47,6 +47,7 @@ from ..prefs import PreferencesStore
 from .contacts import ContactsScreen
 from .contacts_logic import VERB_DESCRIPTION
 from .list_view import PostCallListView
+from .call_card import CallCardPanel
 from ..audio.endpoint import default_endpoint
 from ..audio.streaming import StreamingTranscriber
 from ..audio.stt import default_stt
@@ -373,6 +374,7 @@ class IrisConsole(App):
         Binding("space", "talk", "talk/stop", priority=True),
         Binding("l", "listen", "hear you"),
         Binding("L", "list_panel", "list"),
+        Binding("C", "call_card_panel", "call card"),
         Binding("f", "far", "hear them"),
         Binding("g", "grant", "grant", priority=True),
         Binding("a", "approve", "approve"),
@@ -451,6 +453,7 @@ class IrisConsole(App):
         with Horizontal(id="main-row"):
             yield RichLog(id="log", markup=True, wrap=True)
             yield ListPanel()
+            yield CallCardPanel(id="call-card-panel")
         yield Static(id="status")
         yield Footer()
 
@@ -731,6 +734,10 @@ class IrisConsole(App):
             self._dnd = ev.get("dnd", False)
             self._dnd_expires = ev.get("expires_in_s")
             self._refresh_status()
+        elif event_type.startswith("call_card"):
+            # Live Call Card capture events from the daemon (ti-913rw) — feed the
+            # side panel. Runs on the UI thread (drained from the queue).
+            self.query_one(CallCardPanel).handle_event(ev)
         elif event_type == "disconnected":
             self._w("[yellow]Daemon disconnected — switched to direct mode[/]")
             self._proxy = None
@@ -1069,6 +1076,10 @@ class IrisConsole(App):
         self._maybe_show_post_call_list(
             getattr(self.conductor, "session_id", "") or ""
         )
+
+    def action_call_card_panel(self) -> None:
+        """Toggle the live Call Card side panel."""
+        self.query_one(CallCardPanel).toggle_panel()
 
     def action_list_panel(self) -> None:
         """Toggle the right-side list panel (WCAG 2.1 AA: [L] moves focus in, [Esc] returns)."""

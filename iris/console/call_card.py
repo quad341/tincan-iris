@@ -825,3 +825,88 @@ class CallCardView(App):
         idx = levels.index(self.participation_level)
         if idx > 0:
             self.participation_level = levels[idx - 1]
+
+
+# ─────────────────────────────────────────────────────────────────
+# CallCardPanel — embeddable live feed for IrisConsole (ti-913rw)
+# ─────────────────────────────────────────────────────────────────
+
+class CallCardPanel(ScrollableContainer):
+    """Live Call Card side panel for the ride-along console.
+
+    A newest-first feed of the DisclosureCard + Critical/Fact/ActionItem cards,
+    driven by ``call_card_*`` daemon events via :meth:`handle_event`. It is meant
+    to sit alongside the ride-along log (additive — the console keeps speaking
+    when addressed; this just shows what the daemon silently captured).
+
+    ``handle_event`` runs on the console's UI thread (events are drained from the
+    app's event queue), so widget mutations are direct — no ``call_from_thread``.
+
+    Payload keys match the daemon broadcasts (iris/daemon/call_card_host.py):
+    ``fact`` / ``item`` / ``caller_number`` / ``contact_name`` / ``script``.
+    """
+
+    DEFAULT_CSS = """
+    CallCardPanel {
+        width: 46;
+        height: 1fr;
+        background: #10151f;
+        border: round #3a5080;
+        padding: 0 1;
+        display: none;
+    }
+    CallCardPanel.visible-panel {
+        display: block;
+    }
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.border_title = "Call Card"
+        self._session_id = ""
+
+    def _prepend(self, card: Widget) -> None:
+        if self.children:
+            self.mount(card, before=self.children[0])
+        else:
+            self.mount(card)
+
+    def show_panel(self) -> None:
+        self.add_class("visible-panel")
+
+    def toggle_panel(self) -> None:
+        self.toggle_class("visible-panel")
+
+    def handle_event(self, event: dict) -> None:
+        """Route one ``call_card_*`` daemon event into the panel. Unknown → ignored."""
+        ev = event.get("event", "")
+        if ev == "call_card_started":
+            self._session_id = event.get("session_id", "")
+            caller = event.get("contact_name") or event.get("caller_number") or "call"
+            self.border_title = f"Call Card · {caller}"
+            self.border_subtitle = ""
+            self.show_panel()
+        elif ev == "call_card_disclosure_needed":
+            self._session_id = event.get("session_id", self._session_id)
+            self.show_panel()
+            self._prepend(
+                DisclosureCard(self._session_id or "default", script=event.get("script"))
+            )
+        elif ev == "call_card_fact":
+            try:
+                fact = _fact_from_dict(event.get("fact", event))
+            except (KeyError, ValueError):
+                return
+            self._prepend(CriticalFactCard(fact) if fact.critical else FactCard(fact))
+            self.show_panel()
+        elif ev == "call_card_action_item":
+            try:
+                item = _action_item_from_dict(event.get("item", event))
+            except (KeyError, ValueError):
+                return
+            self._prepend(ActionItemCard(item))
+            self.show_panel()
+        elif ev == "call_card_enriched":
+            self.border_subtitle = "✨ enriched"
+        elif ev == "call_card_ended":
+            self.border_subtitle = "· ended"
