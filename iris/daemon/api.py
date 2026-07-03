@@ -276,6 +276,7 @@ class DaemonAPI:
                 "call":    call_state,
                 "posture": {"dnd": eff["dnd"], "busy": eff["busy"]},
                 "clients": self.client_count(),
+                "pid":     os.getpid(),
             },
         })
 

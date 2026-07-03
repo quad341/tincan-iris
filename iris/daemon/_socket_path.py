@@ -22,3 +22,13 @@ def daemon_socket_path() -> Path:
     if runtime:
         return Path(runtime) / "iris" / "daemon.sock"
     return Path.home() / ".local" / "run" / "iris" / "daemon.sock"
+
+
+def daemon_pid_path() -> Path:
+    """Return the canonical path for the daemon's exclusivity lock/pid file.
+
+    Always derived from daemon_socket_path() — same directory, same
+    precedence — so the lock and the socket it guards can never drift to
+    different scopes again.
+    """
+    return daemon_socket_path().with_name("daemon.pid")
