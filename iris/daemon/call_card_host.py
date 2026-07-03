@@ -5,7 +5,6 @@ import logging
 import threading
 from dataclasses import asdict
 
-from iris.capture.enricher import PostCallEnricher
 from iris.capture.processor import L1CaptureProcessor
 from iris.capture.schemas import ActionItem, CapturedFact
 from iris.capture.session import CaptureSession
@@ -111,6 +110,17 @@ class CallCardHost:
             "fact_count": fact_count,
             "action_item_count": action_item_count,
         })
+        # L3 post-call enrichment is OPTIONAL (needs the `call-card` extra:
+        # instructor + pydantic + anthropic). L1 capture works without it — if the
+        # extra is absent, log loudly and skip (never a silent no-op).
+        try:
+            from iris.capture.enricher import PostCallEnricher  # noqa: PLC0415
+        except ImportError as exc:
+            _log.warning(
+                "Post-call enrichment skipped — call-card LLM extra not installed "
+                "(%s); run `pip install -e '.[call-card]'` for the L3 pass.", exc,
+            )
+            return
         enricher = PostCallEnricher(
             session_id=session_id,
             store=self._store,
