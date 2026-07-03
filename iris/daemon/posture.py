@@ -145,21 +145,34 @@ class PostureManager:
 
     def set_dnd(self, source: str, expires: float | None = None) -> None:
         """Enable DND.  source is internal only; never forwarded to listeners."""
+        snapshot = self._set_dnd_state(source, expires)
+        self._finish_dnd_change(snapshot)
+
+    def _set_dnd_state(self, source: str, expires: float | None = None) -> _State:
+        """Mutate in-memory state only. Caller must call _finish_dnd_change
+        afterward — used where the caller needs effective() to reflect the
+        change before persisting/broadcasting it (ack-ordering, see DaemonAPI)."""
         with self._lock:
             self._state = _State(
                 dnd=True, dnd_source=source, dnd_expires=expires, busy=False
             )
-            snapshot = _State(**vars(self._state))
-        self._persist(snapshot)
-        self._broadcast(snapshot)
+            return _State(**vars(self._state))
 
     def clear_dnd(self) -> None:
         """Disable DND unconditionally."""
+        snapshot = self._clear_dnd_state()
+        self._finish_dnd_change(snapshot)
+
+    def _clear_dnd_state(self) -> _State:
+        """Mutate in-memory state only. Caller must call _finish_dnd_change."""
         with self._lock:
             self._state = _State(
                 dnd=False, dnd_source="manual", dnd_expires=None, busy=False
             )
-            snapshot = _State(**vars(self._state))
+            return _State(**vars(self._state))
+
+    def _finish_dnd_change(self, snapshot: _State) -> None:
+        """Persist + broadcast a state already applied by _set_dnd_state/_clear_dnd_state."""
         self._persist(snapshot)
         self._broadcast(snapshot)
 
