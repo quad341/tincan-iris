@@ -865,7 +865,19 @@ class CallCardPanel(ScrollableContainer):
         self.border_title = "Call Card"
         self._session_id = ""
 
+    def compose(self) -> ComposeResult:
+        # A visible empty state so [V] on an idle console shows the panel is there
+        # (an empty container renders as nothing). Hidden once real cards arrive.
+        yield Static("[dim]○ waiting for a call…[/dim]", id="cc-empty")
+
+    def _hide_placeholder(self) -> None:
+        try:
+            self.query_one("#cc-empty").display = False
+        except Exception:  # noqa: BLE001 — placeholder already gone
+            pass
+
     def _prepend(self, card: Widget) -> None:
+        self._hide_placeholder()
         if self.children:
             self.mount(card, before=self.children[0])
         else:

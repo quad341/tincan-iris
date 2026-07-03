@@ -215,24 +215,27 @@ class ListPanel(Static):
         for it in items:
             state = it.lookup_status  # "none", "pending", "done", "failed"
             self._items.append((it.text, state, ""))
-        self._render()
+        self._refresh()
 
     def on_lookup_done(self, item_id: int, result: str) -> None:
-        self._render()
+        self._refresh()
 
     def on_lookup_failed(self, item_id: int, msg: str) -> None:
-        self._render()
+        self._refresh()
 
     def add_item(self, text: str) -> None:
         self._items.append((text, "none", ""))
-        self._render()
+        self._refresh()
 
     def _icon(self, state: str, checked: bool) -> str:
         if checked:
             return "☑"
         return {"none": "○", "pending": "⏳", "done": "✓", "failed": "⚠"}.get(state, "○")
 
-    def _render(self) -> None:
+    def _refresh(self) -> None:
+        # NB: must NOT be named _render — that collides with Textual's internal
+        # Widget._render(), whose return value is used by the renderer (returning
+        # None here crashes the moment the panel is shown).
         if not self._items:
             lines = ["[dim]— empty —[/dim]"]
         else:
