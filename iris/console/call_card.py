@@ -238,6 +238,18 @@ class DisclosureCard(Widget):
         self.refresh()
         self._return_focus()
 
+    def set_disclosure_result(self, state: DisclosureState) -> None:
+        """Reflect a terminal state driven by an external event (the daemon's
+        automatic TTS disclosure), without posting Acknowledged/Skipped — the
+        daemon already made this transition; posting again would just re-send
+        an already-applied ack/skip back to it."""
+        if self._state is not DisclosureState.EXPANDED:
+            return
+        self._state = state
+        self._save_state()
+        self.add_class("-badge")
+        self.refresh()
+
     def _return_focus(self) -> None:
         try:
             from iris.console.ride_along import CardFeed
@@ -888,6 +900,7 @@ class CallCardPanel(ScrollableContainer):
         super().__init__(**kwargs)
         self.border_title = "Call Card"
         self._session_id = ""
+        self._disclosure: DisclosureCard | None = None
 
     def compose(self) -> ComposeResult:
         # A visible empty state so [V] on an idle console shows the panel is there
@@ -925,9 +938,14 @@ class CallCardPanel(ScrollableContainer):
         elif ev == "call_card_disclosure_needed":
             self._session_id = event.get("session_id", self._session_id)
             self.show_panel()
-            self._prepend(
-                DisclosureCard(self._session_id or "default", script=event.get("script"))
-            )
+            self._disclosure = DisclosureCard(self._session_id or "default", script=event.get("script"))
+            self._prepend(self._disclosure)
+        elif ev == "call_card_disclosed":
+            if self._disclosure is not None:
+                self._disclosure.set_disclosure_result(DisclosureState.DISCLOSED)
+        elif ev == "call_card_skipped":
+            if self._disclosure is not None:
+                self._disclosure.set_disclosure_result(DisclosureState.SKIPPED)
         elif ev == "call_card_fact":
             try:
                 fact = _fact_from_dict(event.get("fact", event))
