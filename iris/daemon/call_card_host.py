@@ -87,6 +87,7 @@ class CallCardHost:
                 store=self._store,
                 on_fact=self._on_fact,
                 on_action_item=self._on_action_item,
+                on_far_lost=lambda reason, sid=session_id: self._on_far_lost(sid, reason),
             )
             self._session = session
 
@@ -221,6 +222,20 @@ class CallCardHost:
             if not session_id:  # empty id = the active session (see start_session)
                 session_id = self._session_id or ""
         self._store.mark_disclosure_skipped(session_id)
+
+    def _on_far_lost(self, session_id: str, reason: str) -> None:
+        """Far-channel binding broke (SCO route left / node vanished) — tell clients.
+
+        The far capture has already been stopped by CaptureSession; from here
+        on, any far-party speech is NOT captured and the card must say so
+        rather than silently mislabel the operator's room as "far".
+        """
+        _log.warning("CallCardHost: far channel lost for %s: %s", session_id, reason)
+        self._api.broadcast({  # type: ignore[union-attr]
+            "event": "call_card_far_lost",
+            "session_id": session_id,
+            "reason": reason,
+        })
 
     def get_call_card(self, session_id: str | None = None) -> dict:
         with self._lock:
