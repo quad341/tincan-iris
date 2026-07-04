@@ -69,6 +69,76 @@ def test_disclosure_ack_no_active_session_is_noop(mock_session_cls, caplog):
 
 
 # ---------------------------------------------------------------------------
+# disclosure_ack -- TOCTOU corrective fix (ti-s6kz3 Finding 1, commit 546212f)
+#
+# session.start_far() runs outside the lock, so a concurrent stop_session()
+# for the same session can tear it down while start_far() is still in
+# flight. The fix re-validates session identity after start_far() returns
+# and stops the orphaned session correctively if it was superseded.
+# ---------------------------------------------------------------------------
+
+@patch("iris.capture.enricher.PostCallEnricher")
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_disclosure_ack_race_during_start_far_stops_orphaned_session(
+    mock_session_cls, _mock_enricher_cls, caplog,
+):
+    host, _store, _api = _make_host()
+    session_mock = MagicMock()
+    mock_session_cls.return_value = session_mock
+
+    def _concurrent_teardown():
+        # A different thread's stop_session() interleaves while this
+        # start_far() call (still running on the disclosure_ack thread) is
+        # in flight -- the exact window 546212f closes.
+        host.stop_session("s1")
+        session_mock.stop.reset_mock()  # isolate disclosure_ack's own corrective call
+
+    session_mock.start_far.side_effect = _concurrent_teardown
+
+    host.start_session("s1", "+15550000")
+    with caplog.at_level(logging.WARNING, logger="iris.daemon.call_card_host"):
+        host.disclosure_ack("s1")
+
+    session_mock.stop.assert_called_once_with()
+    assert host._session is None
+    assert any(
+        "torn down while starting far capture" in r.getMessage() for r in caplog.records
+    )
+
+
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_disclosure_ack_no_race_does_not_spuriously_stop(mock_session_cls):
+    host, _store, _api = _make_host()
+    session_mock = MagicMock()
+    mock_session_cls.return_value = session_mock
+
+    host.start_session("s1", "+15550000")
+    host.disclosure_ack("s1")
+
+    session_mock.start_far.assert_called_once_with()
+    session_mock.stop.assert_not_called()
+    assert host._session is session_mock
+
+
+@patch("iris.capture.enricher.PostCallEnricher")
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_disclosure_ack_then_later_stop_session_does_not_double_stop(
+    mock_session_cls, _mock_enricher_cls,
+):
+    host, _store, _api = _make_host()
+    session_mock = MagicMock()
+    mock_session_cls.return_value = session_mock
+
+    host.start_session("s1", "+15550000")
+    host.disclosure_ack("s1")  # completes cleanly, no interleaving
+    session_mock.stop.assert_not_called()
+
+    host.stop_session("s1")  # legitimate teardown, strictly after ack returns
+
+    session_mock.stop.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
 # disclosure_skip
 # ---------------------------------------------------------------------------
 
