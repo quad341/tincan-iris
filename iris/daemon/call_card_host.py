@@ -32,7 +32,7 @@ class CallCardHost:
         store: CallCardStore,
         processor: L1CaptureProcessor,
         api: object,      # DaemonAPI — typed as object to avoid circular import
-        cfg: object,      # iris config; host reads cfg.call_card.disclosure_script
+        cfg: object,      # iris config; host reads cfg.call_card_disclosure_script
     ) -> None:
         self._store = store
         self._processor = processor
@@ -49,7 +49,7 @@ class CallCardHost:
     @property
     def _disclosure_script(self) -> str:
         try:
-            return self._cfg.call_card.disclosure_script  # type: ignore[union-attr]
+            return self._cfg.call_card_disclosure_script or _DEFAULT_DISCLOSURE  # type: ignore[union-attr]
         except AttributeError:
             return _DEFAULT_DISCLOSURE
 

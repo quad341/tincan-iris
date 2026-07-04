@@ -96,6 +96,8 @@ _KEYMAP: dict[tuple[str, str], str] = {
     ("take_message", "name_s"):        "IRIS_TM_NAME_S",
     ("take_message", "msg_s"):         "IRIS_TM_MSG_S",
     ("take_message", "add_s"):         "IRIS_TM_ADD_S",
+    # Call Card disclosure script (consent-gate script shown/spoken before capture starts):
+    ("call_card", "disclosure_script"): "IRIS_CALL_CARD_DISCLOSURE_SCRIPT",
     # Local server URLs + console log:
     ("servers", "stt_url"):        "IRIS_STT_SERVER_URL",
     ("servers", "tts_url"):        "IRIS_TTS_SERVER_URL",
