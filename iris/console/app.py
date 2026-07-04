@@ -28,6 +28,7 @@ import os
 import queue
 import re
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -1337,6 +1338,24 @@ class IrisConsole(App):
         super()._handle_exception(error)
 
 
+_CRASH_EXIT_LABEL_WIDTH = 23  # aligns the value column across all three lines below
+
+
+def _crash_exit_message() -> str:
+    """Final stderr block for a message-pump/run_worker crash — printed once Textual's
+    own panic/traceback dump has already rendered to the restored terminal and the app
+    has fully exited, so it's the last thing left in scrollback (ti-00jr4.2)."""
+    lines = [
+        "Iris crashed — sorry about that.",
+        "  " + "Log (just appended):".ljust(_CRASH_EXIT_LABEL_WIDTH) + diagnostics.log_path(),
+    ]
+    bug_report = diagnostics.last_crash_bug_report()
+    if bug_report is not None:
+        lines.append("  " + "Bug report:".ljust(_CRASH_EXIT_LABEL_WIDTH) + str(bug_report))
+    lines.append("  " + "Retry:".ljust(_CRASH_EXIT_LABEL_WIDTH) + "python -m iris.console")
+    return "\n".join(lines)
+
+
 def main() -> int:
     diagnostics.install_exception_hooks()
     app = IrisConsole()
@@ -1344,6 +1363,14 @@ def main() -> int:
     try:
         app.run()
     finally:
+        # app.return_code is set to 1 exclusively by Textual's own _handle_exception
+        # (IrisConsole never sets a custom return_code elsewhere) — an unambiguous
+        # crash signal. By the time app.run() returns, Textual has already restored
+        # the terminal and printed its own panic/traceback dump (_print_error_renderables
+        # runs after driver.close(), before run_async returns), so this print is
+        # strictly the last thing in scrollback, per ti-00jr4.2.
+        if app.return_code:
+            print(_crash_exit_message(), file=sys.stderr)
         diagnostics.clear_active_app()
     return app.return_code or 0
 
