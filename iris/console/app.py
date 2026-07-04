@@ -569,6 +569,12 @@ class IrisConsole(App):
                     self._on_heard_far_main(ev[1], ev[2] if len(ev) > 2 else "")
                 elif kind == "error":
                     self._w(f"[red]✗ {ev[1]}[/]")
+                    self._last_error = ev[1]
+                    self.notify(
+                        r"Error - press \[e] to copy it, \[b] to file a bug",
+                        severity="error",
+                    )
+                    self._refresh_status()
                 elif kind == "list":
                     self._on_list_event(ev)
                 elif kind == "incoming_call":
@@ -982,6 +988,8 @@ class IrisConsole(App):
                 )
             else:
                 parts.append(f"[b yellow]🔔 {self._proactive_badge}[/]")
+        if self._last_error:
+            parts.append(r"[b red]⚠ error just now — \[e] copy · \[b] file bug[/]")
         if self._dnd:
             if self._dnd_expires is not None:
                 from datetime import datetime as _dt
