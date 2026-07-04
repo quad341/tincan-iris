@@ -31,6 +31,11 @@ _LOG_TAIL_LINES = 200
 # available, and degrade gracefully when it isn't.
 _active_app: Any = None
 
+# Path of the bug report written by the most recent persist_crash() call (or None if
+# none has run yet, or the write failed) — surfaced to app.py's crash-exit message
+# (ti-00jr4.2), which needs the actual path rather than triggering a second write.
+_last_crash_bug_report: Path | None = None
+
 
 def set_active_app(app: Any) -> None:
     global _active_app
@@ -40,6 +45,17 @@ def set_active_app(app: Any) -> None:
 def clear_active_app() -> None:
     global _active_app
     _active_app = None
+
+
+def log_path() -> str:
+    """Public accessor for the active console.log path (see ti-00jr4.2)."""
+    return _log_path()
+
+
+def last_crash_bug_report() -> Path | None:
+    """Path of the bug report from the most recent persist_crash() call, or None if
+    none has run yet this process or the write failed (see ti-00jr4.2)."""
+    return _last_crash_bug_report
 
 
 def install_exception_hooks() -> None:
@@ -65,11 +81,12 @@ def install_exception_hooks() -> None:
 
 def persist_crash(source: str, exc: BaseException) -> None:
     """Append a traceback to console.log and write a bug report. Never raises."""
+    global _last_crash_bug_report
     try:
         tb_text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
         timestamp_iso = datetime.now().isoformat()
         _append_to_log(f"\n=== CRASH ({source}) {timestamp_iso} ===\n{tb_text}")
-        write_bug_report(
+        _last_crash_bug_report = write_bug_report(
             f"crash:{source}",
             crash_record={"timestamp_iso": timestamp_iso, "source": source, "traceback": tb_text},
         )
