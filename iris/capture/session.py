@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Callable
 
@@ -30,6 +31,7 @@ class CaptureSession:
         store: CallCardStore,
         on_fact: Callable[[CapturedFact], None],
         on_action_item: Callable[[ActionItem], None],
+        on_far_lost: Callable[[str], None] | None = None,
     ) -> None:
         self._session_id = session_id
         self._transcript_store = transcript_store
@@ -37,6 +39,9 @@ class CaptureSession:
         self._store = store
         self._on_fact = on_fact
         self._on_action_item = on_action_item
+        self._on_far_lost = on_far_lost
+        self._far_watchdog_stop = threading.Event()
+        self._far_lost_reported = False
         self._start_time: float | None = None
 
         self._op = StreamingTranscriber(
@@ -47,6 +52,7 @@ class CaptureSession:
             self._utterance_callback,
             label="far",
             backend="pw",
+            on_stream_end=self._on_far_stream_end,
         )
 
     def _utterance_callback(self, text: str, speaker: str) -> None:
@@ -101,6 +107,18 @@ class CaptureSession:
         if downlink:
             self._far.source = downlink
             self._far.start()
+            # BINDING IS NOT TRUSTED: PipeWire silently reroutes a capture to
+            # the default mic when its target is missing or disappears (e.g.
+            # the operator moves the call off the Bluetooth route), which
+            # relabels the operator's room as "far" — attribution fiction and
+            # a hole under the channel-identity trust model (ADR-0002).
+            # Verify the actual link and keep watching it for the whole call.
+            self._far_watchdog_stop.clear()
+            threading.Thread(
+                target=self._far_binding_watchdog,
+                name=f"far-watchdog-{self._session_id}",
+                daemon=True,
+            ).start()
         else:
             _log.warning(
                 "CaptureSession %s: no SCO downlink found — far-party capture "
@@ -108,7 +126,48 @@ class CaptureSession:
                 self._session_id,
             )
 
+    def _far_binding_watchdog(self) -> None:
+        """Verify the far stream stays bound to the SCO downlink; kill it loudly if not.
+
+        First check is delayed so the link has time to appear; then re-checked
+        every 2s. Transcribing from the wrong source is worse than silence, so
+        a bad binding stops the channel rather than limping on.
+        """
+        interval_s = 2.0
+        deadline_first = time.time() + 4.0
+        while not self._far_watchdog_stop.wait(interval_s):
+            ok, detail = self._far.verify_target_bound()
+            if ok:
+                continue
+            if time.time() < deadline_first and "no incoming links" in detail:
+                continue  # link may still be forming right after start
+            self._report_far_lost(detail)
+            return
+
+    def _on_far_stream_end(self, label: str) -> None:
+        self._report_far_lost("far pipeline exited unexpectedly")
+
+    def _report_far_lost(self, reason: str) -> None:
+        if self._far_lost_reported:
+            return
+        self._far_lost_reported = True
+        self._far_watchdog_stop.set()
+        _log.warning(
+            "CaptureSession %s: FAR CHANNEL LOST — stopping far capture: %s",
+            self._session_id, reason,
+        )
+        try:
+            self._far.stop()
+        except Exception:
+            _log.exception("far stop failed")
+        if self._on_far_lost is not None:
+            try:
+                self._on_far_lost(reason)
+            except Exception:
+                _log.exception("on_far_lost callback failed")
+
     def stop(self) -> None:
+        self._far_watchdog_stop.set()
         self._op.stop()
         self._far.stop()
         for tr in (self._op, self._far):
