@@ -347,7 +347,7 @@ class IncomingCallPanel(Widget, can_focus=False):
         caller_line = f"{display_name}  [dim]·[/]  {caller_number}" if caller_name else caller_number
         body = VERB_DESCRIPTION.get(verb, "")
         choice_keys = "  ".join(
-            f"[b][{c['key']}][/] {c['label']}" for c in choices
+            rf"[b]\[{c['key']}][/] {c['label']}" for c in choices
         ) if choices else ""
 
         self.query_one("#call-header", Static).update(header)
@@ -613,7 +613,7 @@ class IrisConsole(App):
                     self._far_announced = False
                     self._w(
                         "[green]call connected — ride-along: say \"Hey Iris …\"; "
-                        "ARM TRUST + [g] to grant the far party[/]"
+                        "ARM TRUST + \\[g] to grant the far party[/]"
                     )
                     # Hands-free: continuously listen to the operator, and disclose to
                     # BOTH parties — a successful announcement opens far-party
@@ -984,7 +984,7 @@ class IrisConsole(App):
         if self._proactive_badge:
             if self._proactive_queue_count > 1:
                 parts.append(
-                    f"[b yellow]🔔 {self._proactive_queue_count} pending  ·  press [n] to cycle[/]"
+                    rf"[b yellow]🔔 {self._proactive_queue_count} pending  ·  press \[n] to cycle[/]"
                 )
             else:
                 parts.append(f"[b yellow]🔔 {self._proactive_badge}[/]")
@@ -1160,8 +1160,8 @@ class IrisConsole(App):
         """Arm the trust session; operator can then use [g] to grant the far party."""
         self.conductor.arm()
         name = self._call_contact_name or "contact"
-        self._w(f"[b yellow]ARM TRUST — {name} armed; press [g] to grant far access[/]")
-        self.notify(f"Trust armed for {name}; press [g] to grant")
+        self._w(rf"[b yellow]ARM TRUST — {name} armed; press \[g] to grant far access[/]")
+        self.notify(rf"Trust armed for {name}; press \[g] to grant")
         self._refresh_status()
         # Card update happens via ("armed", True) in _drain()
 
