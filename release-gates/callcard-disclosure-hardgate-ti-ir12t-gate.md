@@ -4,9 +4,9 @@
 **Source bead:** ti-s6kz3 — Review: Call Card disclosure hard-gate channel-split (ti-ir12t) — CLOSED/PASS
 **Build bead:** ti-ir12t — Call Card: hard-gate far-party capture on disclosure ack/skip — CLOSED
 **Reviewed commits:** 6c3fde9 (feature), 546212f (Finding-1 TOCTOU fix)
-**Test commit:** 4eab054 (ti-9oguk, cherry-picked onto this branch as 5bacdec)
+**Test commit:** 4eab054 (ti-9oguk, cherry-picked onto this branch as 5bacdec); 0627cb9 (ti-ofce3, cherry-picked as 9fad394 — see Addendum)
 **Branch:** feat/callcard-disclosure-hardgate-ti-ir12t → origin/main
-**Date:** 2026-07-04
+**Date:** 2026-07-04 (original); updated 2026-07-04 (TOCTOU regression coverage addendum, ti-yzemk)
 
 ## Gate Criteria
 
@@ -33,6 +33,8 @@
 - Finding 1 (TOCTOU race: session torn down mid-`start_far()`) fixed in 546212f via a corrective post-call identity re-check (`self._session is not session`); reviewer independently reproduced 4 scenarios (race / happy-path / stale-id / sequential-teardown), all passing.
 
 **Known non-blocking coverage gap:** no committed regression test yet asserts the Finding-1 corrective-fix behavior specifically (the existing suite covers the rest of the feature and passes). Tracked separately as ti-ofce3 (needs-tests, routed to validator), filed non-blocking per this rig's coverage-check policy — the same policy already applied earlier in this feature chain (ti-9oguk/ti-94lrs).
+
+**RESOLVED** (2026-07-04, ti-yzemk): see Addendum below — commit 0627cb9 lands the Finding-1-specific regression coverage onto this branch.
 
 ## Test Run
 
@@ -88,3 +90,62 @@ confirmation of the underlying consent risk posture (`bd human`). This deploy sh
 the architect's recommended default (hard-gate, channel-split, matching the existing
 ti-rqhn precedent) so the pipeline isn't blocked on that response, per ti-ir12t's own
 notes. If the operator's answer changes the policy, follow-up work will be needed.
+
+## Addendum — TOCTOU corrective-fix regression coverage (ti-yzemk, 2026-07-04)
+
+**Deploy bead:** ti-yzemk — needs-deploy: cherry-pick TOCTOU regression tests onto
+open PR #141 (from: ti-rop6d, ti-wmgzq)
+**Source bead:** ti-ofce3 — needs-tests: commit regression test for disclosure_ack
+TOCTOU corrective fix (from: ti-s6kz3) — CLOSED
+**Review beads:** ti-rop6d, ti-wmgzq — both CLOSED, "REVIEW VERDICT: PASS" (same
+commit, reviewed once — see ti-rop6d notes for full findings)
+**Landed commit:** 0627cb9 → cherry-picked onto this branch as 9fad394 (clean,
+0 conflicts, purely additive hunk to `tests/test_call_card_host.py`, +70 lines)
+
+This closes the "known non-blocking coverage gap" noted above: commit 0627cb9 adds
+3 scenarios asserting the 546212f corrective-fix behavior specifically (Finding 1,
+ti-s6kz3) rather than just the rest of the feature:
+
+1. `test_disclosure_ack_race_during_start_far_stops_orphaned_session` — the actual
+   discriminating test. Independently verified non-vacuous by both the reviewer
+   (ti-rop6d notes) and this deploy pass: cherry-picked onto the pre-fix base
+   (4eab054, skipping b7b520b/546212f) in a disposable context — fails with
+   "Expected 'stop' to be called once. Called 0 times."; passes once the fix is
+   present.
+2. `test_disclosure_ack_no_race_does_not_spuriously_stop` — happy-path sanity check.
+3. `test_disclosure_ack_then_later_stop_session_does_not_double_stop` — sequential
+   teardown does not misfire.
+
+**Ancestry (independently re-verified, not just trusted from bead notes):**
+`0627cb9 -> b7b520b -> 4eab054 -> 6c3fde9 -> 088b7da` (already-merged mainline).
+Linear, no merge commits. `git merge-base --is-ancestor 546212f e87e8d6` and
+`git merge-base --is-ancestor 0627cb9 e87e8d6` confirm the production fix was
+already on the PR branch and the test commit was not (i.e., this cherry-pick was
+genuinely additive, not a no-op).
+
+**Test run** (this deploy pass, isolated `.deploy-venv`, same technique as above,
+on top of 9fad394):
+
+```
+$ python3 -m pytest tests/ -q
+1647 passed, 1 skipped, 3 xpassed in 84.60s (0:01:24)
+
+$ ruff check iris/daemon/call_card_host.py tests/test_call_card_host.py
+All checks passed!
+```
+
+Matches the reviewer's independently-verified numbers exactly (ti-rop6d,
+ti-wmgzq notes).
+
+**Updated commit list on this branch:**
+
+```
+9fad394 tests(daemon): regression coverage for disclosure_ack TOCTOU corrective fix (ti-ofce3)
+ tests/test_call_card_host.py | 70 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 70 insertions(+)
+```
+
+**Overall (addendum): PASS.** No new PR opened — this updates the existing, open,
+mergeable PR #141 (`feat/callcard-disclosure-hardgate-ti-ir12t`) in place, per the
+same precedent already established for 5bacdec on this same PR. Merge authority
+remains operator/mayor/mpr; this deploy pass does not merge.
