@@ -3,6 +3,8 @@
 ti-rnlqo.6.1: DisclosureCard — focus-trapped modal gate with disk state persistence
 ti-rnlqo.6.2: CriticalFactCard, FactCard — confidence bar, edit mode, CapturedFact schema
 ti-rnlqo.6.3: ActionItemCard — description/owner/due_date display + inline edit mode
+ti-ir12t: DisclosureCard posts DisclosureAcknowledged/DisclosureSkipped so the app
+can forward disclosure_ack/disclosure_skip to the daemon (hard-gates far capture).
 """
 from __future__ import annotations
 
@@ -221,6 +223,7 @@ class DisclosureCard(Widget):
             return
         self._state = DisclosureState.DISCLOSED
         self._save_state()
+        self.post_message(DisclosureAcknowledged(self._session_id))
         self.add_class("-badge")
         self.refresh()
         self._return_focus()
@@ -230,6 +233,7 @@ class DisclosureCard(Widget):
             return
         self._state = DisclosureState.SKIPPED
         self._save_state()
+        self.post_message(DisclosureSkipped(self._session_id))
         self.add_class("-badge")
         self.refresh()
         self._return_focus()
@@ -247,6 +251,26 @@ class DisclosureCard(Widget):
     @property
     def state(self) -> DisclosureState:
         return self._state
+
+
+# ─────────────────────────────────────────────────────────────────
+# Messages — posted to parent on disclosure actions
+# ─────────────────────────────────────────────────────────────────
+
+class DisclosureAcknowledged(Message):
+    """Operator disclosed AI listening to the far party — daemon may start far capture."""
+
+    def __init__(self, session_id: str) -> None:
+        super().__init__()
+        self.session_id = session_id
+
+
+class DisclosureSkipped(Message):
+    """Operator explicitly declined to disclose — far capture must stay off this call."""
+
+    def __init__(self, session_id: str) -> None:
+        super().__init__()
+        self.session_id = session_id
 
 
 # ─────────────────────────────────────────────────────────────────

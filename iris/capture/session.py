@@ -73,12 +73,19 @@ class CaptureSession:
             )
 
     def start(self) -> None:
+        """Start both channels immediately. Used by callers with no consent gate to honor."""
+        self.start_operator()
+        self.start_far()
+
+    def start_operator(self) -> None:
         self._processor.session_id = self._session_id
         self._start_time = time.time()
         # Operator channel captures the default source. With ambient AEC that is
         # `iris_aec_src` (the echo-cancelled mic); without it, the raw mic — either
         # way, the operator's own voice.
         self._op.start()
+
+    def start_far(self) -> None:
         # The far channel MUST target the live SCO downlink (bluez_input). The
         # default source is the operator's mic, so a bare default capture would
         # double-record the operator instead of the far party. The SCO nodes only
