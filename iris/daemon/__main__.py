@@ -29,8 +29,10 @@ from .engine import HandlingEngine
 from .message_event_source import MessageEventSource
 from .policy import PolicyResolver
 from .posture import PostureManager, PostureWatcher
+from .. import settings
 from ..brain import Brain
 from ..call_control import TincanCallControl
+from ..config import Config
 from ..notes import NotesStore
 from ..notify_sink import DesktopNotifySink
 from ..prefs import PreferencesStore
@@ -149,6 +151,18 @@ def _remove_pid(path: Path) -> None:
         pass
 
 
+def _load_call_card_config() -> Config:
+    """Real Config for CallCardHost/PostCallEnricher — env > config.toml > default.
+
+    Only the Call Card knobs are threaded through here; the rest of Config's
+    fields (Brain/latency/proactive/etc.) stay at their built-in defaults —
+    the daemon doesn't construct a Brain-facing Config today.
+    """
+    return Config(
+        call_card_disclosure_script=settings.get("IRIS_CALL_CARD_DISCLOSURE_SCRIPT", ""),
+    )
+
+
 def main() -> int:
     try:
         _lock_file = _acquire_exclusive_lock(_PID_PATH)  # noqa: F841 — held for our lifetime, see docstring
@@ -202,7 +216,7 @@ def main() -> int:
                 store=CallCardStore(),
                 processor=L1CaptureProcessor(),
                 api=None,       # patched below after api is built
-                cfg=None,
+                cfg=_load_call_card_config(),
             )
             engine._call_card_host = call_card_host
             _log.info("iris daemon: Call Card capture ENABLED")
