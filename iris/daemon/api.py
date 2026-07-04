@@ -71,6 +71,18 @@ class _ClientWriter:
                 self.closed = True
                 return False
 
+    def close(self) -> None:
+        """Mark closed and close the underlying file under the same lock write()
+        uses, so an in-flight write can never observe a half-closed file."""
+        with self._lock:
+            if self.closed:
+                return
+            self.closed = True
+            try:
+                self._wfile.close()
+            except OSError:
+                pass
+
 
 class _RequestHandler(socketserver.StreamRequestHandler):
     """Handles one connected client: reads commands, writes acks + events."""
@@ -94,7 +106,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             api._dispatch(cmd, self._writer)
 
     def finish(self) -> None:
-        self._writer.closed = True
+        self._writer.close()
         self.server.api._unregister(self._writer)
         super().finish()
 
