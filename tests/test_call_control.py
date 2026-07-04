@@ -185,9 +185,26 @@ def test_call_connected_enables_aec_when_iris_aec_set():
     assert c.endpoint.aec is True
 
 
-def test_call_connected_aec_off_by_default():
-    """AEC is opt-in (IRIS_AEC / [audio] aec): off unless explicitly enabled —
-    loading it at startup starves the pre-call continuous-listen mic."""
+def test_call_connected_aec_on_with_zero_env_vars():
+    """AEC is default-ON (ti-wunrs): with IRIS_AEC unset the call-site default
+    wins, so the endpoint gets aec=True with zero configuration."""
+    c, events = _ctrl()
+
+    def unset(name, default=False):  # settings behavior when the key is absent
+        return default
+
+    with patch(
+        "iris.call_control.discover_sco_nodes",
+        return_value=("bluez_output.AA.1", "bluez_input.AA.0"),
+    ), patch("iris.call_control.settings.get_bool", side_effect=unset):
+        c._on_connected("call-1")
+    assert c.endpoint is not None
+    assert c.endpoint.aec is True
+
+
+def test_call_connected_aec_disabled_by_settings():
+    """AEC default is ON (ti-wunrs), but IRIS_AEC=0 / [audio] aec=false still
+    disables it — the endpoint must honor the settings gate."""
     c, events = _ctrl()
     with patch(
         "iris.call_control.discover_sco_nodes",

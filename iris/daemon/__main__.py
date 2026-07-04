@@ -263,6 +263,13 @@ def main() -> int:
         _bus=None,  # wired to ctrl._bus inside _start_dbus_components
     )
 
+    # Load the WebRTC AEC before any call can start (default ON — ti-wunrs;
+    # IRIS_AEC=0 opts out). The daemon only ever bridged an already-loaded
+    # canceller before, so proxy-mode setups without a console got no echo
+    # cancellation unless someone ran aec_audio.sh by hand.
+    if settings.get_bool("IRIS_AEC", default=True):
+        _run_aec_async("up")
+
     _start_dbus_components(ctrl, mes)
 
     _log.info("iris daemon starting (pid=%d)", os.getpid())
