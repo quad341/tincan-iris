@@ -48,10 +48,7 @@ class CallCardHost:
 
     @property
     def _disclosure_script(self) -> str:
-        try:
-            return self._cfg.call_card.disclosure_script  # type: ignore[union-attr]
-        except AttributeError:
-            return _DEFAULT_DISCLOSURE
+        return getattr(self._cfg, "call_card_disclosure_script", "") or _DEFAULT_DISCLOSURE
 
     # ── Session lifecycle ─────────────────────────────────────────────────────
 

@@ -28,6 +28,7 @@ from .policy import PolicyResolver
 from .posture import PostureManager, PostureWatcher
 from ..brain import Brain
 from ..call_control import TincanCallControl
+from ..config import load as load_config
 from ..notes import NotesStore
 from ..notify_sink import DesktopNotifySink
 from ..prefs import PreferencesStore
@@ -127,6 +128,7 @@ def main() -> int:
 
     notes = NotesStore()  # uses default ~/.local/share/iris/notes.json, NOT roster.db
     prefs = PreferencesStore()
+    cfg = load_config()
 
     # Create TCC with null emit placeholder; emit is wired after brain_host is ready.
     # Shared SessionBus is created inside ctrl.start() — MessageEventSource (ti-s9mm.4.2)
@@ -165,7 +167,7 @@ def main() -> int:
                 store=CallCardStore(),
                 processor=L1CaptureProcessor(),
                 api=None,       # patched below after api is built
-                cfg=None,
+                cfg=cfg,
             )
             engine._call_card_host = call_card_host
             _log.info("iris daemon: Call Card capture ENABLED")

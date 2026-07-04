@@ -74,3 +74,8 @@ kokoro_voice = "af_heart"       # IRIS_KOKORO_VOICE
 
 [storage]
 # log_file = ""                 # IRIS_LOG_FILE (default ~/.local/state/iris/console.log)
+
+[call_card]
+# Call Card (the on-call note-taking capture). No IRIS_* env var yet — this
+# section only resolves via config.toml or the built-in default.
+# disclosure_script = "I'm going to put you on speaker — I have an AI assistant that takes notes so I don't miss anything."

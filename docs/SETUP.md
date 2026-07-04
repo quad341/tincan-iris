@@ -74,7 +74,11 @@ whisper_model_size = "small.en"
 ```
 
 See `config.toml.example` for every section (audio, assets, voice, email,
-screening, take-message, servers, storage).
+screening, take-message, servers, storage, call_card).
+
+`[call_card]` configures Call Card's disclosure script (`disclosure_script`);
+unlike the sections above it has no `IRIS_*` env var yet — config.toml or the
+built-in default only.
 
 ## Secrets — `secrets.toml`
 

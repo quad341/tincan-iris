@@ -7,7 +7,11 @@ never handed to the cloud model (see ``docs/adr/0001``).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import tomllib
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+
+from . import settings
 
 
 # Safety invariant — NOT a config key, never moved to Config.proactive_*:
@@ -105,8 +109,45 @@ class Config:
     cadence_range: tuple[float, float] = (0.7, 1.4)
     language_detect_threshold: float = 0.80  # Whisper min confidence
 
+    # --- Call Card (ti-rnlqo). "" = CallCardHost's own built-in disclosure text.
+    call_card_disclosure_script: str = ""
+
 
 DEFAULT = Config()
+
+# config.toml ``[call_card]`` section -> Config field name. Mirrors iris/settings.py's
+# _KEYMAP convention; add a row here when a new call_card.* knob needs file-configuration.
+_CALL_CARD_KEYMAP: dict[str, str] = {
+    "disclosure_script": "call_card_disclosure_script",
+}
+
+
+def load(path: Path | None = None) -> Config:
+    """Build a Config from config.toml's ``[call_card]`` section, else DEFAULT.
+
+    Reuses :func:`iris.settings.config_path` for file resolution so IRIS_HOME /
+    IRIS_CONFIG still apply. Only ``[call_card]`` is file-configurable today —
+    every other Config field still uses its Python default (see _CALL_CARD_KEYMAP
+    to add more). Missing/unreadable/malformed files degrade to DEFAULT, same as
+    iris.settings._file_values().
+    """
+    toml_path = path or settings.config_path()
+    try:
+        data = tomllib.loads(toml_path.read_text())
+    except (FileNotFoundError, IsADirectoryError, OSError, tomllib.TOMLDecodeError):
+        return DEFAULT
+
+    section = data.get("call_card")
+    if not isinstance(section, dict):
+        return DEFAULT
+
+    overrides = {
+        field_name: section[toml_key]
+        for toml_key, field_name in _CALL_CARD_KEYMAP.items()
+        if toml_key in section
+    }
+    return replace(DEFAULT, **overrides) if overrides else DEFAULT
+
 
 _PROACTIVE_STARTUP_NOTICE = (
     "[proactive] Proactive notifications are available but disabled in v1. "
