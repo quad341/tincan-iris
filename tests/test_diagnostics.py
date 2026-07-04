@@ -215,3 +215,43 @@ def test_tail_lines_returns_last_n_lines(tmp_path):
 def test_tail_lines_missing_path_returns_empty_list(tmp_path):
     missing = tmp_path / "does-not-exist.log"
     assert diagnostics._tail_lines(str(missing), 10) == []
+
+
+# ---------------------------------------------------------------------------
+# log_path() / last_crash_bug_report() -- public accessors (ti-00jr4.2)
+# ---------------------------------------------------------------------------
+
+def test_log_path_delegates_to_internal_log_path(monkeypatch):
+    monkeypatch.setattr(diagnostics, "_log_path", lambda: "/tmp/console.log")
+    assert diagnostics.log_path() == "/tmp/console.log"
+
+
+def test_last_crash_bug_report_returns_current_module_state(monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr(diagnostics, "_last_crash_bug_report", Path("/tmp/bug-1.json"))
+    assert diagnostics.last_crash_bug_report() == Path("/tmp/bug-1.json")
+
+
+def test_last_crash_bug_report_reflects_most_recent_persist_crash_call(tmp_path, monkeypatch):
+    monkeypatch.setenv("IRIS_HOME", str(tmp_path))
+    diagnostics.set_active_app(
+        SimpleNamespace(_logf=None, _logpath=str(tmp_path / "console.log"), _last_error="")
+    )
+
+    try:
+        raise ValueError("first")
+    except ValueError as exc:
+        diagnostics.persist_crash("main", exc)
+
+    first_report = diagnostics.last_crash_bug_report()
+    assert first_report is not None
+    assert first_report.exists()
+
+    monkeypatch.setattr(diagnostics, "write_bug_report", lambda *a, **kw: None)
+    try:
+        raise ValueError("second")
+    except ValueError as exc:
+        diagnostics.persist_crash("main", exc)
+
+    assert diagnostics.last_crash_bug_report() is None
