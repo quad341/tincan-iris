@@ -60,11 +60,18 @@ class _Playback:
 
     def __init__(self, proc: subprocess.Popen) -> None:
         self._proc = proc
+        # Set before the signal is sent, so a thread blocked in wait() always
+        # observes the correct cause once its own wait() call unblocks: a
+        # caller can otherwise not tell "played to completion" apart from
+        # "cut short", which matters when finishing triggers a side effect
+        # (e.g. Call Card's disclosure_ack) that a stop must never trigger.
+        self.stopped = False
 
     def wait(self) -> None:
         self._proc.wait()
 
     def stop(self) -> None:
+        self.stopped = True
         self._proc.send_signal(signal.SIGINT)
         try:
             self._proc.wait(timeout=2)
@@ -81,12 +88,14 @@ class _MultiPlayback:
 
     def __init__(self, procs: list[subprocess.Popen]) -> None:
         self._procs = procs
+        self.stopped = False
 
     def wait(self) -> None:
         if self._procs:
             self._procs[0].wait()
 
     def stop(self) -> None:
+        self.stopped = True
         for p in self._procs:
             p.send_signal(signal.SIGINT)
         for p in self._procs:

@@ -204,6 +204,7 @@ def main() -> int:
     if os.environ.get("IRIS_CALL_CARD", "1").strip().lower() not in ("0", "false", "no", "off"):
         try:
             from .call_card_host import CallCardHost  # noqa: PLC0415
+            from iris.audio.tts import default_tts  # noqa: PLC0415
             from iris.capture.processor import L1CaptureProcessor  # noqa: PLC0415
             from iris.capture.store import CallCardStore  # noqa: PLC0415
         except ImportError as exc:
@@ -217,6 +218,7 @@ def main() -> int:
                 processor=L1CaptureProcessor(),
                 api=None,       # patched below after api is built
                 cfg=_load_call_card_config(),
+                tts=default_tts(),
             )
             engine._call_card_host = call_card_host
             _log.info("iris daemon: Call Card capture ENABLED")

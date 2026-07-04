@@ -16,14 +16,18 @@ from iris.daemon.call_card_host import _DEFAULT_DISCLOSURE, CallCardHost
 
 def _make_host():
     store = MagicMock()
+    store.get_call_card.return_value = {"disclosure_state": "pending"}
     processor = MagicMock()
     api = MagicMock()
     cfg = MagicMock()
-    return CallCardHost(store=store, processor=processor, api=api, cfg=cfg), store, api
+    tts = MagicMock()
+    return CallCardHost(store=store, processor=processor, api=api, cfg=cfg, tts=tts), store, api
 
 
 def _make_host_with_cfg(cfg):
-    return CallCardHost(store=MagicMock(), processor=MagicMock(), api=MagicMock(), cfg=cfg)
+    return CallCardHost(
+        store=MagicMock(), processor=MagicMock(), api=MagicMock(), cfg=cfg, tts=MagicMock(),
+    )
 
 
 # ---------------------------------------------------------------------------
