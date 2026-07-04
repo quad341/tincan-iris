@@ -185,6 +185,18 @@ class CallCardHost:
             )
             return
         session.start_far()
+        # Re-validate identity after start_far()'s own (possibly slow) D-Bus/PipeWire
+        # I/O: stop_session() runs on a different thread and could have torn this
+        # session down while start_far() was in flight. Corrective, not preventive —
+        # closing the lock across start_far() would block stop_session() unnecessarily.
+        with self._lock:
+            superseded = self._session is not session
+        if superseded:
+            _log.warning(
+                "CallCardHost.disclosure_ack: session %s torn down while starting "
+                "far capture — stopping orphaned CaptureSession", session_id,
+            )
+            session.stop()
 
     def disclosure_skip(self, session_id: str) -> None:
         # Operator explicitly declined — never call start_far(); far channel stays
