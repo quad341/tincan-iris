@@ -722,7 +722,16 @@ class IrisConsole(App):
                 self.query_one(IncomingCallPanel).update_countdown(remaining)
 
     def _on_daemon_event(self, ev: dict) -> None:
-        """Handle a JSON event received from DaemonProxy."""
+        """Handle a JSON event received from DaemonProxy.
+
+        SINGLE-OWNER INVARIANT: deliberately has no "call_connected" case, so
+        proxy mode never starts the console's own ride-along capture
+        (_attach_call_audio()/_begin_ride_along(), direct-mode-only — see the
+        streaming-loop handler above). Proxy mode's daemon already owns
+        capture via CallCardHost/HandlingEngine/BrainHost. Adding a
+        "call_connected" case here (e.g. to restore proxy-mode UI feedback)
+        would double audio capture unless it keeps excluding those calls.
+        """
         event_type = ev.get("event", "")
         if event_type == "incoming_call":
             self._incoming_call_id = ev.get("call_id")
