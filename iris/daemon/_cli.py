@@ -14,10 +14,10 @@ import sys
 import time
 from pathlib import Path
 
-from ._socket_path import daemon_socket_path
+from ._socket_path import daemon_pid_path, daemon_socket_path
 from .proxy import DaemonNotRunning, DaemonProxy
 
-_PID_PATH = Path.home() / ".local" / "run" / "iris" / "daemon.pid"
+_PID_PATH = daemon_pid_path()
 _LOG_PATH = Path.home() / ".local" / "state" / "iris" / "daemon.log"
 
 _NO_COLOR = os.environ.get("NO_COLOR") is not None or not sys.stdout.isatty()
@@ -75,13 +75,40 @@ def _daemon_running() -> int | None:
     return pid if _pid_alive(pid) else None
 
 
+def _probe_daemon() -> int | None:
+    """Return the pid of the daemon currently answering on the socket, or None.
+
+    A round-trip over the wire protocol, not file-existence or kill(pid, 0)
+    alone — both of those can be fooled by a stale file or a recycled pid.
+    """
+    proxy = DaemonProxy()
+    try:
+        proxy.connect()
+        ack = proxy.send({"cmd": "status"})
+    except DaemonNotRunning:
+        return None
+    finally:
+        proxy.close()
+    if not ack.get("ok"):
+        return None
+    return ack.get("state", {}).get("pid")
+
+
+def _tail_log(lines: int = 5) -> str:
+    try:
+        content = _LOG_PATH.read_text()
+    except OSError:
+        return ""
+    return "\n".join(content.splitlines()[-lines:])
+
+
 # ---------------------------------------------------------------------------
 # iris daemon start
 # ---------------------------------------------------------------------------
 
 
 def _daemon_start() -> int:
-    running_pid = _daemon_running()
+    running_pid = _probe_daemon()
     if running_pid is not None:
         _warn(f"Iris daemon is already running (pid {running_pid})")
         return 0
@@ -101,19 +128,30 @@ def _daemon_start() -> int:
         log_file.close()
         return 3
 
-    sock_path = daemon_socket_path()
     deadline = time.monotonic() + 5.0
+    seen_pid: int | None = None
     while time.monotonic() < deadline:
         time.sleep(0.1)
-        if sock_path.exists():
+        seen_pid = _probe_daemon()
+        if seen_pid is not None:
             break
-    else:
+    log_file.close()
+
+    if seen_pid is None:
         _err(f"Failed to start: socket not ready. Check {_LOG_PATH}")
-        log_file.close()
+        tail = _tail_log()
+        if tail:
+            _err(tail)
         return 3
 
-    print(f"Starting iris daemon…  {_green('✓')}  pid {proc.pid}")
-    log_file.close()
+    if seen_pid != proc.pid:
+        _err(
+            f"A different daemon (pid {seen_pid}) is already listening — "
+            f"our process (pid {proc.pid}) lost the startup race."
+        )
+        return 3
+
+    print(f"Starting iris daemon…  {_green('✓')}  pid {seen_pid}")
     return 0
 
 
@@ -186,6 +224,10 @@ def _daemon_status() -> int:
         return 3
 
     state = ack.get("state", {})
+    socket_pid = state.get("pid")
+    if socket_pid is not None and socket_pid != pid:
+        _warn(f"pid file says {pid} but socket is served by {socket_pid} (stale pid file)")
+
     posture = state.get("posture", {})
     clients = state.get("clients", 0)
     call = state.get("call", "unknown")

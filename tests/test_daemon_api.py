@@ -9,6 +9,7 @@ Covers:
 """
 from __future__ import annotations
 
+import os
 import socket
 import threading
 import time
@@ -89,6 +90,17 @@ def test_status_ack(api, tmp_sock):
         assert "state" in ack
         assert "posture" in ack["state"]
         assert "call" in ack["state"]
+    finally:
+        sock.close()
+
+
+def test_status_ack_includes_own_pid(api, tmp_sock):
+    """FR-5 (ti-qlbi0): status must include the daemon's own pid so callers can
+    verify the socket is served by the pid they believe is authoritative."""
+    rfile, wfile, sock = _connect(tmp_sock)
+    try:
+        ack = _send_recv(rfile, wfile, {"cmd": "status"})
+        assert ack["state"]["pid"] == os.getpid()
     finally:
         sock.close()
 

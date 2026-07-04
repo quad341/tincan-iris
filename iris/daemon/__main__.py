@@ -1,15 +1,17 @@
 """``python -m iris.daemon`` — start the always-on call-handling daemon (ADR-0006).
 
 The daemon:
-  1. Opens RosterStore + PostureManager
-  2. Builds PolicyResolver + HandlingEngine
-  3. Starts TincanCallControl (D-Bus call signals) + MessageEventSource (ANCS)
-  4. Starts DaemonAPI (Unix socket server)
-  5. Writes PID to ~/.local/run/iris/daemon.pid
+  1. Acquires an exclusive flock on the pid/lock file (same directory as the
+     socket, same resolver — see _socket_path.py); exits if already held
+  2. Opens RosterStore + PostureManager
+  3. Builds PolicyResolver + HandlingEngine
+  4. Starts TincanCallControl (D-Bus call signals) + MessageEventSource (ANCS)
+  5. Starts DaemonAPI (Unix socket server)
   6. Blocks on SIGTERM / SIGINT for graceful shutdown
 """
 from __future__ import annotations
 
+import fcntl
 import logging
 import os
 import signal
@@ -20,6 +22,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ._socket_path import daemon_pid_path
 from .api import DaemonAPI
 from .brain_host import BrainHost
 from .engine import HandlingEngine
@@ -39,7 +42,7 @@ if TYPE_CHECKING:
     # daemon starts without the `call-card` optional extra (NFR-03).
     from .call_card_host import CallCardHost
 
-_PID_PATH = Path.home() / ".local" / "run" / "iris" / "daemon.pid"
+_PID_PATH = daemon_pid_path()
 _LOG_PATH = Path.home() / ".local" / "state" / "iris" / "daemon.log"
 _DEFAULT_DB = Path.home() / ".local" / "share" / "iris" / "roster.db"
 _AEC_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "aec_audio.sh"
@@ -106,9 +109,37 @@ def _start_dbus_components(ctrl: object, mes: object) -> None:
         _log.warning("D-Bus unavailable — dbus_absent: %s", exc, extra={"dbus_absent": True})
 
 
-def _write_pid(path: Path) -> None:
+class _DaemonAlreadyRunning(Exception):
+    """Raised when another live process already holds the daemon's exclusivity lock."""
+
+    def __init__(self, holder_pid: str) -> None:
+        super().__init__(f"another instance holds the lock (pid {holder_pid})")
+        self.holder_pid = holder_pid
+
+
+def _acquire_exclusive_lock(path: Path):
+    """Acquire an exclusive, non-blocking flock on ``path``; write our pid on success.
+
+    Returns the open file object — keep it referenced for the process's entire
+    lifetime (do not close it). The kernel releases the lock the instant all of
+    its file descriptors close, including on crash/SIGKILL/OOM-kill, which is
+    what makes this immune to the stale-pid-file/TOCTOU class of bug.
+
+    Raises _DaemonAlreadyRunning if another live process already holds it.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(str(os.getpid()))
+    lock_file = open(path, "a+")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock_file.seek(0)
+        holder = lock_file.read().strip() or "unknown"
+        lock_file.close()
+        raise _DaemonAlreadyRunning(holder) from None
+    lock_file.truncate(0)
+    lock_file.write(str(os.getpid()))
+    lock_file.flush()
+    return lock_file
 
 
 def _remove_pid(path: Path) -> None:
@@ -119,6 +150,12 @@ def _remove_pid(path: Path) -> None:
 
 
 def main() -> int:
+    try:
+        _lock_file = _acquire_exclusive_lock(_PID_PATH)  # noqa: F841 — held for our lifetime, see docstring
+    except _DaemonAlreadyRunning as exc:
+        _log.error("iris daemon: %s — exiting", exc)
+        return 1
+
     db_path = Path(os.environ.get("IRIS_DB", str(_DEFAULT_DB)))
 
     roster = RosterStore(db_path)
@@ -214,7 +251,6 @@ def main() -> int:
 
     _start_dbus_components(ctrl, mes)
 
-    _write_pid(_PID_PATH)
     _log.info("iris daemon starting (pid=%d)", os.getpid())
 
     stop_event = threading.Event()
