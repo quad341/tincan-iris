@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 
 
 from iris.daemon._cli import (
+    _daemon_start,
     _dnd_off,
     _dnd_on,
     _dnd_until,
@@ -193,6 +194,105 @@ def test_daemon_status_not_running(capsys):
     out = capsys.readouterr().out
     assert "not running" in out.lower()
     assert "iris daemon start" in out
+
+
+# ---------------------------------------------------------------------------
+# iris daemon status: pid cross-check (ti-qlbi0)
+# ---------------------------------------------------------------------------
+
+
+def _status_ack(pid: int) -> dict:
+    return {"ok": True, "ack": "status", "state": {
+        "call": "idle", "posture": {"dnd": False, "busy": False}, "clients": 0, "pid": pid,
+    }}
+
+
+def test_daemon_status_pid_match_no_warning(capsys):
+    with patch("iris.daemon._cli._daemon_running", return_value=4242), \
+         patch("iris.daemon._cli.DaemonProxy", return_value=_make_proxy_for(_status_ack(4242))):
+        rc = daemon_main(["status"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "stale" not in out.lower()
+
+
+def test_daemon_status_pid_mismatch_warns(capsys):
+    """The exact stale/orphaned state ti-qlbi0 fixes: pid file and socket disagree."""
+    with patch("iris.daemon._cli._daemon_running", return_value=4242), \
+         patch("iris.daemon._cli.DaemonProxy", return_value=_make_proxy_for(_status_ack(9999))):
+        rc = daemon_main(["status"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "stale" in out.lower()
+    assert "4242" in out
+    assert "9999" in out
+
+
+# ---------------------------------------------------------------------------
+# iris daemon start: socket-probe pre-flight + pid-matching readiness wait (ti-qlbi0)
+# ---------------------------------------------------------------------------
+
+
+def test_daemon_start_already_running(capsys):
+    with patch("iris.daemon._cli._probe_daemon", return_value=4242):
+        rc = _daemon_start()
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "already running" in out.lower()
+    assert "4242" in out
+
+
+def test_daemon_start_success_pid_matches(tmp_path, capsys):
+    fake_proc = MagicMock()
+    fake_proc.pid = 5555
+    with patch("iris.daemon._cli._probe_daemon", side_effect=[None, 5555]), \
+         patch("iris.daemon._cli.subprocess.Popen", return_value=fake_proc), \
+         patch("iris.daemon._cli._LOG_PATH", tmp_path / "daemon.log"):
+        rc = _daemon_start()
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "5555" in out
+
+
+def test_daemon_start_pid_mismatch_fails_loudly(tmp_path, capsys):
+    """We lost the startup race: a different pid answers than the one we spawned."""
+    fake_proc = MagicMock()
+    fake_proc.pid = 5555
+    with patch("iris.daemon._cli._probe_daemon", side_effect=[None, 9999]), \
+         patch("iris.daemon._cli.subprocess.Popen", return_value=fake_proc), \
+         patch("iris.daemon._cli._LOG_PATH", tmp_path / "daemon.log"):
+        rc = _daemon_start()
+    assert rc == 3
+    out = capsys.readouterr().out
+    assert "9999" in out
+    assert "different daemon" in out.lower()
+
+
+def _instant_clock(step: float = 1.0):
+    ticks = [0.0]
+
+    def _tick() -> float:
+        ticks[0] += step
+        return ticks[0]
+
+    return _tick
+
+
+def test_daemon_start_timeout_surfaces_log_tail(tmp_path, capsys):
+    fake_proc = MagicMock()
+    fake_proc.pid = 5555
+    log_path = tmp_path / "daemon.log"
+    log_path.write_text("iris.daemon ERROR another instance holds the lock (pid 123)\n")
+    with patch("iris.daemon._cli._probe_daemon", return_value=None), \
+         patch("iris.daemon._cli.subprocess.Popen", return_value=fake_proc), \
+         patch("iris.daemon._cli._LOG_PATH", log_path), \
+         patch("iris.daemon._cli.time.sleep", lambda _s: None), \
+         patch("iris.daemon._cli.time.monotonic", side_effect=_instant_clock()):
+        rc = _daemon_start()
+    assert rc == 3
+    out = capsys.readouterr().out
+    assert "socket not ready" in out.lower()
+    assert "another instance holds the lock" in out.lower()
 
 
 # ---------------------------------------------------------------------------

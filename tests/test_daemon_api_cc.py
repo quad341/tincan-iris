@@ -1,13 +1,16 @@
 """Tests for DaemonAPI call-card command handlers (ti-rnlqo.4.1).
 
-Covers all 4 new CC commands via the socket round-trip pattern from test_daemon_api.py:
-  confirm_fact, confirm_action_item, disclosure_ack, get_call_card
+Covers all 5 CC commands via the socket round-trip pattern from test_daemon_api.py:
+  confirm_fact, confirm_action_item, disclosure_ack, disclosure_skip, get_call_card
 
 Two paths per command:
   (a) call_card_host=None  → {ok: False, error: 'call_card not configured'}
   (b) call_card_host=mock  → delegates to host, returns {ok: True}
 
 Missing-field rejection paths also tested for commands that require session_id.
+
+disclosure_skip (ti-ir12t) mirrors disclosure_ack's handler exactly — same three
+paths, same error strings — so its tests mirror disclosure_ack's below 1:1.
 """
 from __future__ import annotations
 
@@ -170,6 +173,34 @@ def test_disclosure_ack_delegates_to_host(api_with_cc, cc_host, tmp_sock):
 def test_disclosure_ack_missing_session_id(api_with_cc, tmp_sock):
     rfile, wfile, sock = _connect(tmp_sock)
     resp = _send_recv(rfile, wfile, {"cmd": "disclosure_ack"})
+    assert resp["ok"] is False
+    assert "Missing" in resp["error"]
+    sock.close()
+
+
+# ---------------------------------------------------------------------------
+# disclosure_skip (ti-ir12t)
+# ---------------------------------------------------------------------------
+
+def test_disclosure_skip_no_cc_host(api_no_cc, tmp_sock):
+    rfile, wfile, sock = _connect(tmp_sock)
+    resp = _send_recv(rfile, wfile, {"cmd": "disclosure_skip", "session_id": "s1"})
+    assert resp["ok"] is False
+    assert "call_card not configured" in resp["error"]
+    sock.close()
+
+
+def test_disclosure_skip_delegates_to_host(api_with_cc, cc_host, tmp_sock):
+    rfile, wfile, sock = _connect(tmp_sock)
+    resp = _send_recv(rfile, wfile, {"cmd": "disclosure_skip", "session_id": "s1"})
+    assert resp["ok"] is True
+    cc_host.disclosure_skip.assert_called_once_with("s1")
+    sock.close()
+
+
+def test_disclosure_skip_missing_session_id(api_with_cc, tmp_sock):
+    rfile, wfile, sock = _connect(tmp_sock)
+    resp = _send_recv(rfile, wfile, {"cmd": "disclosure_skip"})
     assert resp["ok"] is False
     assert "Missing" in resp["error"]
     sock.close()

@@ -67,13 +67,15 @@ assets once; check it all with the doctor:
 
 ```bash
 scripts/setup_whisper.sh --shared && scripts/setup_kokoro.sh --shared   # once
-iris doctor      # assets + services + config, one screen
-iris home        # out-of-call dashboard — chat to Iris
+make doctor      # assets + services + config, one screen
+make up          # bring the stack up, launch the console
 ```
 
-One `iris` command fronts everything — `iris --help` lists every subcommand
-(`iris doctor`, `iris home`, `iris console`, `iris auth gcal`, …). The legacy
-`iris-*` scripts and `python -m iris.<x>` forms still work.
+`make help` lists every dev/ops target (`make doctor`, `make console`,
+`make daemon`, `make verify`, …) — see [AGENTS.md](AGENTS.md) for the full
+command map. Each target is a thin wrapper over the `iris` umbrella CLI
+(`iris --help` lists every subcommand); the legacy `iris-*` scripts and
+`python -m iris.<x>` forms still work too.
 
 Knobs go in `$IRIS_HOME/config.toml`, credentials in `secrets.toml` (`chmod
 600`). Full walkthrough — including the email / calendar / web-search / notes
@@ -101,6 +103,7 @@ This project depends on **[tincan](https://github.com/quad341/tincan)** — see 
 
 ## More
 
+- **[Dev/ops commands](AGENTS.md)** — the `make` targets: install, lint, test, daemon, console, …
 - **[Setup & running](docs/SETUP.md)** — get Iris running, the doctor, and the email/calendar/web/notes connectors
 - **[Commands](docs/COMMANDS.md)** — what you can say (local commands + qwen skills)
 - **[Architecture](ARCHITECTURE.md)** — the loop, the dispatch layer (skills vs. LLM), the trust/capability model, pluggable providers, the tincan contract

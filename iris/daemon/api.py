@@ -21,6 +21,7 @@ Commands accepted from clients:
   confirm_fact        — operator confirms/edits a captured fact (requires call_card_host)
   confirm_action_item — operator confirms/edits an action item (requires call_card_host)
   disclosure_ack      — operator acknowledged AI disclosure (requires call_card_host)
+  disclosure_skip     — operator explicitly declined AI disclosure (requires call_card_host)
   get_call_card       — return current call card snapshot (requires call_card_host)
 """
 from __future__ import annotations
@@ -71,6 +72,18 @@ class _ClientWriter:
                 self.closed = True
                 return False
 
+    def close(self) -> None:
+        """Mark closed and close the underlying file under the same lock write()
+        uses, so an in-flight write can never observe a half-closed file."""
+        with self._lock:
+            if self.closed:
+                return
+            self.closed = True
+            try:
+                self._wfile.close()
+            except OSError:
+                pass
+
 
 class _RequestHandler(socketserver.StreamRequestHandler):
     """Handles one connected client: reads commands, writes acks + events."""
@@ -94,7 +107,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             api._dispatch(cmd, self._writer)
 
     def finish(self) -> None:
-        self._writer.closed = True
+        self._writer.close()
         self.server.api._unregister(self._writer)
         super().finish()
 
@@ -216,6 +229,8 @@ class DaemonAPI:
             self._handle_confirm_action_item(cmd, writer)
         elif kind == "disclosure_ack":
             self._handle_disclosure_ack(cmd, writer)
+        elif kind == "disclosure_skip":
+            self._handle_disclosure_skip(cmd, writer)
         elif kind == "get_call_card":
             self._handle_get_call_card(cmd, writer)
         else:
@@ -237,17 +252,21 @@ class DaemonAPI:
             writer.write({"ack": "choose", "ok": False, "error": str(exc)})
 
     def _handle_dnd(self, cmd: dict, writer: _ClientWriter) -> None:
-        # Write ack BEFORE mutating posture so the ack arrives before any
-        # posture broadcast event on the same connection.
+        # Mutate posture state BEFORE writing the ack (so effective() already
+        # reflects the change the instant the ack arrives), then persist+
+        # broadcast AFTER the ack (so the ack still precedes the posture
+        # broadcast event on the same connection). See ti-v6lc6/ti-7hwcu.
         action = cmd.get("action", "")
         if action == "on":
+            snapshot = self._posture._set_dnd_state("manual")
             writer.write({"ack": "dnd", "ok": True,
                           "posture": {"dnd": True, "expires_in_s": None}})
-            self._posture.set_dnd("manual")
+            self._posture._finish_dnd_change(snapshot)
         elif action == "off":
+            snapshot = self._posture._clear_dnd_state()
             writer.write({"ack": "dnd", "ok": True,
                           "posture": {"dnd": False, "expires_in_s": None}})
-            self._posture.clear_dnd()
+            self._posture._finish_dnd_change(snapshot)
         elif action == "until":
             until = cmd.get("until")
             if not isinstance(until, (int, float)):
@@ -255,9 +274,10 @@ class DaemonAPI:
                               "error": "'until' must be a Unix timestamp (number)"})
                 return
             expires_in = max(0.0, float(until) - time.time())
+            snapshot = self._posture._set_dnd_state("manual", expires=float(until))
             writer.write({"ack": "dnd", "ok": True,
                           "posture": {"dnd": True, "expires_in_s": expires_in}})
-            self._posture.set_dnd("manual", expires=float(until))
+            self._posture._finish_dnd_change(snapshot)
         else:
             writer.write({"ack": "dnd", "ok": False,
                           "error": f"Unknown DND action: {action!r}. Use on, off, or until."})
@@ -276,6 +296,7 @@ class DaemonAPI:
                 "call":    call_state,
                 "posture": {"dnd": eff["dnd"], "busy": eff["busy"]},
                 "clients": self.client_count(),
+                "pid":     os.getpid(),
             },
         })
 
@@ -345,6 +366,17 @@ class DaemonAPI:
             return
         self._call_card_host.disclosure_ack(session_id)  # type: ignore[attr-defined]
         writer.write({"ack": "disclosure_ack", "ok": True})
+
+    def _handle_disclosure_skip(self, cmd: dict, writer: _ClientWriter) -> None:
+        if self._call_card_host is None:
+            writer.write({"ack": "disclosure_skip", "ok": False, "error": "call_card not configured"})
+            return
+        session_id = cmd.get("session_id", "")
+        if not session_id:
+            writer.write({"ack": "disclosure_skip", "ok": False, "error": "Missing session_id"})
+            return
+        self._call_card_host.disclosure_skip(session_id)  # type: ignore[attr-defined]
+        writer.write({"ack": "disclosure_skip", "ok": True})
 
     def _handle_get_call_card(self, cmd: dict, writer: _ClientWriter) -> None:
         if self._call_card_host is None:

@@ -1,7 +1,9 @@
 """Unit tests for CallCardStore (ti-rnlqo.3.1)."""
 from __future__ import annotations
 
+import sqlite3
 import threading
+import time
 
 import pytest
 
@@ -119,6 +121,87 @@ def test_mark_disclosure_ack(store):
     store.mark_disclosure_ack("sess-1")
     card = store.get_call_card("sess-1")
     assert card["disclosure_ack"] is True
+    assert card["disclosure_state"] == "disclosed"
+
+
+def test_disclosure_state_defaults_to_pending(store):
+    store.load_or_create("sess-1", "+15550000")
+    card = store.get_call_card("sess-1")
+    assert card["disclosure_state"] == "pending"
+    assert card["disclosure_ack"] is False
+
+
+def test_mark_disclosure_skipped(store):
+    store.load_or_create("sess-1", "+15550000")
+    store.mark_disclosure_skipped("sess-1")
+    card = store.get_call_card("sess-1")
+    assert card["disclosure_state"] == "skipped"
+    # skip is not an ack -- the boolean field stays false, distinct from disclosed.
+    assert card["disclosure_ack"] is False
+
+
+def test_mark_disclosure_ack_then_skipped_last_write_wins(store):
+    # Not a realistic call flow (real code only calls one or the other), but pins
+    # down that the two writers don't share hidden state beyond the row itself.
+    store.load_or_create("sess-1", "+15550000")
+    store.mark_disclosure_ack("sess-1")
+    store.mark_disclosure_skipped("sess-1")
+    card = store.get_call_card("sess-1")
+    assert card["disclosure_state"] == "skipped"
+    assert card["disclosure_ack"] is True  # mark_disclosure_skipped never clears it
+
+
+def test_migrate_disclosure_state_backfills_pre_existing_db(tmp_path):
+    """A call_cards.db created before ti-ir12t has no disclosure_state column.
+
+    Opening it via CallCardStore must add the column and backfill existing
+    disclosure_ack=1 rows to disclosure_state='disclosed', so the two fields
+    never disagree after the upgrade.
+    """
+    db_path = tmp_path / "legacy_call_cards.db"
+
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE call_cards (
+            session_id        TEXT PRIMARY KEY,
+            caller_number     TEXT,
+            contact_id        TEXT,
+            context_notes     TEXT,
+            disclosure_ack    INTEGER DEFAULT 0,
+            disclosure_ack_ts REAL,
+            enrichment_done   INTEGER DEFAULT 0,
+            started_at        REAL,
+            ended_at          REAL,
+            created_at        REAL NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO call_cards (session_id, caller_number, disclosure_ack, created_at) "
+        "VALUES (?, ?, ?, ?)",
+        ("legacy-acked", "+15550000", 1, time.time()),
+    )
+    conn.execute(
+        "INSERT INTO call_cards (session_id, caller_number, disclosure_ack, created_at) "
+        "VALUES (?, ?, ?, ?)",
+        ("legacy-never-acked", "+15550001", 0, time.time()),
+    )
+    conn.commit()
+    conn.close()
+
+    store = CallCardStore(db_path)  # triggers _migrate_disclosure_state() on open
+
+    cols = {r["name"] for r in store._conn.execute("PRAGMA table_info(call_cards)").fetchall()}
+    assert "disclosure_state" in cols
+
+    acked = store.get_call_card("legacy-acked")
+    assert acked["disclosure_state"] == "disclosed"
+    assert acked["disclosure_ack"] is True
+
+    never_acked = store.get_call_card("legacy-never-acked")
+    assert never_acked["disclosure_state"] == "pending"
+    assert never_acked["disclosure_ack"] is False
 
 
 def test_thread_safety_concurrent_add_facts(store):
