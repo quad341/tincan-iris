@@ -47,6 +47,7 @@ from ..prefs import PreferencesStore
 from . import diagnostics
 from .contacts import ContactsScreen
 from .contacts_logic import VERB_DESCRIPTION
+from .help_screen import HelpScreen
 from .list_view import PostCallListView
 from .call_card import CallCardPanel
 from ..audio.endpoint import default_endpoint
@@ -387,6 +388,7 @@ class IrisConsole(App):
     """
 
     BINDINGS = [
+        Binding("question_mark", "help", "help"),
         Binding("space", "talk", "talk/stop", priority=True),
         Binding("l", "listen", "hear you"),
         Binding("L", "list_panel", "list"),
@@ -489,6 +491,7 @@ class IrisConsole(App):
         self._w(f"[dim]STT: {self.stt.name} · TTS: {self.tts.name} · (I'm an AI.)[/]")
         if self._logpath:
             self._w(f"[dim]session log → {self._logpath}[/]")
+        self._w("[dim]press [?] for help[/]")
         if not self.stt.available():
             self._w("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
         self.set_interval(0.05, self._drain)
@@ -1122,6 +1125,10 @@ class IrisConsole(App):
             self.query_one("#log", RichLog).focus()
             log.write("[dim]⟨list panel hidden⟩[/]")
 
+    def action_help(self) -> None:
+        """Open the [?] help screen — the universal 'how do I use this' key."""
+        self.push_screen(HelpScreen(self._logpath))
+
     def action_contacts(self) -> None:
         """Open the full-width Contacts management panel ([K])."""
         self.push_screen(ContactsScreen(self._roster))
@@ -1289,6 +1296,13 @@ class IrisConsole(App):
             return self._incoming_call_id is not None
         if action == "copy_last":
             return bool(self._last_iris_reply)
+        if action == "quit":
+            # HelpScreen's own "q" is priority=True (matches ContactsScreen's
+            # convention); Textual's priority-binding dispatch checks the App
+            # before the Screen, so without this gate "q" would quit the app
+            # instead of closing help. Suppressing "quit" here falls through
+            # to HelpScreen's own binding in the same priority pass.
+            return not isinstance(self.screen, HelpScreen)
         return True
 
     def _send_choose(self, index: int) -> None:
