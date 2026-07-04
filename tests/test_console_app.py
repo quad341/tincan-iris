@@ -943,3 +943,95 @@ def test_main_returns_zero_when_return_code_is_none():
         result = app_module.main()
 
     assert result == 0
+
+
+# ---------------------------------------------------------------------------
+# _crash_exit_message() -- stderr block text, with/without bug report (ti-00jr4.2)
+# ---------------------------------------------------------------------------
+
+def test_crash_exit_message_includes_bug_report_when_present():
+    from pathlib import Path
+    from unittest.mock import patch
+
+    with patch(
+        "iris.console.app.diagnostics.log_path", return_value="/tmp/x/console.log",
+    ), patch(
+        "iris.console.app.diagnostics.last_crash_bug_report",
+        return_value=Path("/tmp/x/bug-reports/bug-123.json"),
+    ):
+        msg = app_module._crash_exit_message()
+
+    assert msg == (
+        "Iris crashed — sorry about that.\n"
+        "  Log (just appended):   /tmp/x/console.log\n"
+        "  Bug report:            /tmp/x/bug-reports/bug-123.json\n"
+        "  Retry:                 python -m iris.console"
+    )
+
+
+def test_crash_exit_message_omits_bug_report_line_when_none():
+    from unittest.mock import patch
+
+    with patch(
+        "iris.console.app.diagnostics.log_path", return_value="/tmp/x/console.log",
+    ), patch(
+        "iris.console.app.diagnostics.last_crash_bug_report", return_value=None,
+    ):
+        msg = app_module._crash_exit_message()
+
+    assert msg == (
+        "Iris crashed — sorry about that.\n"
+        "  Log (just appended):   /tmp/x/console.log\n"
+        "  Retry:                 python -m iris.console"
+    )
+    assert "Bug report:" not in msg
+
+
+# ---------------------------------------------------------------------------
+# main() -- crash-exit stderr print gated strictly on truthy return_code (ti-00jr4.2)
+# ---------------------------------------------------------------------------
+
+def test_main_prints_crash_exit_message_when_return_code_truthy(capsys):
+    from unittest.mock import MagicMock, patch
+
+    fake_app = MagicMock()
+    fake_app.return_code = 1
+
+    with patch("iris.console.app.diagnostics.install_exception_hooks"), patch(
+        "iris.console.app.diagnostics.set_active_app",
+    ), patch(
+        "iris.console.app.diagnostics.clear_active_app",
+    ), patch(
+        "iris.console.app.IrisConsole", return_value=fake_app,
+    ), patch(
+        "iris.console.app._crash_exit_message", return_value="CRASH MESSAGE",
+    ):
+        result = app_module.main()
+
+    captured = capsys.readouterr()
+    assert captured.err == "CRASH MESSAGE\n"
+    assert captured.out == ""
+    assert result == 1
+
+
+def test_main_does_not_print_crash_exit_message_on_clean_exit(capsys):
+    from unittest.mock import MagicMock, patch
+
+    fake_app = MagicMock()
+    fake_app.return_code = None
+
+    with patch("iris.console.app.diagnostics.install_exception_hooks"), patch(
+        "iris.console.app.diagnostics.set_active_app",
+    ), patch(
+        "iris.console.app.diagnostics.clear_active_app",
+    ), patch(
+        "iris.console.app.IrisConsole", return_value=fake_app,
+    ), patch(
+        "iris.console.app._crash_exit_message",
+    ) as mock_msg:
+        result = app_module.main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    mock_msg.assert_not_called()
+    assert result == 0
