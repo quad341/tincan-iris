@@ -237,17 +237,21 @@ class DaemonAPI:
             writer.write({"ack": "choose", "ok": False, "error": str(exc)})
 
     def _handle_dnd(self, cmd: dict, writer: _ClientWriter) -> None:
-        # Write ack BEFORE mutating posture so the ack arrives before any
-        # posture broadcast event on the same connection.
+        # Mutate posture state BEFORE writing the ack (so effective() already
+        # reflects the change the instant the ack arrives), then persist+
+        # broadcast AFTER the ack (so the ack still precedes the posture
+        # broadcast event on the same connection). See ti-v6lc6/ti-7hwcu.
         action = cmd.get("action", "")
         if action == "on":
+            snapshot = self._posture._set_dnd_state("manual")
             writer.write({"ack": "dnd", "ok": True,
                           "posture": {"dnd": True, "expires_in_s": None}})
-            self._posture.set_dnd("manual")
+            self._posture._finish_dnd_change(snapshot)
         elif action == "off":
+            snapshot = self._posture._clear_dnd_state()
             writer.write({"ack": "dnd", "ok": True,
                           "posture": {"dnd": False, "expires_in_s": None}})
-            self._posture.clear_dnd()
+            self._posture._finish_dnd_change(snapshot)
         elif action == "until":
             until = cmd.get("until")
             if not isinstance(until, (int, float)):
@@ -255,9 +259,10 @@ class DaemonAPI:
                               "error": "'until' must be a Unix timestamp (number)"})
                 return
             expires_in = max(0.0, float(until) - time.time())
+            snapshot = self._posture._set_dnd_state("manual", expires=float(until))
             writer.write({"ack": "dnd", "ok": True,
                           "posture": {"dnd": True, "expires_in_s": expires_in}})
-            self._posture.set_dnd("manual", expires=float(until))
+            self._posture._finish_dnd_change(snapshot)
         else:
             writer.write({"ack": "dnd", "ok": False,
                           "error": f"Unknown DND action: {action!r}. Use on, off, or until."})
