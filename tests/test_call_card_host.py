@@ -193,3 +193,37 @@ def test_disclosure_script_falls_back_to_default_when_cfg_lacks_attribute():
 def test_disclosure_script_falls_back_to_default_when_cfg_is_none():
     host = _make_host_with_cfg(None)
     assert host._disclosure_script == _DEFAULT_DISCLOSURE
+
+
+# ---------------------------------------------------------------------------
+# Empty call id from tincand (ti-wunrs live finding, 2026-07-04)
+# ---------------------------------------------------------------------------
+
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_start_session_mints_id_when_tincand_gives_none(mock_session_cls):
+    """tincand's CallConnected carries no call id (tincan-xbtct gap): outbound
+    calls arrive with session_id="". The host must mint a real id — an empty id
+    broke every downstream ack (the API rejects disclosure_ack without one), so
+    the far channel could never start (found live, 2026-07-04)."""
+    host, store, api = _make_host()
+    host.start_session("", "+18155550100")
+    started = [c.args[0] for c in api.broadcast.call_args_list
+               if c.args[0].get("event") == "call_card_started"]
+    assert started and started[0]["session_id"], "broadcast must carry a minted id"
+    assert host._session_id, "host must track the minted id"
+
+
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_empty_id_resolves_to_active_session_for_ack_and_stop(mock_session_cls):
+    """disclosure_ack('') and stop_session('') act on the active session — the
+    CallEnded signal carries no id either."""
+    host, store, api = _make_host()
+    host.start_session("", "+18155550100")
+    minted = host._session_id
+    host.disclosure_ack("")
+    mock_session_cls.return_value.start_far.assert_called_once()
+    host.stop_session("")
+    assert host._session is None
+    ended = [c.args[0] for c in api.broadcast.call_args_list
+             if c.args[0].get("event") == "call_card_ended"]
+    assert ended and ended[0]["session_id"] == minted

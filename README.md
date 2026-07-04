@@ -85,9 +85,9 @@ connectors and how qwen uses them — in **[docs/SETUP.md](docs/SETUP.md)**.
 
 **v1 is built and running** — and has already held real, **disclosed** phone calls.
 
-**Shipped:** streaming STT (Whisper) + Kokoro TTS · the tiered local-first brain (rules → local Qwen → Haiku on escalation) · skill/LLM dispatch · call control + spoken AI disclosure · calendar (OAuth) · web search · notes & scratchpad · conversation context (rolling window + compressed gist) · the **operator console** (Textual) · the DEMO/FULL **trust model** · SCO call-audio tap with echo-cancellation. *(341 tests, CI-green.)*
+**Shipped:** streaming STT (Whisper) + Kokoro TTS · the tiered local-first brain (rules → local Qwen → Haiku on escalation) · skill/LLM dispatch · call control + spoken AI disclosure · **Call Card** — deterministic live-call capture (facts, commitments, follow-ups) with the ride-along review flow ([ADR-0006](docs/adr/0006-call-handling-model.md)) · calendar (OAuth) · web search · notes & scratchpad · conversation context (rolling window + compressed gist) · the **operator console** (Textual) · the DEMO/FULL **trust model** · SCO call-audio tap with echo-cancellation. *(Heavily tested — the suite gates every merge in CI.)*
 
-**In progress / next:** echo-cancelled **Discord / virtual-audio** calling (beyond SCO) · **proactive** delivery (built, shipped *disabled* — pending the “don't talk over either party” design) · the memory layer's semantic-recall design ([issue #8](https://github.com/quad341/tincan-iris/issues/8)).
+**In progress / next:** Call Card AFTER-stage (recap generation, review UX, capture data layer) · **reliability baseline with tincan** — daemon-owned call audio (`im.tincan.CallAudio`) and gated echo cancellation, replacing iris's hand-rolled SCO routing · **proactive** delivery (built, shipped *disabled* — pending the “don't talk over either party” design) · the memory layer's semantic-recall design ([issue #8](https://github.com/quad341/tincan-iris/issues/8)).
 
 ## Principles
 

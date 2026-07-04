@@ -1126,3 +1126,52 @@ def test_main_does_not_print_crash_exit_message_on_clean_exit(capsys):
     assert captured.err == ""
     mock_msg.assert_not_called()
     assert result == 0
+
+
+# --- console/daemon capture single-ownership invariant (ti-1fpil) -----------
+
+
+def test_daemon_event_call_connected_does_not_start_ride_along_capture():
+    """Regression guard (ti-1fpil): proxy mode's _on_daemon_event has no
+    "call_connected" case today — the daemon (CallCardHost/HandlingEngine/
+    BrainHost) already owns audio capture there. Feeding a synthetic
+    daemon_event call_connected through the event-drain path must NOT
+    double-start the console's own ride-along capture."""
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._attach_call_audio = MagicMock()
+            app._begin_ride_along = MagicMock()
+            app.events.put(("daemon_event", {"event": "call_connected"}))
+            app._drain()
+            app._attach_call_audio.assert_not_called()
+            app._begin_ride_along.assert_not_called()
+            assert app._stream is None
+            assert app._far_stream is None
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_direct_call_connected_still_starts_ride_along_capture():
+    """Contrast for the guard above: the DIRECT-mode call_connected branch
+    (dispatched via kind == "call_connected", not routed through
+    daemon_event) is the single owner of ride-along capture and must still
+    call _attach_call_audio/_begin_ride_along — proving the guard above is a
+    meaningful regression check, not a tautology."""
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._attach_call_audio = MagicMock()
+            app._begin_ride_along = MagicMock()
+            app.events.put(("call_connected",))
+            app._drain()
+            app._attach_call_audio.assert_called_once()
+            app._begin_ride_along.assert_called_once()
+            await pilot.press("q")
+
+    asyncio.run(scenario())

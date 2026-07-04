@@ -289,7 +289,7 @@ class TincanSCOAudio(VirtualDeviceAudio):
     instead, which is the reference input for PipeWire's WebRTC echo-canceller.
     Push-to-talk then captures from ``iris_aec_src`` (the cleaned mic: Iris's voice
     subtracted).  Result: the operator can address Iris over open speakers without
-    echo.  Enabled via ``IRIS_AEC=1`` in the environment.
+    echo.  Default ON (ti-wunrs); disable via ``IRIS_AEC=0``.
 
     This is **media only** — it knows nothing about ringing, answering, or call
     state. Signaling lives in tincan's ``im.tincan.Calls`` D-Bus interface
@@ -521,7 +521,7 @@ def default_endpoint() -> AudioEndpoint:
                 "tincan-sco: no HFP/SCO sink found — is a call active on the dongle? "
                 "Set IRIS_SCO_SINK / IRIS_SCO_SOURCE to override."
             )
-        aec = settings.get_bool("IRIS_AEC")
+        aec = settings.get_bool("IRIS_AEC", default=True)
         return TincanSCOAudio(sink, source, aec=aec)
     if (settings.get("IRIS_AUDIO", "") or "").lower() == "loopback":
         # No-hardware test/dev seam (§7). Far-party fixtures + the uplink dir come

@@ -84,7 +84,7 @@ class TincanCallControl:
 
         The SCO PipeWire nodes appear when the call's audio transport comes up,
         which can lag the signal slightly, so retry discovery briefly. AEC is
-        enabled per ``IRIS_AEC`` so the console's ride-along is echo-free.
+        default ON per ``IRIS_AEC`` (ti-wunrs) so the ride-along is echo-free.
         """
         sink = source = None
         for attempt in range(max(1, self._discover_tries)):
@@ -95,7 +95,7 @@ class TincanCallControl:
                 time.sleep(self._discover_delay)
         if sink:
             self.endpoint = TincanSCOAudio(
-                sink, source, aec=settings.get_bool("IRIS_AEC")
+                sink, source, aec=settings.get_bool("IRIS_AEC", default=True)
             )
         self.emit(("call_connected", sink, source))
 

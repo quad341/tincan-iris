@@ -391,21 +391,21 @@ class IrisConsole(App):
     BINDINGS = [
         Binding("question_mark", "help", "help"),
         Binding("space", "talk", "talk/stop", priority=True),
-        Binding("l", "listen", "hear you"),
+        Binding("l", "listen", "hear"),
         Binding("L", "list_panel", "list"),
-        Binding("V", "call_card_panel", "call card"),
-        Binding("f", "far", "hear them"),
+        Binding("V", "call_card_panel", "card"),
+        Binding("f", "far", "far"),
         Binding("g", "grant", "grant", priority=True),
         Binding("a", "approve", "approve"),
-        Binding("i", "interrupt", "interrupt", priority=True),
+        Binding("i", "interrupt", "stop", priority=True),
         Binding("m", "mute", "mute"),
         Binding("d", "toggle_dnd", "dnd", show=False),
         Binding("n", "notification", "next notif", show=False),
-        Binding("c", "commands", "commands"),
+        Binding("c", "commands", "cmds"),
         Binding("y", "copy_last", "copy reply", show=False),
         Binding("e", "copy_last_error", "copy error", show=False),
         Binding("b", "file_bug", "file a bug"),
-        Binding("K", "contacts", "contacts"),
+        Binding("K", "contacts", "book"),
         Binding("q", "quit", "quit", priority=True),
         Binding("1", "choose_1", "put through", show=False),
         Binding("2", "choose_2", "take message", show=False),
@@ -799,18 +799,24 @@ class IrisConsole(App):
         return proc.returncode == 0
 
     def _ensure_aec_up(self) -> None:
-        """Load the WebRTC AEC once at startup when ``IRIS_AEC`` is set.
+        """Load the WebRTC AEC at startup — default ON, ``IRIS_AEC=0`` to disable.
 
-        Opt-in, NOT default-on: loading module-echo-cancel grabs the mic as its
-        ALSA source_master, which starves the pre-call continuous-listen capture
-        (it reads the same default mic) — so AEC must be enabled deliberately, per
-        ``[audio] aec = true`` / ``IRIS_AEC=1``, not forced on at startup.
+        Echo cancellation is the make-or-break requirement of the whole stack
+        (ti-wunrs): without it the far party hears themselves. Default-on is
+        safe *because this runs before any capture starts*: the historical
+        mic-contention (module-echo-cancel grabbing the mic as source_master
+        and starving a continuous-listen capture) only bites captures opened
+        BEFORE the module loads — at startup none exist yet, and every later
+        capture reads the new default source (``iris_aec_src``), which is the
+        echo-cancelled mic.
 
         Keeping it always-loaded (not per-call) is the ti-veyx design: the
-        canceller is harmless when idle / on a headset and avoids a module load on
-        every call. A second ``up`` just no-ops.
+        canceller is harmless when idle / on a headset and avoids a module load
+        on every call. A second ``up`` just no-ops. Opt out with
+        ``[audio] aec = false`` / ``IRIS_AEC=0`` (e.g. dedicated-headset rigs
+        that want the raw mic).
         """
-        if settings.get_bool("IRIS_AEC"):
+        if settings.get_bool("IRIS_AEC", default=True):
             self._aec("up")
 
     def _attach_call_audio(self) -> None:
@@ -969,7 +975,7 @@ class IrisConsole(App):
         # Audio mode label (startup-time env var)
         if _os.environ.get("IRIS_VA_AEC"):
             parts.append("[dim]AEC[/]")
-        elif _os.environ.get("IRIS_AEC"):
+        elif settings.get_bool("IRIS_AEC", default=True):
             parts.append("[dim]HEADSET[/]")
         else:
             parts.append("[dim]SPEAKERS[/]")
