@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import uuid
 from dataclasses import asdict
 
 from iris.capture.processor import L1CaptureProcessor
@@ -57,6 +58,14 @@ class CallCardHost:
     # ── Session lifecycle ─────────────────────────────────────────────────────
 
     def start_session(self, session_id: str, caller_number: str) -> None:
+        # tincand's CallConnected signal carries no call id yet (client-contract
+        # gap, tincan-xbtct), so outbound calls arrive here with session_id="".
+        # An empty id broke the whole DURING flow: broadcasts carried "", and the
+        # API rejects disclosure_ack without a session_id, so the far channel
+        # could never start (found live, 2026-07-04). Mint one instead.
+        if not session_id:
+            session_id = f"call-{uuid.uuid4().hex[:8]}"
+            _log.info("CallCardHost.start_session: no call id from tincand — minted %s", session_id)
         with self._lock:
             if self._session is not None:
                 _log.warning(
@@ -91,6 +100,9 @@ class CallCardHost:
 
     def stop_session(self, session_id: str) -> None:
         with self._lock:
+            # Empty id = "the active session" — CallEnded carries no id either.
+            if not session_id:
+                session_id = self._session_id or ""
             if self._session is None or self._session_id != session_id:
                 _log.warning(
                     "CallCardHost.stop_session: no active session matching %s", session_id
@@ -175,6 +187,10 @@ class CallCardHost:
         self._store.confirm_action_item(item_id, confirmed, description, due_date)
 
     def disclosure_ack(self, session_id: str) -> None:
+        with self._lock:
+            # Empty id = "the active session" (see start_session id minting).
+            if not session_id:
+                session_id = self._session_id or ""
         self._store.mark_disclosure_ack(session_id)
         with self._lock:
             session = self._session
@@ -201,6 +217,9 @@ class CallCardHost:
     def disclosure_skip(self, session_id: str) -> None:
         # Operator explicitly declined — never call start_far(); far channel stays
         # off for the rest of this call (ti-ir12t hard-gate).
+        with self._lock:
+            if not session_id:  # empty id = the active session (see start_session)
+                session_id = self._session_id or ""
         self._store.mark_disclosure_skipped(session_id)
 
     def get_call_card(self, session_id: str | None = None) -> dict:
