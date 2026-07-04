@@ -67,6 +67,12 @@ kokoro_voice = "af_heart"       # IRIS_KOKORO_VOICE
 # msg_s  = 30                   # IRIS_TM_MSG_S
 # add_s  = 10                   # IRIS_TM_ADD_S
 
+[call_card]
+# Consent-gate script shown/spoken before Call Card capture starts. Omit to
+# use the built-in default ("I'm going to put you on speaker — I have an AI
+# assistant that takes notes so I don't miss anything.").
+# disclosure_script = "..."     # IRIS_CALL_CARD_DISCLOSURE_SCRIPT
+
 [servers]
 # Local model server URLs (only when STT/TTS run as HTTP servers).
 # stt_url = "http://127.0.0.1:8082"   # IRIS_STT_SERVER_URL

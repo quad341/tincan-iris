@@ -39,6 +39,13 @@ class Config:
     # --- Operator identity (used in disclosure script and ring announcements).
     operator_name: str = ""  # e.g. "Jim" — first name only; blank disables personalisation
 
+    # --- Call Card disclosure (the consent-gate script shown/spoken before
+    # capture starts; see iris/daemon/call_card_host.py). Empty string means
+    # "use the built-in default script" (_DEFAULT_DISCLOSURE in
+    # call_card_host.py) — distinct from the auto-answer TTS disclosure in
+    # iris/disclosure.py, which is a separate flow.
+    call_card_disclosure_script: str = ""
+
     # --- Screening (handling_rule='screen'). relay_timeout_secs: how long Iris
     # waits for the operator to decide before auto-pivoting to take_message.
     screening_relay_timeout_secs: float = 20.0

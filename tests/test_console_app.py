@@ -5,6 +5,7 @@ so no pytest-async plugin is needed."""
 from __future__ import annotations
 
 import asyncio
+import stat
 
 import pytest
 
@@ -12,6 +13,7 @@ pytest.importorskip("textual")
 
 from textual.widgets import Button  # noqa: E402
 
+import iris.console.app as app_module  # noqa: E402
 from iris.console.app import ActiveCallCard, IrisConsole, _GRANT  # noqa: E402
 from iris.console.call_card import DisclosureAcknowledged, DisclosureSkipped  # noqa: E402
 from iris.console.conductor import State  # noqa: E402
@@ -684,6 +686,265 @@ def test_iris_statement_does_not_open_answer_window():
             await pilot.press("q")
 
     asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# _open_log() — append + single-generation size-triggered rotation (ti-oqlyk)
+# ---------------------------------------------------------------------------
+
+def test_open_log_creates_fresh_file_with_delimiter(tmp_path, monkeypatch):
+    log_path = tmp_path / "console.log"
+    monkeypatch.setenv("IRIS_LOG_FILE", str(log_path))
+
+    f, path = app_module._open_log()
+    f.close()
+
+    assert path == str(log_path)
+    assert stat.S_IMODE(log_path.stat().st_mode) == 0o600
+    assert "=== session start:" in log_path.read_text()
+
+
+def test_open_log_appends_under_threshold_no_rotation(tmp_path, monkeypatch):
+    log_path = tmp_path / "console.log"
+    log_path.write_text("prior session content\n")
+    monkeypatch.setenv("IRIS_LOG_FILE", str(log_path))
+    monkeypatch.setenv("IRIS_LOG_MAX_BYTES", "1000000")
+
+    f, _path = app_module._open_log()
+    f.close()
+
+    assert not (tmp_path / "console.log.1").exists()
+    content = log_path.read_text()
+    assert "prior session content" in content
+    assert "=== session start:" in content
+
+
+def test_open_log_rotates_when_over_threshold(tmp_path, monkeypatch):
+    log_path = tmp_path / "console.log"
+    log_path.write_text("old content that is now oversized\n")
+    monkeypatch.setenv("IRIS_LOG_FILE", str(log_path))
+    monkeypatch.setenv("IRIS_LOG_MAX_BYTES", "5")  # anything non-trivial exceeds this
+
+    f, _path = app_module._open_log()
+    f.close()
+
+    backup = tmp_path / "console.log.1"
+    assert backup.exists()
+    assert "old content that is now oversized" in backup.read_text()
+    fresh_content = log_path.read_text()
+    assert "old content" not in fresh_content  # rotated out, not carried over
+    assert "=== session start:" in fresh_content
+
+
+# ---------------------------------------------------------------------------
+# _copy_text_to_clipboard() — OSC52 always + subprocess additive (ti-oqlyk)
+# ---------------------------------------------------------------------------
+
+def test_copy_clipboard_runs_subprocess_even_when_osc52_succeeds():
+    from unittest.mock import MagicMock, patch
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app.copy_to_clipboard = MagicMock()  # OSC52 "succeeds" (no exception raised)
+            with patch("iris.console.app.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0)  # `which wl-copy` found + copy ok
+                app._copy_text_to_clipboard("hello")
+
+            app.copy_to_clipboard.assert_called_once_with("hello")
+            # No delivery ack exists for OSC52 -- the subprocess attempt must not be
+            # skipped just because copy_to_clipboard() didn't raise.
+            assert mock_run.call_count == 2
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_copy_clipboard_missing_binaries_still_notifies_best_effort():
+    from unittest.mock import MagicMock, patch
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app.copy_to_clipboard = MagicMock()
+            app.notify = MagicMock()
+            with patch("iris.console.app.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=1)  # every `which` check fails
+                app._copy_text_to_clipboard("hello")
+
+            app.notify.assert_called_once_with("Copied (best-effort).", severity="information")
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# action_copy_last_error() / action_file_bug() (ti-oqlyk)
+# ---------------------------------------------------------------------------
+
+def test_action_copy_last_error_nothing_yet_warns():
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._last_error = ""
+            app.notify = MagicMock()
+            app._copy_text_to_clipboard = MagicMock()
+            app.action_copy_last_error()
+            app.notify.assert_called_once_with("No error to copy yet.", severity="warning")
+            app._copy_text_to_clipboard.assert_not_called()
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_action_copy_last_error_copies_when_present():
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._last_error = "Traceback: boom"
+            app._copy_text_to_clipboard = MagicMock()
+            app.action_copy_last_error()
+            app._copy_text_to_clipboard.assert_called_once_with("Traceback: boom")
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_action_file_bug_success_notifies_path():
+    from pathlib import Path
+    from unittest.mock import MagicMock, patch
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app.notify = MagicMock()
+            fake_path = Path("/tmp/bug-123.json")
+            with patch(
+                "iris.console.app.diagnostics.write_bug_report", return_value=fake_path,
+            ) as mock_write:
+                app.action_file_bug()
+            mock_write.assert_called_once_with("manual")
+            app.notify.assert_called_once_with(
+                f"Bug report written: {fake_path}", severity="information"
+            )
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_action_file_bug_failure_notifies_error():
+    from unittest.mock import MagicMock, patch
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app.notify = MagicMock()
+            with patch("iris.console.app.diagnostics.write_bug_report", return_value=None):
+                app.action_file_bug()
+            app.notify.assert_called_once_with(
+                "Could not write bug report (see stderr).", severity="error"
+            )
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# _handle_exception() — persist_crash before Textual's own handling (ti-oqlyk)
+# ---------------------------------------------------------------------------
+
+def test_handle_exception_persists_crash_before_super_handling():
+    from unittest.mock import patch
+
+    from textual.app import App
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            order = []
+            with patch(
+                "iris.console.app.diagnostics.persist_crash",
+                side_effect=lambda *a, **kw: order.append("persist"),
+            ):
+                with patch.object(
+                    App, "_handle_exception",
+                    side_effect=lambda *a, **kw: order.append("super"),
+                ):
+                    app._handle_exception(ValueError("boom"))
+            assert order == ["persist", "super"]
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# main() — hook install order, set/clear_active_app bracketing, return code
+# ---------------------------------------------------------------------------
+
+def test_main_installs_hooks_before_constructing_console_and_returns_code():
+    from unittest.mock import MagicMock, patch
+
+    order = []
+    fake_app = MagicMock()
+    fake_app.return_code = 3
+    fake_app.run.side_effect = lambda: order.append("run")
+
+    with patch(
+        "iris.console.app.diagnostics.install_exception_hooks",
+        side_effect=lambda: order.append("hooks"),
+    ), patch(
+        "iris.console.app.diagnostics.set_active_app",
+        side_effect=lambda a: order.append("set_active"),
+    ), patch(
+        "iris.console.app.diagnostics.clear_active_app",
+        side_effect=lambda: order.append("clear_active"),
+    ), patch(
+        "iris.console.app.IrisConsole",
+        side_effect=lambda: order.append("construct") or fake_app,
+    ):
+        result = app_module.main()
+
+    assert order == ["hooks", "construct", "set_active", "run", "clear_active"]
+    assert result == 3
+
+
+def test_main_clears_active_app_even_if_run_raises():
+    from unittest.mock import MagicMock, patch
+
+    cleared = []
+    fake_app = MagicMock()
+    fake_app.run.side_effect = RuntimeError("boom")
+
+    with patch("iris.console.app.diagnostics.install_exception_hooks"), patch(
+        "iris.console.app.diagnostics.set_active_app",
+    ), patch(
+        "iris.console.app.diagnostics.clear_active_app",
+        side_effect=lambda: cleared.append(True),
+    ), patch("iris.console.app.IrisConsole", return_value=fake_app):
+        with pytest.raises(RuntimeError):
+            app_module.main()
+
+    assert cleared == [True]
+
+
+def test_main_returns_zero_when_return_code_is_none():
+    from unittest.mock import MagicMock, patch
+
+    fake_app = MagicMock()
+    fake_app.return_code = None
+
+    with patch("iris.console.app.diagnostics.install_exception_hooks"), patch(
+        "iris.console.app.diagnostics.set_active_app",
+    ), patch(
+        "iris.console.app.diagnostics.clear_active_app",
+    ), patch("iris.console.app.IrisConsole", return_value=fake_app):
+        result = app_module.main()
+
+    assert result == 0
 
 
 # ---------------------------------------------------------------------------

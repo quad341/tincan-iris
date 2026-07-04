@@ -1,16 +1,17 @@
-"""Tests for CallCardHost.disclosure_ack / disclosure_skip (ti-ir12t hard-gate).
+"""Tests for CallCardHost — disclosure_ack/disclosure_skip hard-gate (ti-ir12t)
+and _disclosure_script config wiring (ti-ajkht).
 
-CaptureSession is mocked at the call_card_host module boundary (same technique
-as test_daemon_api_cc.py mocking call_card_host itself one layer up) so these
-tests isolate CallCardHost's own orchestration: does it write the right store
-state, and does it start far-party capture only when it's supposed to.
+CaptureSession is mocked at the call_card_host module boundary so the hard-gate
+tests isolate CallCardHost's own orchestration (store state + whether far-party
+capture starts). The _disclosure_script tests construct CallCardHost directly —
+no CaptureSession mocking needed since _disclosure_script never touches capture.
 """
 from __future__ import annotations
 
 import logging
 from unittest.mock import MagicMock, patch
 
-from iris.daemon.call_card_host import CallCardHost
+from iris.daemon.call_card_host import _DEFAULT_DISCLOSURE, CallCardHost
 
 
 def _make_host():
@@ -19,6 +20,10 @@ def _make_host():
     api = MagicMock()
     cfg = MagicMock()
     return CallCardHost(store=store, processor=processor, api=api, cfg=cfg), store, api
+
+
+def _make_host_with_cfg(cfg):
+    return CallCardHost(store=MagicMock(), processor=MagicMock(), api=MagicMock(), cfg=cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -162,3 +167,29 @@ def test_disclosure_skip_with_no_active_session_still_writes_store(mock_session_
     host.disclosure_skip("s1")  # no start_session() call at all -- must not raise
 
     store.mark_disclosure_skipped.assert_called_once_with("s1")
+
+
+# ---------------------------------------------------------------------------
+# _disclosure_script (ti-ajkht config wiring)
+# ---------------------------------------------------------------------------
+
+def test_disclosure_script_reflects_nonempty_cfg_value():
+    cfg = MagicMock(call_card_disclosure_script="Please note this call is recorded.")
+    host = _make_host_with_cfg(cfg)
+    assert host._disclosure_script == "Please note this call is recorded."
+
+
+def test_disclosure_script_falls_back_to_default_when_cfg_value_empty():
+    cfg = MagicMock(call_card_disclosure_script="")
+    host = _make_host_with_cfg(cfg)
+    assert host._disclosure_script == _DEFAULT_DISCLOSURE
+
+
+def test_disclosure_script_falls_back_to_default_when_cfg_lacks_attribute():
+    host = _make_host_with_cfg(object())  # no call_card_disclosure_script attribute
+    assert host._disclosure_script == _DEFAULT_DISCLOSURE
+
+
+def test_disclosure_script_falls_back_to_default_when_cfg_is_none():
+    host = _make_host_with_cfg(None)
+    assert host._disclosure_script == _DEFAULT_DISCLOSURE
