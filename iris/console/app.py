@@ -1169,7 +1169,7 @@ class IrisConsole(App):
     def _do_arm_trust(self) -> None:
         """Arm the trust session; operator can then use [g] to grant the far party."""
         self.conductor.arm()
-        name = self._call_contact_name or "contact"
+        name = escape(self._call_contact_name or "contact")
         self._w(rf"[b yellow]ARM TRUST — {name} armed; press \[g] to grant far access[/]")
         self.notify(rf"Trust armed for {name}; press \[g] to grant")
         self._refresh_status()
