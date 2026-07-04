@@ -55,6 +55,11 @@ class CaptureSession:
         self._on_utterance(text, speaker, offset_s)
 
     def _on_utterance(self, text: str, speaker: str, offset_s: float) -> None:
+        # The only live trace that capture is hearing anything — without it a
+        # silent far channel is indistinguishable from a broken one (ti-wunrs).
+        _log.info(
+            "CaptureSession %s: [%s] %.80s", self._session_id, speaker, text
+        )
         try:
             turn_id = self._transcript_store.append(text, speaker, offset_s)
             results = self._processor.process(text, speaker, turn_id, offset_s)
