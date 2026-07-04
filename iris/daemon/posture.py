@@ -33,6 +33,7 @@ class _State:
     dnd_source: str = "manual"
     dnd_expires: float | None = None
     busy: bool = False  # v1 stub
+    seq: int = 0
 
 
 class PostureManager:
@@ -145,21 +146,48 @@ class PostureManager:
 
     def set_dnd(self, source: str, expires: float | None = None) -> None:
         """Enable DND.  source is internal only; never forwarded to listeners."""
+        snapshot = self._set_dnd_state(source, expires)
+        self._finish_dnd_change(snapshot)
+
+    def _set_dnd_state(self, source: str, expires: float | None = None) -> _State:
+        """Mutate in-memory state only. Caller must call _finish_dnd_change
+        afterward — used where the caller needs effective() to reflect the
+        change before persisting/broadcasting it (ack-ordering, see DaemonAPI)."""
         with self._lock:
             self._state = _State(
-                dnd=True, dnd_source=source, dnd_expires=expires, busy=False
+                dnd=True, dnd_source=source, dnd_expires=expires, busy=False,
+                seq=self._state.seq + 1,
             )
-            snapshot = _State(**vars(self._state))
-        self._persist(snapshot)
-        self._broadcast(snapshot)
+            return _State(**vars(self._state))
 
     def clear_dnd(self) -> None:
         """Disable DND unconditionally."""
+        snapshot = self._clear_dnd_state()
+        self._finish_dnd_change(snapshot)
+
+    def _clear_dnd_state(self) -> _State:
+        """Mutate in-memory state only. Caller must call _finish_dnd_change."""
         with self._lock:
             self._state = _State(
-                dnd=False, dnd_source="manual", dnd_expires=None, busy=False
+                dnd=False, dnd_source="manual", dnd_expires=None, busy=False,
+                seq=self._state.seq + 1,
             )
-            snapshot = _State(**vars(self._state))
+            return _State(**vars(self._state))
+
+    def _finish_dnd_change(self, snapshot: _State) -> None:
+        """Persist + broadcast a state already applied by _set_dnd_state/_clear_dnd_state.
+
+        No-ops if a newer mutation has already superseded this snapshot (ti-51vep
+        Finding 1): _handle_dnd calls this AFTER writing the client's ack, so it can
+        be delayed behind a slow socket write while a second mutation (another
+        client, or PostureWatcher's auto-expiry) completes its own mutate+finish
+        entirely inside that window. Without this check, the delayed finish would
+        persist/broadcast its now-stale snapshot last, silently overwriting the
+        newer value even though effective() already reflects it correctly.
+        """
+        with self._lock:
+            if snapshot.seq < self._state.seq:
+                return
         self._persist(snapshot)
         self._broadcast(snapshot)
 

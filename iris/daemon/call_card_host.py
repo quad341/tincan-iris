@@ -23,7 +23,8 @@ class CallCardHost:
     """Owns a CaptureSession for the duration of a call; broadcasts all call_card_* events.
 
     Wired by the daemon entry point into HandlingEngine (on_call_connected/on_call_ended)
-    and DaemonAPI (confirm_fact, confirm_action_item, disclosure_ack, get_call_card).
+    and DaemonAPI (confirm_fact, confirm_action_item, disclosure_ack, disclosure_skip,
+    get_call_card).
     """
 
     def __init__(
@@ -32,7 +33,7 @@ class CallCardHost:
         store: CallCardStore,
         processor: L1CaptureProcessor,
         api: object,      # DaemonAPI — typed as object to avoid circular import
-        cfg: object,      # iris config; host reads cfg.call_card.disclosure_script
+        cfg: object,      # iris config; host reads cfg.call_card_disclosure_script
     ) -> None:
         self._store = store
         self._processor = processor
@@ -49,7 +50,7 @@ class CallCardHost:
     @property
     def _disclosure_script(self) -> str:
         try:
-            return self._cfg.call_card.disclosure_script  # type: ignore[union-attr]
+            return self._cfg.call_card_disclosure_script or _DEFAULT_DISCLOSURE  # type: ignore[union-attr]
         except AttributeError:
             return _DEFAULT_DISCLOSURE
 
@@ -80,8 +81,9 @@ class CallCardHost:
             )
             self._session = session
 
-        # Start audio threads and broadcast outside the lock
-        session.start()
+        # Start audio threads and broadcast outside the lock. Operator channel only —
+        # far-party capture is hard-gated on disclosure_ack (ti-ir12t/ti-rqhn precedent).
+        session.start_operator()
         self._api.broadcast({"event": "call_card_started", "session_id": session_id,  # type: ignore[union-attr]
                               "caller_number": caller_number, "contact_name": ""})
         self._api.broadcast({"event": "call_card_disclosure_needed", "session_id": session_id,  # type: ignore[union-attr]
@@ -174,6 +176,32 @@ class CallCardHost:
 
     def disclosure_ack(self, session_id: str) -> None:
         self._store.mark_disclosure_ack(session_id)
+        with self._lock:
+            session = self._session
+            active_id = self._session_id
+        if session is None or active_id != session_id:
+            _log.warning(
+                "CallCardHost.disclosure_ack: no active session matching %s", session_id
+            )
+            return
+        session.start_far()
+        # Re-validate identity after start_far()'s own (possibly slow) D-Bus/PipeWire
+        # I/O: stop_session() runs on a different thread and could have torn this
+        # session down while start_far() was in flight. Corrective, not preventive —
+        # closing the lock across start_far() would block stop_session() unnecessarily.
+        with self._lock:
+            superseded = self._session is not session
+        if superseded:
+            _log.warning(
+                "CallCardHost.disclosure_ack: session %s torn down while starting "
+                "far capture — stopping orphaned CaptureSession", session_id,
+            )
+            session.stop()
+
+    def disclosure_skip(self, session_id: str) -> None:
+        # Operator explicitly declined — never call start_far(); far channel stays
+        # off for the rest of this call (ti-ir12t hard-gate).
+        self._store.mark_disclosure_skipped(session_id)
 
     def get_call_card(self, session_id: str | None = None) -> dict:
         with self._lock:

@@ -44,10 +44,12 @@ from ..daemon.posture import PostureManager
 from ..daemon.proxy import DaemonNotRunning, DaemonProxy
 from ..message_store import MessageStore
 from ..prefs import PreferencesStore
+from . import diagnostics
 from .contacts import ContactsScreen
 from .contacts_logic import VERB_DESCRIPTION
+from .help_screen import HelpScreen
 from .list_view import PostCallListView
-from .call_card import CallCardPanel
+from .call_card import CallCardPanel, DisclosureAcknowledged, DisclosureSkipped
 from ..audio.endpoint import default_endpoint
 from ..audio.streaming import StreamingTranscriber
 from ..audio.stt import default_stt
@@ -102,8 +104,11 @@ _MARKUP = re.compile(r"\[/?[^\]]*\]")
 
 
 def _open_log():
-    """Open the plain-text session logfile (fresh per run). $IRIS_LOG_FILE overrides
-    the default ~/.local/state/iris/console.log. Returns (file, path) or (None, None)."""
+    """Open the plain-text session logfile (append; survives restarts/crashes).
+    $IRIS_LOG_FILE overrides the default ~/.local/state/iris/console.log. Auto-rotates
+    to a single console.log.1 backup once IRIS_LOG_MAX_BYTES (default 5MB) is exceeded,
+    so the file stays bounded without multiplying discoverable paths (ti-qz990 OQ1).
+    Returns (file, path) or (None, None)."""
     path = settings.get("IRIS_LOG_FILE")
     if not path:
         base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
@@ -112,8 +117,17 @@ def _open_log():
         except OSError:
             return None, None
         path = os.path.join(base, "iris", "console.log")
+    max_bytes = settings.get_int("IRIS_LOG_MAX_BYTES", 5_000_000)
     try:
-        return open(path, "w", buffering=1), path
+        if os.path.getsize(path) > max_bytes:
+            os.replace(path, path + ".1")
+    except OSError:
+        pass  # doesn't exist yet, or rotation failed — fall through to open/create below
+    try:
+        f = open(path, "a", buffering=1)
+        os.chmod(path, 0o600)  # may carry call content/contact PII
+        f.write(f"=== session start: pid={os.getpid()} {datetime.now().isoformat()} ===\n")
+        return f, path
     except OSError:
         return None, None
 
@@ -374,20 +388,23 @@ class IrisConsole(App):
     """
 
     BINDINGS = [
+        Binding("question_mark", "help", "help"),
         Binding("space", "talk", "talk/stop", priority=True),
-        Binding("l", "listen", "hear you"),
+        Binding("l", "listen", "hear"),
         Binding("L", "list_panel", "list"),
-        Binding("V", "call_card_panel", "call card"),
-        Binding("f", "far", "hear them"),
+        Binding("V", "call_card_panel", "card"),
+        Binding("f", "far", "far"),
         Binding("g", "grant", "grant", priority=True),
         Binding("a", "approve", "approve"),
-        Binding("i", "interrupt", "interrupt", priority=True),
+        Binding("i", "interrupt", "stop", priority=True),
         Binding("m", "mute", "mute"),
         Binding("d", "toggle_dnd", "dnd", show=False),
         Binding("n", "notification", "next notif", show=False),
-        Binding("c", "commands", "commands"),
+        Binding("c", "commands", "cmds"),
         Binding("y", "copy_last", "copy reply", show=False),
-        Binding("K", "contacts", "contacts"),
+        Binding("e", "copy_last_error", "copy error", show=False),
+        Binding("b", "file_bug", "file a bug"),
+        Binding("K", "contacts", "book"),
         Binding("q", "quit", "quit", priority=True),
         Binding("1", "choose_1", "put through", show=False),
         Binding("2", "choose_2", "take message", show=False),
@@ -425,6 +442,7 @@ class IrisConsole(App):
         self._proactive_store = ProactiveStore()
         self._prefs = PreferencesStore()
         self._last_iris_reply: str = ""
+        self._last_error: str = ""
         self._call_contact_name: str = ""
         self._call_contact_number: str = ""
         self._call_trust_eligible: bool = False
@@ -473,6 +491,7 @@ class IrisConsole(App):
         self._w(f"[dim]STT: {self.stt.name} · TTS: {self.tts.name} · (I'm an AI.)[/]")
         if self._logpath:
             self._w(f"[dim]session log → {self._logpath}[/]")
+        self._w("[dim]press [?] for help[/]")
         if not self.stt.available():
             self._w("[red]STT not set up — run:  bash scripts/setup_whisper.sh[/]")
         self.set_interval(0.05, self._drain)
@@ -698,7 +717,16 @@ class IrisConsole(App):
                 self.query_one(IncomingCallPanel).update_countdown(remaining)
 
     def _on_daemon_event(self, ev: dict) -> None:
-        """Handle a JSON event received from DaemonProxy."""
+        """Handle a JSON event received from DaemonProxy.
+
+        SINGLE-OWNER INVARIANT: deliberately has no "call_connected" case, so
+        proxy mode never starts the console's own ride-along capture
+        (_attach_call_audio()/_begin_ride_along(), direct-mode-only — see the
+        streaming-loop handler above). Proxy mode's daemon already owns
+        capture via CallCardHost/HandlingEngine/BrainHost. Adding a
+        "call_connected" case here (e.g. to restore proxy-mode UI feedback)
+        would double audio capture unless it keeps excluding those calls.
+        """
         event_type = ev.get("event", "")
         if event_type == "incoming_call":
             self._incoming_call_id = ev.get("call_id")
@@ -1097,6 +1125,10 @@ class IrisConsole(App):
             self.query_one("#log", RichLog).focus()
             log.write("[dim]⟨list panel hidden⟩[/]")
 
+    def action_help(self) -> None:
+        """Open the [?] help screen — the universal 'how do I use this' key."""
+        self.push_screen(HelpScreen(self._logpath))
+
     def action_contacts(self) -> None:
         """Open the full-width Contacts management panel ([K])."""
         self.push_screen(ContactsScreen(self._roster))
@@ -1130,6 +1162,22 @@ class IrisConsole(App):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "arm-trust-btn":
             self._do_arm_trust()
+
+    def on_disclosure_acknowledged(self, message: DisclosureAcknowledged) -> None:
+        """Forward the operator's disclosure to the daemon — gates far-party capture."""
+        if self._proxy is not None:
+            try:
+                self._proxy.send({"cmd": "disclosure_ack", "session_id": message.session_id})
+            except DaemonNotRunning:
+                self._w("[red]Daemon disconnected — disclosure not recorded[/]")
+
+    def on_disclosure_skipped(self, message: DisclosureSkipped) -> None:
+        """Forward the operator's explicit skip — daemon must never start far capture."""
+        if self._proxy is not None:
+            try:
+                self._proxy.send({"cmd": "disclosure_skip", "session_id": message.session_id})
+            except DaemonNotRunning:
+                self._w("[red]Daemon disconnected — skip not recorded[/]")
 
     def _do_arm_trust(self) -> None:
         """Arm the trust session; operator can then use [g] to grant the far party."""
@@ -1201,16 +1249,42 @@ class IrisConsole(App):
         if not self._last_iris_reply:
             self.notify("No reply to copy yet.", severity="warning")
             return
-        text = self._last_iris_reply
+        self._copy_text_to_clipboard(self._last_iris_reply)
+
+    def action_copy_last_error(self) -> None:
+        """Copy the last captured error to the system clipboard ([e] key)."""
+        if not self._last_error:
+            self.notify("No error to copy yet.", severity="warning")
+            return
+        self._copy_text_to_clipboard(self._last_error)
+
+    def action_file_bug(self) -> None:
+        """Write a bug-report snapshot ([b] key) — works mid-session, not only post-crash."""
+        path = diagnostics.write_bug_report("manual")
+        if path is not None:
+            self.notify(f"Bug report written: {path}", severity="information")
+        else:
+            self.notify("Could not write bug report (see stderr).", severity="error")
+
+    def _copy_text_to_clipboard(self, text: str) -> None:
+        """OSC 52 always (dependency-free, works over SSH); subprocess additionally when a
+        clipboard binary is present. OSC 52 has no delivery acknowledgment, so this is
+        redundancy, not an either/or chain (ti-qz990 OQ6) — wording says "best-effort"
+        because a silently-ignored OSC 52 sequence can't be told apart from success.
+        """
         try:
-            for cmd in (["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--input", "--clipboard"]):
-                if subprocess.run(["which", cmd[0]], capture_output=True).returncode == 0:
+            self.copy_to_clipboard(text)
+        except Exception:  # noqa: BLE001 — OSC52 is best-effort; the subprocess path still runs
+            pass
+        for cmd in (["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--input", "--clipboard"]):
+            if subprocess.run(["which", cmd[0]], capture_output=True).returncode == 0:
+                try:
                     subprocess.run(cmd, input=text.encode(), check=True)
-                    self.notify("Copied to clipboard.", severity="information")
+                except Exception as e:  # noqa: BLE001
+                    self.notify(f"Clipboard error: {e}", severity="error")
                     return
-            self.notify("No clipboard tool found (install wl-copy or xclip).", severity="warning")
-        except Exception as e:  # noqa: BLE001
-            self.notify(f"Clipboard error: {e}", severity="error")
+                break
+        self.notify("Copied (best-effort).", severity="information")
 
     def action_notification(self) -> None:
         """Cycle to the next pending proactive notification ([n] key)."""
@@ -1238,6 +1312,13 @@ class IrisConsole(App):
             return self._incoming_call_id is not None
         if action == "copy_last":
             return bool(self._last_iris_reply)
+        if action == "quit":
+            # HelpScreen's own "q" is priority=True (matches ContactsScreen's
+            # convention); Textual's priority-binding dispatch checks the App
+            # before the Screen, so without this gate "q" would quit the app
+            # instead of closing help. Suppressing "quit" here falls through
+            # to HelpScreen's own binding in the same priority pass.
+            return not isinstance(self.screen, HelpScreen)
         return True
 
     def _send_choose(self, index: int) -> None:
@@ -1284,10 +1365,26 @@ class IrisConsole(App):
         if self._logf is not None:
             self._logf.close()
 
+    def _handle_exception(self, error: Exception) -> None:
+        """Persist the crash before Textual's own panic/restore handling (ti-qz990 OQ2).
+
+        Covers the message pump and every run_worker(..., thread=True) call site in this
+        file (the STT/TTS pipeline included) — Textual's own run()/run_async() never
+        re-raise, so this override is the only reliable funnel point for those crashes.
+        """
+        diagnostics.persist_crash("app", error)
+        super()._handle_exception(error)
+
 
 def main() -> int:
-    IrisConsole().run()
-    return 0
+    diagnostics.install_exception_hooks()
+    app = IrisConsole()
+    diagnostics.set_active_app(app)
+    try:
+        app.run()
+    finally:
+        diagnostics.clear_active_app()
+    return app.return_code or 0
 
 
 if __name__ == "__main__":

@@ -3,6 +3,12 @@
 enrichment_done values: 0=pending/skipped, 1=success, 2=failed (INTEGER, not bool).
 Amendment applied (2026-06-30): mark_enrichment_done(session_id, status=1),
 upsert_enriched_action_item, get_call_card.enrichment_done is int.
+
+disclosure_state values: 'pending' (default) / 'disclosed' / 'skipped'.
+Amendment applied (2026-07-03, ti-ir12t): tri-state disclosure tracking, so an
+audit can distinguish "operator declined" from "call ended before they responded".
+disclosure_ack (bool) is kept for compatibility with existing callers/tests and
+stays in sync with disclosure_state via mark_disclosure_ack/mark_disclosure_skipped.
 """
 from __future__ import annotations
 
@@ -24,6 +30,7 @@ CREATE TABLE IF NOT EXISTS call_cards (
     context_notes     TEXT,
     disclosure_ack    INTEGER DEFAULT 0,
     disclosure_ack_ts REAL,
+    disclosure_state  TEXT DEFAULT 'pending',
     enrichment_done   INTEGER DEFAULT 0,
     started_at        REAL,
     ended_at          REAL,
@@ -81,7 +88,20 @@ class CallCardStore:
             self._conn.executescript("PRAGMA journal_mode=WAL;")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(_DDL)
+            self._migrate_disclosure_state()
             self._conn.commit()
+
+    def _migrate_disclosure_state(self) -> None:
+        # call_cards predates disclosure_state; back-fill it for DBs created before
+        # this column existed so disclosure_ack and disclosure_state never disagree.
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(call_cards)").fetchall()}
+        if "disclosure_state" not in cols:
+            self._conn.execute(
+                "ALTER TABLE call_cards ADD COLUMN disclosure_state TEXT DEFAULT 'pending'"
+            )
+            self._conn.execute(
+                "UPDATE call_cards SET disclosure_state='disclosed' WHERE disclosure_ack=1"
+            )
 
     # ── Session lifecycle ─────────────────────────────────────────
 
@@ -116,8 +136,16 @@ class CallCardStore:
     def mark_disclosure_ack(self, session_id: str) -> None:
         with self._lock:
             self._conn.execute(
-                "UPDATE call_cards SET disclosure_ack=?, disclosure_ack_ts=? WHERE session_id=?",
-                (1, time.time(), session_id),
+                "UPDATE call_cards SET disclosure_ack=?, disclosure_ack_ts=?, disclosure_state=? WHERE session_id=?",
+                (1, time.time(), "disclosed", session_id),
+            )
+            self._conn.commit()
+
+    def mark_disclosure_skipped(self, session_id: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE call_cards SET disclosure_ack_ts=?, disclosure_state=? WHERE session_id=?",
+                (time.time(), "skipped", session_id),
             )
             self._conn.commit()
 
@@ -276,5 +304,6 @@ class CallCardStore:
                 "facts": facts,
                 "action_items": items,
                 "disclosure_ack": bool(row["disclosure_ack"]),
+                "disclosure_state": row["disclosure_state"],
                 "enrichment_done": int(row["enrichment_done"]),
             }
