@@ -6,11 +6,13 @@ import threading
 import uuid
 from dataclasses import asdict
 
+from iris.capture.after_store import AfterStore
 from iris.capture.processor import L1CaptureProcessor
-from iris.capture.schemas import ActionItem, CapturedFact
+from iris.capture.schemas import ActionItem, CapturedFact, DURABLE_FACT_TYPES, FactType
 from iris.capture.session import CaptureSession
 from iris.capture.store import CallCardStore
 from iris.capture.transcript import TranscriptStore
+from iris.notes import NotesStore
 
 _log = logging.getLogger(__name__)
 
@@ -57,7 +59,9 @@ class CallCardHost:
 
     # ── Session lifecycle ─────────────────────────────────────────────────────
 
-    def start_session(self, session_id: str, caller_number: str) -> None:
+    def start_session(
+        self, session_id: str, caller_number: str, contact_id: int | None = None
+    ) -> None:
         # tincand's CallConnected signal carries no call id yet (client-contract
         # gap, tincan-xbtct), so outbound calls arrive here with session_id="".
         # An empty id broke the whole DURING flow: broadcasts carried "", and the
@@ -79,7 +83,10 @@ class CallCardHost:
             self._action_item_count = 0
             transcript_store = TranscriptStore()
             self._session_transcript = transcript_store
-            self._store.load_or_create(session_id, caller_number)
+            self._store.load_or_create(
+                session_id, caller_number,
+                contact_id=str(contact_id) if contact_id is not None else None,
+            )
             session = CaptureSession(
                 session_id=session_id,
                 transcript_store=transcript_store,
@@ -241,3 +248,75 @@ class CallCardHost:
         with self._lock:
             sid = session_id or self._session_id or ""
         return self._store.get_call_card(sid) if sid else {}
+
+    def finalize_writeback(self, session_id: str) -> None:
+        """Copy this call's confirmed facts/action-items into AfterStore.
+
+        written_back only flips to 1 once every insert below has succeeded —
+        if any step raises (e.g. no resolved contact_id, so the FK/NOT NULL
+        constraint fails), the call_cards row is left at written_back=0 so a
+        retry can safely pick up from scratch (see iris/capture/store.py
+        module docstring).
+        """
+        card = self._store.get_call_card(session_id)
+        if not card:
+            _log.warning("CallCardHost.finalize_writeback: no call card for %s", session_id)
+            return
+        contact_id = card["contact_id"]
+        if contact_id is None:
+            # Caller never resolved to a roster contact (e.g. unregistered number).
+            # AfterStore's tables all have contact_id as a NOT NULL FK, so there is
+            # nowhere to write this call's facts/commitments yet — leave
+            # written_back=0 rather than raising, same as the "no call card" guard
+            # above. See ti-hb2dx follow-up bead for the open design question.
+            _log.warning(
+                "CallCardHost.finalize_writeback: no resolved contact for %s; skipping writeback",
+                session_id,
+            )
+            return
+
+        after_store = AfterStore()
+        call_log_id = after_store.insert_call_log(
+            contact_id,
+            session_id,
+            card["started_at"],
+            card["ended_at"],
+            agent_name="iris",
+            disclosed_at=card["disclosure_ack_ts"],
+            outcome_summary=card["outcome_summary"],
+        )
+
+        for item in card["action_items"]:
+            if not item["confirmed"]:
+                continue
+            direction = "they_promised" if item["owner"] == "far" else "i_promised"
+            after_store.insert_commitment(
+                contact_id,
+                call_log_id,
+                direction,
+                item["description"],
+                item.get("amount"),
+                item["due_date"],
+                item["transcript_turn_id"],
+                item["transcript_offset_s"],
+            )
+            if direction == "i_promised":
+                NotesStore().capture(item["description"])
+
+        for fact in card["facts"]:
+            if not fact["confirmed"]:
+                continue
+            if FactType(fact["fact_type"]) not in DURABLE_FACT_TYPES:
+                continue
+            after_store.upsert_contact_fact(
+                contact_id,
+                fact["fact_type"],
+                fact["normalized_value"],
+                label="",
+                session_id=session_id,
+            )
+
+        self._store.mark_written_back(session_id)
+        self._api.broadcast({  # type: ignore[union-attr]
+            "event": "call_card_written_back", "session_id": session_id,
+        })

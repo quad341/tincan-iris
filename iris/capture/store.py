@@ -9,6 +9,11 @@ Amendment applied (2026-07-03, ti-ir12t): tri-state disclosure tracking, so an
 audit can distinguish "operator declined" from "call ended before they responded".
 disclosure_ack (bool) is kept for compatibility with existing callers/tests and
 stays in sync with disclosure_state via mark_disclosure_ack/mark_disclosure_skipped.
+
+written_back / outcome_summary columns (2026-07-04, ti-hb2dx): written_back
+flips to 1 only once CallCardHost.finalize_writeback has successfully copied
+this call's facts/action-items into AfterStore (call_log/commitment/
+contact_fact) — see finalize_writeback for the retry-safety invariant.
 """
 from __future__ import annotations
 
@@ -89,6 +94,7 @@ class CallCardStore:
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(_DDL)
             self._migrate_disclosure_state()
+            self._migrate_writeback_columns()
             self._conn.commit()
 
     def _migrate_disclosure_state(self) -> None:
@@ -101,6 +107,19 @@ class CallCardStore:
             )
             self._conn.execute(
                 "UPDATE call_cards SET disclosure_state='disclosed' WHERE disclosure_ack=1"
+            )
+
+    def _migrate_writeback_columns(self) -> None:
+        # call_cards predates written_back/outcome_summary (ti-hb2dx); back-fill
+        # for DBs created before these columns existed.
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(call_cards)").fetchall()}
+        if "written_back" not in cols:
+            self._conn.execute(
+                "ALTER TABLE call_cards ADD COLUMN written_back INTEGER DEFAULT 0"
+            )
+        if "outcome_summary" not in cols:
+            self._conn.execute(
+                "ALTER TABLE call_cards ADD COLUMN outcome_summary TEXT DEFAULT ''"
             )
 
     # ── Session lifecycle ─────────────────────────────────────────
@@ -155,6 +174,22 @@ class CallCardStore:
             self._conn.execute(
                 "UPDATE call_cards SET enrichment_done=? WHERE session_id=?",
                 (status, session_id),
+            )
+            self._conn.commit()
+
+    def set_outcome_summary(self, session_id: str, text: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE call_cards SET outcome_summary=? WHERE session_id=?",
+                (text, session_id),
+            )
+            self._conn.commit()
+
+    def mark_written_back(self, session_id: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE call_cards SET written_back=? WHERE session_id=?",
+                (1, session_id),
             )
             self._conn.commit()
 
@@ -306,4 +341,10 @@ class CallCardStore:
                 "disclosure_ack": bool(row["disclosure_ack"]),
                 "disclosure_state": row["disclosure_state"],
                 "enrichment_done": int(row["enrichment_done"]),
+                "contact_id": int(row["contact_id"]) if row["contact_id"] is not None else None,
+                "disclosure_ack_ts": row["disclosure_ack_ts"],
+                "written_back": bool(row["written_back"]),
+                "outcome_summary": row["outcome_summary"],
+                "started_at": row["started_at"],
+                "ended_at": row["ended_at"],
             }

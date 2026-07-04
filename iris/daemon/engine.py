@@ -161,7 +161,8 @@ class HandlingEngine:
             )
 
         if self._call_card_host is not None:
-            self._call_card_host.start_session(call_id, caller_number)  # type: ignore[union-attr]
+            contact_id = contact.id if contact is not None else None  # type: ignore[union-attr]
+            self._call_card_host.start_session(call_id, caller_number, contact_id)  # type: ignore[union-attr]
 
     def on_call_ended(self, call_id: str) -> None:
         """Release the attention lock and clear brain call context when a call ends."""

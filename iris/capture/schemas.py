@@ -9,13 +9,28 @@ from uuid import uuid4
 
 
 class FactType(str, Enum):
-    PHONE   = "phone"
-    CASE_ID = "case_id"
-    AMOUNT  = "amount"
-    DATE    = "date"
-    NAME    = "name"
-    ADDRESS = "address"
-    EMAIL   = "email"
+    PHONE      = "phone"
+    CASE_ID    = "case_id"
+    AMOUNT     = "amount"
+    DATE       = "date"
+    NAME       = "name"
+    ADDRESS    = "address"
+    EMAIL      = "email"
+    ACCOUNT_ID = "account_id"
+    MEMBER_ID  = "member_id"
+    POLICY_ID  = "policy_id"
+
+
+# Fact types promotable to a durable contact_fact row on writeback (ti-hb2dx).
+# CASE_ID and PHONE are deliberately excluded — see the Call Card AFTER
+# architecture doc (ti-ve84d) Data Model section for why.
+DURABLE_FACT_TYPES: frozenset[FactType] = frozenset({
+    FactType.ACCOUNT_ID,
+    FactType.MEMBER_ID,
+    FactType.POLICY_ID,
+    FactType.ADDRESS,
+    FactType.EMAIL,
+})
 
 
 @dataclass
