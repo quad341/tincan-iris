@@ -94,16 +94,22 @@ class _RequestHandler(socketserver.StreamRequestHandler):
 
     def handle(self) -> None:
         api: DaemonAPI = self.server.api
-        for raw in self.rfile:
-            raw = raw.strip()
-            if not raw:
-                continue
-            try:
-                cmd = json.loads(raw)
-            except json.JSONDecodeError:
-                self._writer.write({"ack": "error", "ok": False, "error": "Invalid JSON"})
-                continue
-            api._dispatch(cmd, self._writer)
+        try:
+            for raw in self.rfile:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    cmd = json.loads(raw)
+                except json.JSONDecodeError:
+                    self._writer.write({"ack": "error", "ok": False, "error": "Invalid JSON"})
+                    continue
+                api._dispatch(cmd, self._writer)
+        except OSError:
+            # Client disconnected abruptly (e.g. closed with an unread broadcast
+            # still in its receive buffer, which the OS turns into an RST instead
+            # of a clean FIN) -- same as EOF from here: nothing left to serve.
+            pass
 
     def finish(self) -> None:
         self._writer.close()
@@ -249,17 +255,20 @@ class DaemonAPI:
             writer.write({"ack": "choose", "ok": False, "error": str(exc)})
 
     def _handle_dnd(self, cmd: dict, writer: _ClientWriter) -> None:
-        # Write ack BEFORE mutating posture so the ack arrives before any
-        # posture broadcast event on the same connection.
+        # Mutate (+ persist) BEFORE writing the ack, so posture.effective() is
+        # already correct for any observer the instant the ack is visible --
+        # but defer the listener broadcast until after the ack write, so the
+        # ack still arrives before any posture broadcast event on the same
+        # connection (see test_dnd_ack_arrives_before_posture_event).
         action = cmd.get("action", "")
         if action == "on":
+            self._posture.set_dnd("manual", defer_broadcast=True)
             writer.write({"ack": "dnd", "ok": True,
                           "posture": {"dnd": True, "expires_in_s": None}})
-            self._posture.set_dnd("manual")
         elif action == "off":
+            self._posture.clear_dnd(defer_broadcast=True)
             writer.write({"ack": "dnd", "ok": True,
                           "posture": {"dnd": False, "expires_in_s": None}})
-            self._posture.clear_dnd()
         elif action == "until":
             until = cmd.get("until")
             if not isinstance(until, (int, float)):
@@ -267,12 +276,14 @@ class DaemonAPI:
                               "error": "'until' must be a Unix timestamp (number)"})
                 return
             expires_in = max(0.0, float(until) - time.time())
+            self._posture.set_dnd("manual", expires=float(until), defer_broadcast=True)
             writer.write({"ack": "dnd", "ok": True,
                           "posture": {"dnd": True, "expires_in_s": expires_in}})
-            self._posture.set_dnd("manual", expires=float(until))
         else:
             writer.write({"ack": "dnd", "ok": False,
                           "error": f"Unknown DND action: {action!r}. Use on, off, or until."})
+            return
+        self._posture.broadcast_current()
 
     def _handle_status(self, cmd: dict, writer: _ClientWriter) -> None:
         eff = self._posture.effective()
