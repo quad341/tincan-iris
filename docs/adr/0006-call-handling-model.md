@@ -1,6 +1,6 @@
 # ADR-0006 — Call handling & promotion/demotion: an autonomous verb ladder, DND degrade, and a single-attention control surface
 
-- **Status:** proposed (2026-06-24)
+- **Status:** accepted — shipped (proposed 2026-06-24; implemented across the Call Card work, 2026-06/07)
 - **Related:** [ADR-0002](0002-capability-gating-by-speaker-channel.md) (speaker identity = the audio channel — the *who*); [ADR-0004](0004-inbound-events-and-interrupt-handling.md) (the inbound-event source this layer reacts to); [ADR-0005](0005-trust-permission-and-assurance-model.md) (trust/permission/assurance — *what may be done*; this ADR is the policy layer that decides *what Iris does with an inbound call*, above that gate)
 - **Authors:** operator (@quad341) + cohelper
 

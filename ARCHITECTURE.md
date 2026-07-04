@@ -5,10 +5,11 @@ Iris is a voice agent you can phone: a Claude-powered conversational AI that rid
 phone conversations. This document is how we see the secretary working.
 
 > **Status: v1 built and running.** The conversation loop, dispatch, the trust/capability
-> model, the operator console, the skills (calendar / web / notes), and the SCO call-audio
-> tap have shipped (341 tests, CI-green), and Iris has held real, disclosed calls. This
-> document describes the design; a few items remain marked _(planned)_ where noted (e.g.
-> daemon-exposed audio, the semantic-memory layer).
+> model, the operator console, the skills (calendar / web / notes), the SCO call-audio
+> tap, and the Call Card live-call capture layer (ADR-0006) have shipped — CI-gated by a
+> heavy test suite — and Iris has held real, disclosed calls. This document describes the
+> design; a few items remain marked _(planned)_ where noted (e.g. daemon-exposed audio,
+> the semantic-memory layer).
 
 ## Product thesis & scope
 
@@ -23,7 +24,7 @@ speaks, takes the note, and gates what she'll do by *who's asking* (ADR-0002).
 general-chatbot sprawl — the focus *is* the moat. The organizing entity is **Iris's own
 contact roster** (her list, not a mirror of the phone's), around which calls, messaging,
 memory, and scheduling cohere (see [ADR-0004](docs/adr/0004-inbound-events-and-interrupt-handling.md) §4,
-and the forthcoming roster ADR-0005). *(Direction set with the operator 2026-06-16.)*
+and the trust/permission model in [ADR-0005](docs/adr/0005-trust-permission-and-assurance-model.md)). *(Direction set with the operator 2026-06-16.)*
 
 ## 1. Design principles
 
