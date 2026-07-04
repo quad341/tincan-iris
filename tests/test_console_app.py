@@ -399,6 +399,36 @@ def test_active_call_card_shows_on_call_connected():
     asyncio.run(scenario())
 
 
+def test_call_connected_arm_trust_hint_survives_markup_rendering():
+    """ti-40baw: the ride-along call-connected line's 'ARM TRUST + [g] to grant
+    the far party' hint must render with the literal [g] intact -- previously
+    dropped because Rich markup treats an unescaped lowercase-leading '[x]' as
+    an unrecognized style-tag attempt and silently consumes it. Spies on _w()
+    and renders the captured raw string via Content.from_markup(...).plain
+    (rather than reading back RichLog.lines, which word-wraps at the widget's
+    width and would make substring assertions width-dependent)."""
+    from textual.content import Content
+
+    async def scenario():
+        app = IrisConsole()
+        logged: list[str] = []
+        _orig_w = app._w
+        app._w = lambda msg: logged.append(msg) or _orig_w(msg)
+
+        async with app.run_test() as pilot:
+            app.events.put(("call_connected",))
+            app._drain()
+
+            arm_trust_msgs = [m for m in logged if "ARM TRUST" in m]
+            assert len(arm_trust_msgs) == 1
+            rendered = Content.from_markup(arm_trust_msgs[0]).plain
+            assert "ARM TRUST + [g] to grant the far party" in rendered
+
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
 def test_arm_trust_button_arms_conductor():
     """Pressing the ARM TRUST button (or calling _do_arm_trust) calls conductor.arm()."""
     async def scenario():
@@ -412,6 +442,38 @@ def test_arm_trust_button_arms_conductor():
             assert not app.conductor._armed
             app._do_arm_trust()
             assert app.conductor._armed
+
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_do_arm_trust_hints_survive_markup_rendering():
+    """ti-40baw: _do_arm_trust()'s log line and toast both hint '[g] to grant'
+    -- both must render with the literal [g] intact (same escaping bug class
+    as the call-connected hint above; separate call sites, ~app.py:1160-1163)."""
+    from textual.content import Content
+
+    async def scenario():
+        app = IrisConsole()
+        logged: list[str] = []
+        _orig_w = app._w
+        app._w = lambda msg: logged.append(msg) or _orig_w(msg)
+        notified: list[tuple] = []
+        _orig_notify = app.notify
+        app.notify = lambda *a, **kw: notified.append((a, kw)) or _orig_notify(*a, **kw)
+
+        async with app.run_test() as pilot:
+            app._call_contact_name = "Bob"
+            app._do_arm_trust()
+
+            w_msgs = [m for m in logged if "ARM TRUST" in m]
+            assert len(w_msgs) == 1
+            assert "press [g] to grant far access" in Content.from_markup(w_msgs[0]).plain
+
+            assert len(notified) == 1
+            args, kwargs = notified[0]
+            assert Content.from_markup(args[0]).plain == "Trust armed for Bob; press [g] to grant"
 
             await pilot.press("q")
 
@@ -943,3 +1005,29 @@ def test_main_returns_zero_when_return_code_is_none():
         result = app_module.main()
 
     assert result == 0
+
+
+# ---------------------------------------------------------------------------
+# Status bar — proactive-queue cycle hint (ti-40baw)
+# ---------------------------------------------------------------------------
+
+def test_refresh_status_proactive_queue_cycle_hint_survives_markup_rendering():
+    """ti-40baw: when 2+ proactive notifications are pending, the status bar's
+    'press [n] to cycle' hint must render with the literal [n] intact (same
+    escaping bug class as the other ti-40baw sites)."""
+    from textual.widgets import Static
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._proactive_badge = "reminder: call the dentist"
+            app._proactive_queue_count = 2
+            app._refresh_status()
+            await pilot.pause()
+
+            plain = app.query_one("#status", Static).render().plain
+            assert "🔔 2 pending  ·  press [n] to cycle" in plain
+
+            await pilot.press("q")
+
+    asyncio.run(scenario())
