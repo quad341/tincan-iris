@@ -143,24 +143,40 @@ class PostureManager:
         with self._lock:
             return {"dnd": self._state.dnd, "busy": False}
 
-    def set_dnd(self, source: str, expires: float | None = None) -> None:
-        """Enable DND.  source is internal only; never forwarded to listeners."""
+    def set_dnd(
+        self, source: str, expires: float | None = None, *, defer_broadcast: bool = False
+    ) -> None:
+        """Enable DND.  source is internal only; never forwarded to listeners.
+
+        defer_broadcast=True mutates (so effective() is immediately correct)
+        and persists, but skips notifying listeners — the caller must follow
+        up with broadcast_current() once it's safe to do so (e.g. after it
+        has written its own ack for the command that triggered this change).
+        """
         with self._lock:
             self._state = _State(
                 dnd=True, dnd_source=source, dnd_expires=expires, busy=False
             )
             snapshot = _State(**vars(self._state))
         self._persist(snapshot)
-        self._broadcast(snapshot)
+        if not defer_broadcast:
+            self._broadcast(snapshot)
 
-    def clear_dnd(self) -> None:
-        """Disable DND unconditionally."""
+    def clear_dnd(self, *, defer_broadcast: bool = False) -> None:
+        """Disable DND unconditionally.  See set_dnd() for defer_broadcast."""
         with self._lock:
             self._state = _State(
                 dnd=False, dnd_source="manual", dnd_expires=None, busy=False
             )
             snapshot = _State(**vars(self._state))
         self._persist(snapshot)
+        if not defer_broadcast:
+            self._broadcast(snapshot)
+
+    def broadcast_current(self) -> None:
+        """Notify listeners of the current state (companion to defer_broadcast=True)."""
+        with self._lock:
+            snapshot = _State(**vars(self._state))
         self._broadcast(snapshot)
 
     def toggle_dnd(self, source: str) -> None:
