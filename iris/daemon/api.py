@@ -21,6 +21,7 @@ Commands accepted from clients:
   confirm_fact        — operator confirms/edits a captured fact (requires call_card_host)
   confirm_action_item — operator confirms/edits an action item (requires call_card_host)
   disclosure_ack      — operator acknowledged AI disclosure (requires call_card_host)
+  disclosure_skip     — operator explicitly declined AI disclosure (requires call_card_host)
   get_call_card       — return current call card snapshot (requires call_card_host)
 """
 from __future__ import annotations
@@ -228,6 +229,8 @@ class DaemonAPI:
             self._handle_confirm_action_item(cmd, writer)
         elif kind == "disclosure_ack":
             self._handle_disclosure_ack(cmd, writer)
+        elif kind == "disclosure_skip":
+            self._handle_disclosure_skip(cmd, writer)
         elif kind == "get_call_card":
             self._handle_get_call_card(cmd, writer)
         else:
@@ -363,6 +366,17 @@ class DaemonAPI:
             return
         self._call_card_host.disclosure_ack(session_id)  # type: ignore[attr-defined]
         writer.write({"ack": "disclosure_ack", "ok": True})
+
+    def _handle_disclosure_skip(self, cmd: dict, writer: _ClientWriter) -> None:
+        if self._call_card_host is None:
+            writer.write({"ack": "disclosure_skip", "ok": False, "error": "call_card not configured"})
+            return
+        session_id = cmd.get("session_id", "")
+        if not session_id:
+            writer.write({"ack": "disclosure_skip", "ok": False, "error": "Missing session_id"})
+            return
+        self._call_card_host.disclosure_skip(session_id)  # type: ignore[attr-defined]
+        writer.write({"ack": "disclosure_skip", "ok": True})
 
     def _handle_get_call_card(self, cmd: dict, writer: _ClientWriter) -> None:
         if self._call_card_host is None:

@@ -49,7 +49,7 @@ from .contacts import ContactsScreen
 from .contacts_logic import VERB_DESCRIPTION
 from .help_screen import HelpScreen
 from .list_view import PostCallListView
-from .call_card import CallCardPanel
+from .call_card import CallCardPanel, DisclosureAcknowledged, DisclosureSkipped
 from ..audio.endpoint import default_endpoint
 from ..audio.streaming import StreamingTranscriber
 from ..audio.stt import default_stt
@@ -1162,6 +1162,22 @@ class IrisConsole(App):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "arm-trust-btn":
             self._do_arm_trust()
+
+    def on_disclosure_acknowledged(self, message: DisclosureAcknowledged) -> None:
+        """Forward the operator's disclosure to the daemon — gates far-party capture."""
+        if self._proxy is not None:
+            try:
+                self._proxy.send({"cmd": "disclosure_ack", "session_id": message.session_id})
+            except DaemonNotRunning:
+                self._w("[red]Daemon disconnected — disclosure not recorded[/]")
+
+    def on_disclosure_skipped(self, message: DisclosureSkipped) -> None:
+        """Forward the operator's explicit skip — daemon must never start far capture."""
+        if self._proxy is not None:
+            try:
+                self._proxy.send({"cmd": "disclosure_skip", "session_id": message.session_id})
+            except DaemonNotRunning:
+                self._w("[red]Daemon disconnected — skip not recorded[/]")
 
     def _do_arm_trust(self) -> None:
         """Arm the trust session; operator can then use [g] to grant the far party."""

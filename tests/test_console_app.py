@@ -15,7 +15,9 @@ from textual.widgets import Button  # noqa: E402
 
 import iris.console.app as app_module  # noqa: E402
 from iris.console.app import ActiveCallCard, IrisConsole, _GRANT  # noqa: E402
+from iris.console.call_card import DisclosureAcknowledged, DisclosureSkipped  # noqa: E402
 from iris.console.conductor import State  # noqa: E402
+from iris.daemon.proxy import DaemonNotRunning  # noqa: E402
 from iris.trust import TrustMode  # noqa: E402
 
 
@@ -943,3 +945,92 @@ def test_main_returns_zero_when_return_code_is_none():
         result = app_module.main()
 
     assert result == 0
+
+
+# ---------------------------------------------------------------------------
+# Disclosure hard-gate: IrisConsole forwards DisclosureCard's Messages to the
+# daemon (ti-ir12t). Handler bodies are called directly (not via the message
+# pump/bubbling) -- Message.handler_name resolution itself is covered
+# separately in test_disclosure_card.py.
+# ---------------------------------------------------------------------------
+
+def test_disclosure_acknowledged_forwards_to_daemon_via_proxy():
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._proxy = MagicMock()
+            app.on_disclosure_acknowledged(DisclosureAcknowledged("s1"))
+            app._proxy.send.assert_called_once_with(
+                {"cmd": "disclosure_ack", "session_id": "s1"}
+            )
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_disclosure_skipped_forwards_to_daemon_via_proxy():
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._proxy = MagicMock()
+            app.on_disclosure_skipped(DisclosureSkipped("s1"))
+            app._proxy.send.assert_called_once_with(
+                {"cmd": "disclosure_skip", "session_id": "s1"}
+            )
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_disclosure_acknowledged_noop_when_proxy_none():
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._proxy = None
+            app.on_disclosure_acknowledged(DisclosureAcknowledged("s1"))  # must not raise
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_disclosure_skipped_noop_when_proxy_none():
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._proxy = None
+            app.on_disclosure_skipped(DisclosureSkipped("s1"))  # must not raise
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_disclosure_acknowledged_daemon_not_running_is_caught():
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._proxy = MagicMock()
+            app._proxy.send.side_effect = DaemonNotRunning()
+            app.on_disclosure_acknowledged(DisclosureAcknowledged("s1"))  # must not raise
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_disclosure_skipped_daemon_not_running_is_caught():
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._proxy = MagicMock()
+            app._proxy.send.side_effect = DaemonNotRunning()
+            app.on_disclosure_skipped(DisclosureSkipped("s1"))  # must not raise
+            await pilot.press("q")
+
+    asyncio.run(scenario())
