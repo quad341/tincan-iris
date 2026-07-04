@@ -50,6 +50,7 @@ class PostureManager:
     def __init__(self, path: str | Path | None = None) -> None:
         self._path = Path(path) if path else _DEFAULT_PATH
         self._lock = threading.Lock()
+        self._finish_lock = threading.Lock()
         self._state = _State()
         self._listeners: list[Callable[[dict], None]] = []
         self._ensure_row()
@@ -184,12 +185,25 @@ class PostureManager:
         entirely inside that window. Without this check, the delayed finish would
         persist/broadcast its now-stale snapshot last, silently overwriting the
         newer value even though effective() already reflects it correctly.
+
+        _finish_lock serializes the freshness-check + persist + broadcast sequence
+        against OTHER concurrent finishes end to end (ti-fyf2t) — the seq check
+        alone only closes a 2-actor race; with 3+ concurrent finishers, a checked
+        finisher can still be preempted before its persist() runs, letting a
+        yet-newer finish complete its I/O first and get overwritten by the stale
+        one afterward. _finish_lock is distinct from _lock (which only guards
+        _state) so mutate calls (_set_dnd_state/_clear_dnd_state) are never
+        blocked by an in-flight finish — only finishes serialize against each
+        other. Registered listeners must not call back into set_dnd/clear_dnd
+        synchronously from within a posture_changed callback (would deadlock on
+        re-entering this lock); no current listener does.
         """
-        with self._lock:
-            if snapshot.seq < self._state.seq:
-                return
-        self._persist(snapshot)
-        self._broadcast(snapshot)
+        with self._finish_lock:
+            with self._lock:
+                if snapshot.seq < self._state.seq:
+                    return
+            self._persist(snapshot)
+            self._broadcast(snapshot)
 
     def toggle_dnd(self, source: str) -> None:
         """Flip DND state (on→off, off→on indefinitely)."""
