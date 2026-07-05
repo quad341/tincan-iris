@@ -38,6 +38,7 @@ from pathlib import Path
 
 from ._socket_path import daemon_socket_path
 from .brain_host import BrainHost
+from .heartbeat import BaselineHeartbeat
 from .posture import PostureManager
 
 _log = logging.getLogger(__name__)
@@ -141,6 +142,7 @@ class DaemonAPI:
         self._clients_lock = threading.Lock()
         self._server: socketserver.ThreadingUnixStreamServer | None = None
         self._thread: threading.Thread | None = None
+        self._heartbeat: BaselineHeartbeat | None = None
 
         posture.subscribe(self._on_posture_changed)
 
@@ -179,6 +181,24 @@ class DaemonAPI:
             self._server = None
         if self._socket_path.exists():
             self._socket_path.unlink(missing_ok=True)
+
+    def is_healthy(self) -> bool:
+        """In-process liveness check for the baseline heartbeat (ti-pugo3.1).
+
+        No socket round-trip — the heartbeat runs in this same process, so it
+        checks the listening socket's own state directly rather than dialing
+        itself. True once start() has bound the socket and the path is still
+        a live socket file.
+        """
+        if self._server is None:
+            return False
+        try:
+            return stat.S_ISSOCK(self._socket_path.stat().st_mode)
+        except OSError:
+            return False
+
+    def set_heartbeat(self, heartbeat: BaselineHeartbeat) -> None:
+        self._heartbeat = heartbeat
 
     # --- client registry ---
 
@@ -296,12 +316,40 @@ class DaemonAPI:
             "ack": "status",
             "ok": True,
             "state": {
-                "call":    call_state,
-                "posture": {"dnd": eff["dnd"], "busy": eff["busy"]},
-                "clients": self.client_count(),
-                "pid":     os.getpid(),
+                "call":     call_state,
+                "posture":  {"dnd": eff["dnd"], "busy": eff["busy"]},
+                "clients":  self.client_count(),
+                "pid":      os.getpid(),
+                "baseline": self._baseline_snapshot(),
             },
         })
+
+    def _baseline_snapshot(self) -> dict | None:
+        """JSON-serializable view of the last heartbeat tick (ti-pugo3.1).
+
+        None when no heartbeat is wired (e.g. a DaemonAPI built without
+        set_heartbeat(), as in most existing unit tests) or before its first
+        tick completes.
+        """
+        if self._heartbeat is None:
+            return None
+        status = self._heartbeat.latest()
+        if status is None:
+            return None
+        return {
+            "level": status.level,
+            "checked_at": status.checked_at,
+            "checks": [
+                {
+                    "name": c.name,
+                    "status": c.status.value,
+                    "required": c.required,
+                    "detail": c.detail,
+                    "fix": c.fix,
+                }
+                for c in status.checks
+            ],
+        }
 
     def _handle_turn(self, cmd: dict, writer: _ClientWriter) -> None:
         if self._brain_host is None:

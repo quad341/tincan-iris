@@ -27,6 +27,7 @@ from pathlib import Path
 
 from . import settings
 from .config import DEFAULT
+from .tincand_status import get_tincand_status
 
 
 class DoctorStatus(Enum):
@@ -76,14 +77,6 @@ class AssetCheckResult:
     fix: str = ""       # full remediation; shown in the Setup block, not the table
 
 
-def _tincand_get_status() -> dict:
-    import dbus  # noqa: PLC0415
-    bus = dbus.SessionBus()
-    obj = bus.get_object("im.tincan.Daemon", "/im/tincan")
-    iface = dbus.Interface(obj, "im.tincan.Daemon")
-    return {str(k): v for k, v in dict(iface.GetStatus()).items()}
-
-
 def _tincand_deep_check(svc_name: str, unit: str) -> list[str]:  # noqa: ARG001
     lines: list[str] = []
 
@@ -97,7 +90,7 @@ def _tincand_deep_check(svc_name: str, unit: str) -> list[str]:  # noqa: ARG001
         lines.append("✗ health endpoint (unreachable)")
 
     try:
-        st = _tincand_get_status()
+        st = get_tincand_status()
         if st.get("call_setup_ready"):
             lines.append("✓ SELinux loaded")
         else:
@@ -283,30 +276,8 @@ def check_assets() -> list[AssetCheckResult]:
     except Exception as e:  # noqa: BLE001
         results.append(AssetCheckResult("kokoro-tts", DoctorStatus.UNKNOWN, False, detail=str(e)))
 
-    # --- call-card L3 enrichment deps — instructor[anthropic] (ti-0c90n).
-    #     Probed with the DAEMON's interpreter, not this one: the daemon runs
-    #     on system python and skipping enrichment there is exactly the silent
-    #     gap the doctor exists to catch. Optional: L1 capture works without
-    #     it, so a miss is DEGRADED (facts arrive uncontextualized), not DOWN.
-    daemon_python = _daemon_python()
-    try:
-        probe = subprocess.run(
-            [daemon_python, "-c", "import instructor, pydantic, anthropic"],
-            capture_output=True, text=True, timeout=20,
-        )
-        if probe.returncode == 0:
-            results.append(AssetCheckResult(
-                "call-card-enrichment", DoctorStatus.OK, False,
-                detail=f"instructor[anthropic] importable by {daemon_python}"))
-        else:
-            results.append(AssetCheckResult(
-                "call-card-enrichment", DoctorStatus.DEGRADED, False,
-                detail=f"L3 enrichment deps missing for {daemon_python} — "
-                       "every call ends with 'enrichment skipped'",
-                fix=f"{daemon_python} -m pip install --user 'instructor[anthropic]>=1.0'"))
-    except Exception as e:  # noqa: BLE001
-        results.append(AssetCheckResult(
-            "call-card-enrichment", DoctorStatus.UNKNOWN, False, detail=str(e)))
+    # --- call-card L3 enrichment deps — see check_call_card_enrichment().
+    results.append(check_call_card_enrichment())
 
     # --- espeak-ng — the zero-setup fallback TTS. OK if on PATH.
     if shutil.which("espeak-ng"):
@@ -320,6 +291,33 @@ def check_assets() -> list[AssetCheckResult]:
     return results
 
 
+def check_call_card_enrichment(*, timeout_s: float = 20.0) -> AssetCheckResult:
+    """call-card L3 enrichment deps — instructor[anthropic] (ti-0c90n).
+
+    Probed with the DAEMON's interpreter, not this one: the daemon runs on
+    system python and skipping enrichment there is exactly the silent gap
+    the doctor exists to catch. Optional: L1 capture works without it, so a
+    miss is DEGRADED (facts arrive uncontextualized), not DOWN.
+    """
+    daemon_python = _daemon_python()
+    try:
+        probe = subprocess.run(
+            [daemon_python, "-c", "import instructor, pydantic, anthropic"],
+            capture_output=True, text=True, timeout=timeout_s,
+        )
+        if probe.returncode == 0:
+            return AssetCheckResult(
+                "call-card-enrichment", DoctorStatus.OK, False,
+                detail=f"instructor[anthropic] importable by {daemon_python}")
+        return AssetCheckResult(
+            "call-card-enrichment", DoctorStatus.DEGRADED, False,
+            detail=f"L3 enrichment deps missing for {daemon_python} — "
+                   "every call ends with 'enrichment skipped'",
+            fix=f"{daemon_python} -m pip install --user 'instructor[anthropic]>=1.0'")
+    except Exception as e:  # noqa: BLE001
+        return AssetCheckResult("call-card-enrichment", DoctorStatus.UNKNOWN, False, detail=str(e))
+
+
 def _asset_exit_code(results: list[AssetCheckResult]) -> int:
     code = 0
     for r in results:
@@ -330,6 +328,107 @@ def _asset_exit_code(results: list[AssetCheckResult]) -> int:
         elif r.status == DoctorStatus.DEGRADED:
             code = max(code, 1)
     return code
+
+
+_BASELINE_DBUS_RETRIES = 2
+_BASELINE_DBUS_RETRY_DELAY_S = 0.3
+
+
+def _retrying(fn):
+    """Call fn(), retrying up to _BASELINE_DBUS_RETRIES times on exception.
+
+    Absorbs sub-second D-Bus flakiness inside a single heartbeat tick rather
+    than surfacing (and notifying on) a transient blip — mirrors the retry
+    precedent in iris/up.py's _bring_up_tincand (_DBUS_RETRIES/_DBUS_RETRY_DELAY).
+    """
+    last_exc: Exception | None = None
+    for attempt in range(_BASELINE_DBUS_RETRIES + 1):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt < _BASELINE_DBUS_RETRIES:
+                time.sleep(_BASELINE_DBUS_RETRY_DELAY_S)
+    raise last_exc
+
+
+def _tincand_unit_active() -> bool:
+    try:
+        proc = subprocess.run(
+            ["systemctl", "--user", "is-active", "tincand.service"],
+            capture_output=True, text=True,
+        )
+        return proc.returncode == 0
+    except OSError:
+        return False
+
+
+def _check_ambient_aec() -> AssetCheckResult:
+    """Is the ambient (Discord/Zoom) AEC pair the current PulseAudio/PipeWire default?
+
+    This is required=True unconditionally — it's independent of whether
+    tincand/a phone call is involved at all, and a wrong default silently
+    routes desktop audio around the canceller.
+    """
+    from .audio.endpoint import AEC_SINK, AEC_SRC  # noqa: PLC0415
+    try:
+        sink = subprocess.run(
+            ["pactl", "get-default-sink"], capture_output=True, text=True, timeout=2,
+        ).stdout.strip()
+        source = subprocess.run(
+            ["pactl", "get-default-source"], capture_output=True, text=True, timeout=2,
+        ).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return AssetCheckResult("ambient-aec-default", DoctorStatus.UNKNOWN, True, detail=str(e))
+    if sink == AEC_SINK and source == AEC_SRC:
+        return AssetCheckResult("ambient-aec-default", DoctorStatus.OK, True, detail=f"{sink} / {source}")
+    return AssetCheckResult(
+        "ambient-aec-default", DoctorStatus.DOWN, True,
+        detail=f"default sink={sink or '?'} source={source or '?'} (expected {AEC_SINK}/{AEC_SRC})",
+        fix="systemctl --user restart iris-aec   # or: scripts/aec_audio.sh up && scripts/aec_audio.sh default")
+
+
+def check_baseline_capabilities() -> list[AssetCheckResult]:
+    """FR-1.1 items 1+2 for the daemon's baseline heartbeat: tincand D-Bus
+    capabilities + the ambient AEC default.
+
+    Kept separate from check_assets() (the console's own startup-asset check,
+    which instantiates STT/TTS providers — not something a 90s daemon tick
+    should redo). Never raises: an unexpected failure here degrades to a
+    single UNKNOWN entry at the heartbeat's _collect_checks() layer rather
+    than killing the tick.
+    """
+    results: list[AssetCheckResult] = []
+    if not _tincand_unit_active():
+        for name in ("tincand-connected", "call-setup-ready", "messages-capability", "call-audio-aec"):
+            results.append(AssetCheckResult(name, DoctorStatus.ABSENT, required=False,
+                                             detail="tincand not installed/running"))
+        results.append(_check_ambient_aec())
+        return results
+
+    st = _retrying(get_tincand_status)
+    connected = bool(st.get("connected"))
+    results.append(AssetCheckResult(
+        "tincand-connected",
+        DoctorStatus.OK if connected else DoctorStatus.DOWN,
+        required=True,
+        detail="iPhone connected" if connected else "iPhone not connected",
+        fix="check Bluetooth pairing; see docs/SETUP.md"))
+    results.append(AssetCheckResult(
+        "call-setup-ready",
+        DoctorStatus.OK if st.get("call_setup_ready") else DoctorStatus.DOWN,
+        required=True,
+        fix="sudo semodule -i /usr/share/tincan/tincan.pp"))
+    results.append(AssetCheckResult(
+        "messages-capability",
+        DoctorStatus.OK if st.get("capabilities", {}).get("messages") else DoctorStatus.DEGRADED,
+        required=False))
+    results.append(AssetCheckResult(
+        "call-audio-aec", DoctorStatus.ABSENT, required=False,
+        detail="tincand does not yet expose a call_audio_aec capability flag (verified 2026-07-05)",
+        fix="blocked on tincand — re-enable this check once GetStatus() reports it"))
+    results.append(_check_ambient_aec())
+    return results
 
 
 def _sco_advisory() -> str | None:
@@ -376,7 +475,7 @@ def doctor_main(args: list[str] | None = None) -> int:
         tincand_detail = None
         if run_deep and any(r.name == "tincand" for r in results):
             try:
-                st = _tincand_get_status()
+                st = get_tincand_status()
                 tincand_detail = {
                     "call_setup_ready": bool(st.get("call_setup_ready")),
                     "adapter_warning": str(st.get("adapter_warning") or ""),

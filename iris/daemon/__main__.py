@@ -26,6 +26,7 @@ from ._socket_path import daemon_pid_path
 from .api import DaemonAPI
 from .brain_host import BrainHost
 from .engine import HandlingEngine
+from .heartbeat import BaselineHeartbeat
 from .message_event_source import MessageEventSource
 from .policy import PolicyResolver
 from .posture import PostureManager, PostureWatcher
@@ -234,6 +235,11 @@ def main() -> int:
     if call_card_host is not None:
         call_card_host._api = api
 
+    # ti-pugo3.2 (not yet built) will pass on_transition= here to decide when a
+    # baseline change is worth notifying about; this daemon only computes+caches.
+    heartbeat = BaselineHeartbeat(is_daemon_socket_healthy=api.is_healthy)
+    api.set_heartbeat(heartbeat)
+
     _log.info("iris daemon: Brain and BrainHost initialized")
 
     def _on_tcc_event(ev: tuple) -> None:  # called from the tincan-dbus thread
@@ -286,6 +292,7 @@ def main() -> int:
     try:
         watcher.start()
         api.start()
+        heartbeat.start()
         _log.info("iris daemon ready")
         stop_event.wait()
     finally:
@@ -293,6 +300,7 @@ def main() -> int:
         mes.stop()
         ctrl.stop()
         api.stop()
+        heartbeat.stop()
         watcher.stop()
         _remove_pid(_PID_PATH)
         _log.info("iris daemon stopped")
