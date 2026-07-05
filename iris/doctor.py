@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -217,6 +218,25 @@ def _missing(*pairs: tuple[str, str]) -> list[str]:
     return [label for label, path in pairs if not Path(path).exists()]
 
 
+def _daemon_python() -> str:
+    """Return the interpreter the iris-daemon unit runs, else this one.
+
+    Parsed from the unit's ExecStart so the enrichment check probes the env
+    that actually executes PostCallEnricher.
+    """
+    try:
+        r = subprocess.run(
+            ["systemctl", "--user", "show", "-p", "ExecStart", "--value", "iris-daemon"],
+            capture_output=True, text=True, timeout=5,
+        )
+        m = re.search(r"path=(\S+)", r.stdout)
+        if m and Path(m.group(1)).exists():
+            return m.group(1)
+    except Exception:  # noqa: BLE001 — fall through to this interpreter
+        pass
+    return sys.executable
+
+
 def check_assets() -> list[AssetCheckResult]:
     """Check the local model assets the console/voice loop resolves at startup.
 
@@ -262,6 +282,31 @@ def check_assets() -> list[AssetCheckResult]:
                     "IRIS_KOKORO_PYTHON=<…/.venv-kokoro/bin/python>"))
     except Exception as e:  # noqa: BLE001
         results.append(AssetCheckResult("kokoro-tts", DoctorStatus.UNKNOWN, False, detail=str(e)))
+
+    # --- call-card L3 enrichment deps — instructor[anthropic] (ti-0c90n).
+    #     Probed with the DAEMON's interpreter, not this one: the daemon runs
+    #     on system python and skipping enrichment there is exactly the silent
+    #     gap the doctor exists to catch. Optional: L1 capture works without
+    #     it, so a miss is DEGRADED (facts arrive uncontextualized), not DOWN.
+    daemon_python = _daemon_python()
+    try:
+        probe = subprocess.run(
+            [daemon_python, "-c", "import instructor, pydantic, anthropic"],
+            capture_output=True, text=True, timeout=20,
+        )
+        if probe.returncode == 0:
+            results.append(AssetCheckResult(
+                "call-card-enrichment", DoctorStatus.OK, False,
+                detail=f"instructor[anthropic] importable by {daemon_python}"))
+        else:
+            results.append(AssetCheckResult(
+                "call-card-enrichment", DoctorStatus.DEGRADED, False,
+                detail=f"L3 enrichment deps missing for {daemon_python} — "
+                       "every call ends with 'enrichment skipped'",
+                fix=f"{daemon_python} -m pip install --user 'instructor[anthropic]>=1.0'"))
+    except Exception as e:  # noqa: BLE001
+        results.append(AssetCheckResult(
+            "call-card-enrichment", DoctorStatus.UNKNOWN, False, detail=str(e)))
 
     # --- espeak-ng — the zero-setup fallback TTS. OK if on PATH.
     if shutil.which("espeak-ng"):
