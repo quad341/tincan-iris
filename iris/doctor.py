@@ -219,14 +219,18 @@ def _missing(*pairs: tuple[str, str]) -> list[str]:
 
 
 def _daemon_python() -> str:
-    """Return the interpreter the iris-daemon unit runs, else this one.
+    """Return the interpreter the iris-brain unit runs, else this one.
 
     Parsed from the unit's ExecStart so the enrichment check probes the env
-    that actually executes PostCallEnricher.
+    that actually executes PostCallEnricher. iris-brain
+    (iris-services/iris-brain.service.tmpl) isn't auto-installed by
+    `iris-install-services` today (ti-2fiv dropped daemon units from the
+    managed set) — until an operator installs it by hand, this falls through
+    to sys.executable, same as any other unmatched unit.
     """
     try:
         r = subprocess.run(
-            ["systemctl", "--user", "show", "-p", "ExecStart", "--value", "iris-daemon"],
+            ["systemctl", "--user", "show", "-p", "ExecStart", "--value", "iris-brain"],
             capture_output=True, text=True, timeout=5,
         )
         m = re.search(r"path=(\S+)", r.stdout)
@@ -235,6 +239,26 @@ def _daemon_python() -> str:
     except Exception:  # noqa: BLE001 — fall through to this interpreter
         pass
     return sys.executable
+
+
+def _daemon_path() -> str | None:
+    """Return the PATH the iris-brain unit's Environment= sets, else None.
+
+    None means "no unit-specific override found" — callers fall back to
+    shutil.which's own default (this process's PATH), same spirit as
+    _daemon_python's fallback-to-self behavior.
+    """
+    try:
+        r = subprocess.run(
+            ["systemctl", "--user", "show", "-p", "Environment", "--value", "iris-brain"],
+            capture_output=True, text=True, timeout=5,
+        )
+        m = re.search(r"PATH=(\S+)", r.stdout)
+        if m:
+            return m.group(1)
+    except Exception:  # noqa: BLE001 — fall through to shutil.which's default
+        pass
+    return None
 
 
 def check_assets() -> list[AssetCheckResult]:
@@ -283,7 +307,7 @@ def check_assets() -> list[AssetCheckResult]:
     except Exception as e:  # noqa: BLE001
         results.append(AssetCheckResult("kokoro-tts", DoctorStatus.UNKNOWN, False, detail=str(e)))
 
-    # --- call-card L3 enrichment deps — instructor[anthropic] (ti-0c90n).
+    # --- call-card L3 enrichment deps — pydantic (ti-0c90n / ti-pkt2r.1).
     #     Probed with the DAEMON's interpreter, not this one: the daemon runs
     #     on system python and skipping enrichment there is exactly the silent
     #     gap the doctor exists to catch. Optional: L1 capture works without
@@ -291,22 +315,41 @@ def check_assets() -> list[AssetCheckResult]:
     daemon_python = _daemon_python()
     try:
         probe = subprocess.run(
-            [daemon_python, "-c", "import instructor, pydantic, anthropic"],
+            [daemon_python, "-c", "import pydantic"],
             capture_output=True, text=True, timeout=20,
         )
         if probe.returncode == 0:
             results.append(AssetCheckResult(
                 "call-card-enrichment", DoctorStatus.OK, False,
-                detail=f"instructor[anthropic] importable by {daemon_python}"))
+                detail=f"pydantic importable by {daemon_python}"))
         else:
             results.append(AssetCheckResult(
                 "call-card-enrichment", DoctorStatus.DEGRADED, False,
                 detail=f"L3 enrichment deps missing for {daemon_python} — "
                        "every call ends with 'enrichment skipped'",
-                fix=f"{daemon_python} -m pip install --user 'instructor[anthropic]>=1.0'"))
+                fix=f"{daemon_python} -m pip install --user 'pydantic>=2'"))
     except Exception as e:  # noqa: BLE001
         results.append(AssetCheckResult(
             "call-card-enrichment", DoctorStatus.UNKNOWN, False, detail=str(e)))
+
+    # --- call-card L3 tmux/claude resolution (ti-pkt2r.1). The daemon's warm
+    #     ClaudeTuiSession needs both on ITS PATH — a systemd user unit's
+    #     minimal default env often lacks them even when an interactive shell
+    #     has them. Probed against the same Environment=PATH= the unit itself
+    #     would resolve from. Optional, same reasoning as the check above.
+    daemon_path = _daemon_path()
+    for exe, check_name in (("tmux", "call-card-tmux"), ("claude", "call-card-claude")):
+        found = shutil.which(exe, path=daemon_path)
+        if found:
+            results.append(AssetCheckResult(
+                check_name, DoctorStatus.OK, False, detail=f"resolved: {found}"))
+        else:
+            results.append(AssetCheckResult(
+                check_name, DoctorStatus.DEGRADED, False,
+                detail=f"{exe} not found on the daemon unit's PATH — Call Card "
+                       "LLM passes can't start the warm session",
+                fix=f"add {exe}'s directory to iris-brain.service.tmpl's "
+                    f"Environment=PATH=, or install {exe} where the daemon can see it"))
 
     # --- espeak-ng — the zero-setup fallback TTS. OK if on PATH.
     if shutil.which("espeak-ng"):
