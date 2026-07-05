@@ -14,6 +14,8 @@ import time
 import urllib.request
 import subprocess
 
+from .tincand_status import get_tincand_status
+
 
 _MANAGED_SERVICES = ["iris-whisper", "iris-kokoro"]
 _LLAMA_URL = "http://127.0.0.1:8080/health"
@@ -86,14 +88,6 @@ def _wait_healthy(url: str, label: str, retries: int = 6, delay: float = 2.0) ->
     return False
 
 
-def _tincand_dbus_status() -> dict:
-    import dbus  # noqa: PLC0415
-    bus = dbus.SessionBus()
-    obj = bus.get_object("im.tincan.Daemon", "/im/tincan")
-    iface = dbus.Interface(obj, "im.tincan.Daemon")
-    return {str(k): v for k, v in dict(iface.GetStatus()).items()}
-
-
 def _bring_up_tincand() -> dict:
     """Start tincand if inactive, wait for health, poll D-Bus for readiness.
 
@@ -133,7 +127,7 @@ def _bring_up_tincand() -> dict:
 
     for _ in range(_DBUS_RETRIES):
         try:
-            st = _tincand_dbus_status()
+            st = get_tincand_status()
             base["call_setup_ready"] = bool(st.get("call_setup_ready"))
             base["adapter_warning"] = str(st.get("adapter_warning") or "")
             base["connected"] = bool(st.get("connected"))

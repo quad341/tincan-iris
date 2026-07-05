@@ -261,9 +261,10 @@ def discover_sco_nodes() -> tuple[str | None, str | None]:
     return sink, source
 
 
-# SCO (HFP phone-call) AEC nodes — see TincanSCOAudio.
-_AEC_SINK = "iris_aec_sink"
-_AEC_SRC = "iris_aec_src"
+# SCO (HFP phone-call) AEC nodes — see TincanSCOAudio. Public: iris/doctor.py's
+# baseline heartbeat checks these are the PulseAudio/PipeWire default.
+AEC_SINK = "iris_aec_sink"
+AEC_SRC = "iris_aec_src"
 
 # PulseAudio source created by module-echo-cancel for the virtual-audio (Discord/Zoom) path.
 # Set up via scripts/virtual_audio.sh aec-up; enabled via IRIS_VA_AEC=1.
@@ -314,7 +315,7 @@ class TincanSCOAudio(VirtualDeviceAudio):
     ) -> None:
         # With AEC: push-to-talk captures from iris_aec_src (cleaned mic).
         # Without AEC: capture_target=None → default mic.
-        capture = _AEC_SRC if aec else None
+        capture = AEC_SRC if aec else None
         super().__init__(sink, capture_target=capture, rate=rate, channels=channels)
         self.far_source = source  # the SCO downlink — the far party, for _far_stream
         self.far_backend = "pw"   # SCO source is a native PipeWire node -> pw-record
@@ -333,7 +334,7 @@ class TincanSCOAudio(VirtualDeviceAudio):
         if self.aec:
             # Route monitor through the AEC sink so it becomes the echo reference;
             # module-echo-cancel then subtracts it from the mic before capture.
-            return ["paplay", f"--device={_AEC_SINK}", wav]
+            return ["paplay", f"--device={AEC_SINK}", wav]
         # Default: local speakers, no --target.
         return ["pw-cat", "-p", wav]
 
