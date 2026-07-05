@@ -1,6 +1,9 @@
 """CallCardHost — top-level call-card lifecycle controller (ti-rnlqo.3.3+5.4)."""
 from __future__ import annotations
 
+import base64
+import gzip
+import json
 import logging
 import threading
 import uuid
@@ -8,6 +11,7 @@ from dataclasses import asdict
 
 from iris.capture.after_store import AfterStore
 from iris.capture.cloud_session import CallCardCloudSession
+from iris.capture.eval_log_store import EvalLogStore
 from iris.capture.processor import L1CaptureProcessor
 from iris.capture.schemas import ActionItem, CapturedFact, DURABLE_FACT_TYPES, FactType
 from iris.capture.session import CaptureSession
@@ -134,6 +138,41 @@ class CallCardHost:
             "fact_count": fact_count,
             "action_item_count": action_item_count,
         })
+
+        # Eval log: write-only encrypted transcript archive for future model
+        # eval/training use (ti-qi76c). Independent of the L3 enrichment block
+        # below — gated only on cfg.eval_log_public_key, not
+        # call_card_llm_enabled, and never allowed to affect anything else in
+        # stop_session() (placed before the enrichment block's own early
+        # `return` on purpose, so a missing/misconfigured call-card LLM setup
+        # never silently skips eval logging too). EvalLogStore exposes no
+        # read/decrypt method anywhere — only an operator holding the offline
+        # private key (iris.eval_log_keygen) can ever open a sealed entry.
+        public_key = getattr(self._cfg, "eval_log_public_key", "") or ""
+        if not public_key:
+            _log.debug("Eval log skipped for %s — no eval_log_public_key configured.", session_id)
+        else:
+            try:
+                import nacl.public  # noqa: PLC0415 — optional `call-card` extra
+            except ImportError as exc:
+                _log.warning(
+                    "Eval log write skipped for %s — PyNaCl not installed (%s); "
+                    "run `pip install -e '.[call-card]'`.", session_id, exc,
+                )
+            else:
+                try:
+                    turns = transcript_store.get_turns() if transcript_store is not None else []
+                    payload = gzip.compress(json.dumps([asdict(t) for t in turns]).encode("utf-8"))
+                    sealed = nacl.public.SealedBox(
+                        nacl.public.PublicKey(base64.b64decode(public_key))
+                    ).encrypt(payload)
+                    EvalLogStore().append(session_id, key_version=1, sealed_blob=sealed)
+                except Exception:
+                    _log.warning(
+                        "Eval log write failed for %s — skipping, call teardown continues.",
+                        session_id, exc_info=True,
+                    )
+
         # L3 post-call enrichment + recap are OPTIONAL (need the `call-card`
         # extra: pydantic). L1 capture works without them — if the extra is
         # absent, log loudly and skip (never a silent no-op). Recap needs
