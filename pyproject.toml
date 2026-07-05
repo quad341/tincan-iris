@@ -16,10 +16,17 @@ dependencies = [
 
 [project.optional-dependencies]
 console = ["textual>=8"]
-# L3 post-call enrichment: an OPTIONAL cloud LLM pass. L1 capture works without
-# it; when absent, the daemon logs a warning and skips enrichment (never silent).
+# call-card bundles two unrelated optional features that both sit downstream
+# of L1 capture:
+# - instructor[anthropic]: L3 post-call enrichment, an OPTIONAL cloud LLM pass.
+# - PyNaCl: the write-only encrypted eval-log store (ti-qi76c) — sealed-box
+#   encryption of transcripts for future model eval, decryptable only by an
+#   operator holding the offline private key.
+# L1 capture works without either; when a dep is absent, the daemon logs a
+# warning and skips that feature (never silent).
 call-card = [
     "instructor[anthropic]>=1.0",
+    "PyNaCl>=1.5",
 ]
 
 [project.scripts]
