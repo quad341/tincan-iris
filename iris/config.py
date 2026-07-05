@@ -46,6 +46,11 @@ class Config:
     # iris/disclosure.py, which is a separate flow.
     call_card_disclosure_script: str = ""
 
+    # --- Call Card AFTER: post-call recap generator (ti-6a1y3). Facts/action
+    # items below this confidence are excluded from the recap LLM prompt
+    # unless the operator already confirmed them.
+    call_card_recap_confidence_threshold: float = 0.8
+
     # --- Screening (handling_rule='screen'). relay_timeout_secs: how long Iris
     # waits for the operator to decide before auto-pivoting to take_message.
     screening_relay_timeout_secs: float = 20.0

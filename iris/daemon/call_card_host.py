@@ -132,15 +132,19 @@ class CallCardHost:
             "fact_count": fact_count,
             "action_item_count": action_item_count,
         })
-        # L3 post-call enrichment is OPTIONAL (needs the `call-card` extra:
-        # instructor + pydantic + anthropic). L1 capture works without it — if the
-        # extra is absent, log loudly and skip (never a silent no-op).
+        # L3 post-call enrichment + recap are OPTIONAL (need the `call-card`
+        # extra: instructor + pydantic + anthropic). L1 capture works without
+        # them — if the extra is absent, log loudly and skip (never a silent
+        # no-op). Recap needs nothing enricher doesn't already require, so one
+        # guard covers both imports.
         try:
             from iris.capture.enricher import PostCallEnricher  # noqa: PLC0415
+            from iris.capture.recap import PostCallRecapGenerator  # noqa: PLC0415
         except ImportError as exc:
             _log.warning(
-                "Post-call enrichment skipped — call-card LLM extra not installed "
-                "(%s); run `pip install -e '.[call-card]'` for the L3 pass.", exc,
+                "Post-call enrichment+recap skipped — call-card LLM extra not "
+                "installed (%s); run `pip install -e '.[call-card]'` for the "
+                "L3 pass.", exc,
             )
             return
         enricher = PostCallEnricher(
@@ -151,7 +155,18 @@ class CallCardHost:
             cfg=self._cfg,
         )
         enricher.start()
-        # enricher is daemon=True; reference released so GC can collect when it finishes
+
+        recap = PostCallRecapGenerator(
+            session_id=session_id,
+            store=self._store,
+            enricher_thread=enricher,
+            api=self._api,
+            cfg=self._cfg,
+            confidence_threshold=self._cfg.call_card_recap_confidence_threshold,
+        )
+        recap.start()
+        # Both threads are daemon=True; references released so GC can collect
+        # them once they finish (recap always outlives enricher via .join()).
 
     # ── Fact / action-item callbacks (called from audio threads) ─────────────
 
