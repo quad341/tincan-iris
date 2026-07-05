@@ -4,6 +4,7 @@ from __future__ import annotations
 import threading
 
 from iris.capture.transcript import TranscriptStore
+from iris.trust import TrustMode
 
 
 def test_append_returns_sequential_turn_ids():
@@ -59,3 +60,33 @@ def test_thread_safety_no_lost_turns():
 
     assert not errors
     assert len(store.get_turns()) == 200
+
+
+# ---------------------------------------------------------------------------
+# far-party trust stamping (ti-pkt2r.2 -- FR6 trust-gate policy)
+# ---------------------------------------------------------------------------
+
+def test_default_trust_is_none():
+    store = TranscriptStore()
+    store.append("hi", "far", 0.0)
+    assert store.get_turns()[0].trust is TrustMode.NONE
+
+
+def test_set_trust_stamps_subsequent_appends():
+    store = TranscriptStore()
+    store.set_trust(TrustMode.BOTH)
+    store.append("granted", "far", 0.0)
+    assert store.get_turns()[0].trust is TrustMode.BOTH
+
+
+def test_set_trust_does_not_restamp_earlier_turns():
+    """Trust is stamped once, at capture time -- elevating mid-call must not
+    retroactively change turns already appended (ti-pkt2r.2)."""
+    store = TranscriptStore()
+    store.append("before grant", "far", 0.0)
+    store.set_trust(TrustMode.BOTH)
+    store.append("after grant", "far", 1.0)
+
+    turns = store.get_turns()
+    assert turns[0].trust is TrustMode.NONE
+    assert turns[1].trust is TrustMode.BOTH

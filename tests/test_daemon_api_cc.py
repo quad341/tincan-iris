@@ -23,6 +23,7 @@ import pytest
 
 from iris.daemon.api import DaemonAPI
 from iris.daemon.posture import PostureManager
+from iris.trust import TrustMode
 
 
 # ---------------------------------------------------------------------------
@@ -224,4 +225,41 @@ def test_get_call_card_delegates_to_host(api_with_cc, cc_host, tmp_sock):
     assert resp["ok"] is True
     assert "call_card" in resp
     cc_host.get_call_card.assert_called_once()
+    sock.close()
+
+
+# ---------------------------------------------------------------------------
+# trust (ti-pkt2r.2 -- real per-turn far-trust relay)
+# ---------------------------------------------------------------------------
+
+def test_trust_no_cc_host(api_no_cc, tmp_sock):
+    rfile, wfile, sock = _connect(tmp_sock)
+    resp = _send_recv(rfile, wfile, {"cmd": "trust", "session_id": "s1", "trust": "both"})
+    assert resp["ok"] is False
+    assert "call_card not configured" in resp["error"]
+    sock.close()
+
+
+def test_trust_delegates_to_host(api_with_cc, cc_host, tmp_sock):
+    rfile, wfile, sock = _connect(tmp_sock)
+    resp = _send_recv(rfile, wfile, {"cmd": "trust", "session_id": "s1", "trust": "both"})
+    assert resp["ok"] is True
+    cc_host.set_far_trust.assert_called_once_with("s1", TrustMode.BOTH)
+    sock.close()
+
+
+def test_trust_missing_session_id(api_with_cc, tmp_sock):
+    rfile, wfile, sock = _connect(tmp_sock)
+    resp = _send_recv(rfile, wfile, {"cmd": "trust", "trust": "both"})
+    assert resp["ok"] is False
+    assert "Missing" in resp["error"]
+    sock.close()
+
+
+def test_trust_unknown_value_rejected(api_with_cc, cc_host, tmp_sock):
+    rfile, wfile, sock = _connect(tmp_sock)
+    resp = _send_recv(rfile, wfile, {"cmd": "trust", "session_id": "s1", "trust": "bogus"})
+    assert resp["ok"] is False
+    assert "Unknown trust value" in resp["error"]
+    cc_host.set_far_trust.assert_not_called()
     sock.close()

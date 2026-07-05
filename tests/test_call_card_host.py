@@ -12,6 +12,7 @@ import logging
 from unittest.mock import MagicMock, patch
 
 from iris.daemon.call_card_host import _DEFAULT_DISCLOSURE, CallCardHost
+from iris.trust import TrustMode
 
 
 def _make_host():
@@ -227,3 +228,73 @@ def test_empty_id_resolves_to_active_session_for_ack_and_stop(mock_session_cls):
     ended = [c.args[0] for c in api.broadcast.call_args_list
              if c.args[0].get("event") == "call_card_ended"]
     assert ended and ended[0]["session_id"] == minted
+
+
+# ---------------------------------------------------------------------------
+# set_far_trust (ti-pkt2r.2 -- real per-turn far-trust relay)
+# ---------------------------------------------------------------------------
+
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_set_far_trust_stamps_active_session_transcript(mock_session_cls):
+    host, _store, _api = _make_host()
+    mock_session_cls.return_value = MagicMock()
+
+    host.start_session("s1", "+15550000")
+    host.set_far_trust("s1", TrustMode.BOTH)
+
+    assert host._far_trust is TrustMode.BOTH
+    turn_id = host._session_transcript.append("far says something", "far", 0.0)
+    turn = host._session_transcript.get_turns()[turn_id - 1]
+    assert turn.trust is TrustMode.BOTH
+
+
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_set_far_trust_mismatched_session_is_noop(mock_session_cls, caplog):
+    host, _store, _api = _make_host()
+    mock_session_cls.return_value = MagicMock()
+
+    host.start_session("s1", "+15550000")
+    with caplog.at_level(logging.WARNING, logger="iris.daemon.call_card_host"):
+        host.set_far_trust("stale-session", TrustMode.BOTH)
+
+    assert host._far_trust is TrustMode.NONE
+    assert any("stale-session" in r.getMessage() for r in caplog.records)
+
+
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_set_far_trust_no_active_session_is_noop(mock_session_cls, caplog):
+    host, _store, _api = _make_host()
+
+    with caplog.at_level(logging.WARNING, logger="iris.daemon.call_card_host"):
+        host.set_far_trust("s1", TrustMode.BOTH)  # no start_session() call at all
+
+    assert host._far_trust is TrustMode.NONE
+    assert caplog.records
+
+
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_set_far_trust_empty_id_resolves_to_active_session(mock_session_cls):
+    host, _store, _api = _make_host()
+    mock_session_cls.return_value = MagicMock()
+
+    host.start_session("s1", "+15550000")
+    host.set_far_trust("", TrustMode.BOTH)  # empty id = the active session
+
+    assert host._far_trust is TrustMode.BOTH
+
+
+@patch("iris.capture.enricher.PostCallEnricher")
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_start_session_resets_far_trust_to_none(mock_session_cls, _mock_enricher_cls):
+    """A fresh call must never inherit the previous call's far-party grant."""
+    host, _store, _api = _make_host()
+    mock_session_cls.return_value = MagicMock()
+
+    host.start_session("s1", "+15550000")
+    host.set_far_trust("s1", TrustMode.BOTH)
+    assert host._far_trust is TrustMode.BOTH
+
+    host.stop_session("s1")
+    host.start_session("s2", "+15550001")
+
+    assert host._far_trust is TrustMode.NONE

@@ -15,7 +15,7 @@ from textual.widgets import Button  # noqa: E402
 
 import iris.console.app as app_module  # noqa: E402
 from iris.console.app import ActiveCallCard, IrisConsole, _GRANT  # noqa: E402
-from iris.console.call_card import DisclosureAcknowledged, DisclosureSkipped  # noqa: E402
+from iris.console.call_card import CallCardPanel, DisclosureAcknowledged, DisclosureSkipped  # noqa: E402
 from iris.console.conductor import State  # noqa: E402
 from iris.daemon.proxy import DaemonNotRunning  # noqa: E402
 from iris.trust import TrustMode  # noqa: E402
@@ -1093,6 +1093,153 @@ def test_disclosure_skipped_daemon_not_running_is_caught():
             app._proxy = MagicMock()
             app._proxy.send.side_effect = DaemonNotRunning()
             app.on_disclosure_skipped(DisclosureSkipped("s1"))  # must not raise
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# far_trust/trust event -> daemon relay (ti-pkt2r.2 real per-turn far-trust
+# relay). Reading iris/console/app.py:641-658, the proxy.send() relay is
+# nested INSIDE the `if "visible" in card.classes:` guard -- the SAME gate as
+# the armed/unarmed badge update, not an independent one. These tests assert
+# that actual (gated) behavior rather than the "should it fire either way"
+# question the bead raised -- the source settles it, no architect call needed.
+# ---------------------------------------------------------------------------
+
+def test_far_trust_event_relays_trust_to_daemon_via_proxy():
+    """Card visible + proxy connected: elevating far trust while a call is up
+    relays {"cmd": "trust", ...} to the daemon so CallCardHost/TranscriptStore
+    stamp turns with the operator's live grant."""
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._call_contact_name = "Bob"
+            app._call_trust_eligible = True
+            app.events.put(("call_connected",))
+            app._drain()
+
+            app.query_one(CallCardPanel)._session_id = "cc-session-1"
+            app._proxy = MagicMock()
+
+            # grant_far() emits ("far_trust", ...) itself -- Conductor is wired
+            # with emit=self.events.put (see IrisConsole.__init__) -- so no
+            # manual events.put() here, or the handler would run twice.
+            app.conductor.grant_far()  # _trust=BOTH so far_trust=BOTH/FULL
+            app._drain()
+
+            app._proxy.send.assert_called_once_with(
+                {"cmd": "trust", "session_id": "cc-session-1", "trust": "both"}
+            )
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_trust_event_kind_alias_also_relays():
+    """The operator-trust-cycle grant() path emits kind="trust" (vs far_trust
+    from grant_far()/revoke) -- same handler, same relay; it re-reads
+    conductor.far_trust fresh rather than trusting the event payload, so
+    plain grant() (armed, NONE->LOCAL->BOTH) reaches the daemon exactly the
+    same way grant_far() does."""
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._call_contact_name = "Bob"
+            app._call_trust_eligible = True
+            app.events.put(("call_connected",))
+            app._drain()
+
+            app.conductor.arm()
+            app._drain()
+            app.conductor.grant()  # NONE -> LOCAL; proxy still None, nothing sent
+            app._drain()
+
+            app.query_one(CallCardPanel)._session_id = "cc-session-2"
+            app._proxy = MagicMock()
+
+            app.conductor.grant()  # LOCAL -> BOTH
+            app._drain()
+
+            app._proxy.send.assert_called_once_with(
+                {"cmd": "trust", "session_id": "cc-session-2", "trust": "both"}
+            )
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_far_trust_event_noop_when_proxy_none():
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._call_contact_name = "Bob"
+            app._call_trust_eligible = True
+            app.events.put(("call_connected",))
+            app._drain()
+
+            app._proxy = None
+            app.conductor.grant_far()  # must not raise
+            app._drain()
+
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_far_trust_event_daemon_not_running_is_caught():
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        logged: list[str] = []
+        _orig_w = app._w
+        app._w = lambda msg: logged.append(msg) or _orig_w(msg)
+
+        async with app.run_test() as pilot:
+            app._call_contact_name = "Bob"
+            app._call_trust_eligible = True
+            app.events.put(("call_connected",))
+            app._drain()
+
+            app._proxy = MagicMock()
+            app._proxy.send.side_effect = DaemonNotRunning()
+
+            app.conductor.grant_far()
+            app._drain()
+
+            w_msgs = [m for m in logged if "trust level not synced" in m]
+            assert len(w_msgs) == 1
+
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_far_trust_event_no_relay_when_card_not_visible():
+    """Regression guard: with no active call, ActiveCallCard is never shown
+    (no "visible" class) -- the relay must not touch the proxy at all, since
+    it is gated by the same `if "visible" in card.classes:` check as the
+    badge update, not fired independently of it."""
+    from unittest.mock import MagicMock
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app._proxy = MagicMock()
+
+            card = app.query_one(ActiveCallCard)
+            assert "visible" not in card.classes  # no call_connected -> never shown
+
+            app.events.put(("far_trust", app.conductor.far_trust))
+            app._drain()
+
+            app._proxy.send.assert_not_called()
+
             await pilot.press("q")
 
     asyncio.run(scenario())
