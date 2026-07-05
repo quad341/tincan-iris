@@ -7,6 +7,7 @@ service layer is covered separately in test_doctor.py.
 from __future__ import annotations
 
 import json
+import subprocess
 from unittest.mock import MagicMock, patch
 
 from iris import doctor
@@ -195,3 +196,38 @@ def test_human_output_shows_config_line(capsys):
          patch("iris.doctor.check_services", return_value=[]):
         doctor.doctor_main(args=[])
     assert "config:" in capsys.readouterr().out
+
+
+
+# ---------------------------------------------------------------------------
+# call-card enrichment check (ti-0c90n) — probes the DAEMON's interpreter
+# ---------------------------------------------------------------------------
+
+def _enrichment_result(monkeypatch, probe_rc: int):
+    from iris import doctor as doc
+    monkeypatch.setattr(doc, "_daemon_python", lambda: "/usr/bin/python3.14")
+    real_run = doc.subprocess.run
+
+    def fake_run(cmd, **kw):
+        if cmd[0] == "/usr/bin/python3.14":
+            return subprocess.CompletedProcess(cmd, probe_rc, "", "boom" if probe_rc else "")
+        return real_run(cmd, **kw)
+
+    monkeypatch.setattr(doc.subprocess, "run", fake_run)
+    results = doc.check_assets()
+    return next(r for r in results if r.name == "call-card-enrichment")
+
+
+def test_enrichment_ok_when_daemon_python_imports_deps(monkeypatch):
+    from iris.doctor import DoctorStatus
+    r = _enrichment_result(monkeypatch, probe_rc=0)
+    assert r.status is DoctorStatus.OK
+
+
+def test_enrichment_degraded_with_fix_when_deps_missing(monkeypatch):
+    """The mom-call gap: enrichment silently skipped on every call because the
+    daemon env lacked pydantic — the doctor must name it and give the fix."""
+    from iris.doctor import DoctorStatus
+    r = _enrichment_result(monkeypatch, probe_rc=1)
+    assert r.status is DoctorStatus.DEGRADED
+    assert "pip install" in (r.fix or "")
