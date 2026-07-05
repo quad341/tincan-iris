@@ -293,6 +293,8 @@ def main() -> int:
         mes.stop()
         ctrl.stop()
         api.stop()
+        if call_card_host is not None:
+            call_card_host.close()
         watcher.stop()
         _remove_pid(_PID_PATH)
         _log.info("iris daemon stopped")
