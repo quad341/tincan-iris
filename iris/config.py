@@ -74,6 +74,13 @@ class Config:
         "exactly."
     )
 
+    # --- Call Card AFTER: write-only encrypted STT eval log (ti-qi76c). Base64
+    # NaCl public key; empty string disables eval logging entirely (fail
+    # closed — this is optional infrastructure for future model eval, not
+    # required for Call Card to function). The matching private key is never
+    # configured here or read by the daemon at all — see iris.eval_log_keygen.
+    eval_log_public_key: str = ""
+
     # --- Screening (handling_rule='screen'). relay_timeout_secs: how long Iris
     # waits for the operator to decide before auto-pivoting to take_message.
     screening_relay_timeout_secs: float = 20.0
