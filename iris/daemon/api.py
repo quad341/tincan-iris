@@ -22,6 +22,7 @@ Commands accepted from clients:
   confirm_action_item — operator confirms/edits an action item (requires call_card_host)
   disclosure_ack      — operator acknowledged AI disclosure (requires call_card_host)
   disclosure_skip     — operator explicitly declined AI disclosure (requires call_card_host)
+  trust               — relay the console's current far-party trust level (requires call_card_host)
   get_call_card       — return current call card snapshot (requires call_card_host)
   finalize_call_card  — write confirmed facts/action-items to AfterStore (requires call_card_host)
 """
@@ -36,6 +37,7 @@ import threading
 import time
 from pathlib import Path
 
+from ..trust import TrustMode
 from ._socket_path import daemon_socket_path
 from .brain_host import BrainHost
 from .posture import PostureManager
@@ -232,6 +234,8 @@ class DaemonAPI:
             self._handle_disclosure_ack(cmd, writer)
         elif kind == "disclosure_skip":
             self._handle_disclosure_skip(cmd, writer)
+        elif kind == "trust":
+            self._handle_trust(cmd, writer)
         elif kind == "get_call_card":
             self._handle_get_call_card(cmd, writer)
         elif kind == "finalize_call_card":
@@ -380,6 +384,23 @@ class DaemonAPI:
             return
         self._call_card_host.disclosure_skip(session_id)  # type: ignore[attr-defined]
         writer.write({"ack": "disclosure_skip", "ok": True})
+
+    def _handle_trust(self, cmd: dict, writer: _ClientWriter) -> None:
+        if self._call_card_host is None:
+            writer.write({"ack": "trust", "ok": False, "error": "call_card not configured"})
+            return
+        session_id = cmd.get("session_id", "")
+        if not session_id:
+            writer.write({"ack": "trust", "ok": False, "error": "Missing session_id"})
+            return
+        try:
+            trust = TrustMode(cmd.get("trust", ""))
+        except ValueError:
+            writer.write({"ack": "trust", "ok": False,
+                          "error": f"Unknown trust value: {cmd.get('trust')!r}"})
+            return
+        self._call_card_host.set_far_trust(session_id, trust)  # type: ignore[attr-defined]
+        writer.write({"ack": "trust", "ok": True})
 
     def _handle_get_call_card(self, cmd: dict, writer: _ClientWriter) -> None:
         if self._call_card_host is None:

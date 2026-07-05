@@ -7,10 +7,10 @@ session, never a raw API key — see docs/adr/0001) to find entities the L1
 pipeline missed, upserts results into CallCardStore, then broadcasts
 call_card_enriched.
 
-Per FR6 (ti-pkt2r interim trust-gate policy), the transcript sent to the
-model is filtered to operator-speaker turns only — the far side's words
-haven't cleared a trust/consent gate yet, so they're withheld from this
-cloud pass until ti-pkt2r.2 lands the real per-turn trust relay.
+Per FR6 (ti-pkt2r trust-gate policy), the transcript sent to the model
+includes operator-speaker turns plus any far-speaker turn stamped with full
+(BOTH) trust at capture time — turns captured before the operator granted
+full trust stay withheld even if the call is later elevated (ti-pkt2r.2).
 """
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from iris.capture._llm_common import ask_structured
 from iris.capture.schemas import CapturedFact, FactType
 from iris.capture.store import CallCardStore
 from iris.capture.transcript import TranscriptStore
+from iris.trust import TrustMode
 
 _log = logging.getLogger(__name__)
 
@@ -117,11 +118,13 @@ class PostCallEnricher(threading.Thread):
                 if f.get("normalized_value")
             ) or "(none)"
 
-            # FR6 interim trust-gate policy: only operator-speaker turns are
-            # sent to the cloud pass — see module docstring.
-            operator_turns = [t for t in turns if t.speaker == "operator"]
+            # FR6 trust-gate policy — see module docstring.
+            eligible_turns = [
+                t for t in turns
+                if t.speaker == "operator" or t.trust is TrustMode.BOTH
+            ]
             transcript_block = "\n".join(
-                f"{t.speaker}: {t.text}" for t in operator_turns
+                f"{t.speaker}: {t.text}" for t in eligible_turns
             )
 
             prompt = _build_prompt(confirmed_entities_block, transcript_block)

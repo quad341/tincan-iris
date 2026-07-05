@@ -641,10 +641,20 @@ class IrisConsole(App):
                 elif kind in ("far_trust", "trust"):
                     card = self.query_one(ActiveCallCard)
                     if "visible" in card.classes:
-                        if self.conductor.far_trust is TrustMode.BOTH:
+                        far_trust = self.conductor.far_trust
+                        if far_trust is TrustMode.BOTH:
                             card.mark_armed()
                         else:
                             card.mark_unarmed()
+                        if self._proxy is not None:
+                            session_id = self.query_one(CallCardPanel)._session_id
+                            try:
+                                self._proxy.send({
+                                    "cmd": "trust", "session_id": session_id,
+                                    "trust": far_trust.value,
+                                })
+                            except DaemonNotRunning:
+                                self._w("[red]Daemon disconnected — trust level not synced[/]")
                     self._refresh_status()
                 elif kind == "armed":
                     self._refresh_status()

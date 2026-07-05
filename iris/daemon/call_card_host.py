@@ -19,6 +19,7 @@ from iris.capture.store import CallCardStore
 from iris.capture.transcript import TranscriptStore
 from iris.notes import NotesStore
 from iris.roster import SENTINEL_CONTACT_ID
+from iris.trust import TrustMode
 
 _log = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class CallCardHost:
 
     Wired by the daemon entry point into HandlingEngine (on_call_connected/on_call_ended)
     and DaemonAPI (confirm_fact, confirm_action_item, disclosure_ack, disclosure_skip,
-    get_call_card).
+    set_far_trust, get_call_card).
     """
 
     def __init__(
@@ -56,6 +57,7 @@ class CallCardHost:
         self._fact_count: int = 0
         self._action_item_count: int = 0
         self._session_transcript: TranscriptStore | None = None
+        self._far_trust: TrustMode = TrustMode.NONE
 
     @property
     def _disclosure_script(self) -> str:
@@ -88,6 +90,7 @@ class CallCardHost:
             self._caller_number = caller_number
             self._fact_count = 0
             self._action_item_count = 0
+            self._far_trust = TrustMode.NONE
             transcript_store = TranscriptStore()
             self._session_transcript = transcript_store
             self._store.load_or_create(
@@ -293,6 +296,21 @@ class CallCardHost:
             if not session_id:  # empty id = the active session (see start_session)
                 session_id = self._session_id or ""
         self._store.mark_disclosure_skipped(session_id)
+
+    def set_far_trust(self, session_id: str, trust: TrustMode) -> None:
+        """Store the live far-party trust level; stamped onto turns as they're captured."""
+        with self._lock:
+            if not session_id:  # empty id = the active session (see start_session)
+                session_id = self._session_id or ""
+            if self._session is None or self._session_id != session_id:
+                _log.warning(
+                    "CallCardHost.set_far_trust: no active session matching %s", session_id
+                )
+                return
+            self._far_trust = trust
+            transcript_store = self._session_transcript
+        if transcript_store is not None:
+            transcript_store.set_trust(trust)
 
     def _on_far_lost(self, session_id: str, reason: str) -> None:
         """Far-channel binding broke (SCO route left / node vanished) — tell clients.
