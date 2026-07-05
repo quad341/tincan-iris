@@ -730,6 +730,21 @@ class ActionItemCard(Widget):
 # PriorCommitmentCard — "Since last time" open-commitment display (ti-w0dvp)
 # ─────────────────────────────────────────────────────────────────
 
+class CommitmentResolved(Message):
+    """Operator resolved a prior open commitment via [H]/[B].
+
+    Carries only the id + outcome (matching FactConfirmed/ActionItemConfirmed's
+    id-only convention) — PostCallReviewScreen already holds the full
+    commitment dicts from its own get_open_commitments() call and matches
+    this back to one by id.
+    """
+
+    def __init__(self, commitment_id: int, status: str) -> None:
+        super().__init__()
+        self.commitment_id = commitment_id
+        self.status = status
+
+
 class PriorCommitmentCard(Widget):
     """Displays one open commitment row from AfterStore.get_open_commitments().
 
@@ -857,6 +872,7 @@ class PriorCommitmentCard(Widget):
             return
         self._resolved = True
         self._store.resolve_commitment(self._commitment["id"], "honored")
+        self.post_message(CommitmentResolved(self._commitment["id"], "honored"))
         self.remove()
 
     def action_break(self) -> None:
@@ -864,6 +880,7 @@ class PriorCommitmentCard(Widget):
             return
         self._resolved = True
         self._store.resolve_commitment(self._commitment["id"], "broken")
+        self.post_message(CommitmentResolved(self._commitment["id"], "broken"))
         self.remove()
 
 

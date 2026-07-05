@@ -61,7 +61,7 @@ from .call_card import (
     FactDismissed,
     FactValueOverride,
 )
-from .post_call_review import PostCallReviewScreen
+from .post_call_review import PostCallReviewScreen, SaveRequested
 from ..audio.endpoint import default_endpoint
 from ..audio.streaming import StreamingTranscriber
 from ..audio.stt import default_stt
@@ -808,6 +808,20 @@ class IrisConsole(App):
                     2.5,
                     lambda sid=str(session_id): self._maybe_show_post_call_review(sid),
                 )
+        elif event_type == "call_card_written_back":
+            # Save finished server-side (ti-viv73) -- swap PostCallReviewScreen
+            # to its post-save delta view. Placed BEFORE the generic
+            # "call_card"-prefix branch below so it isn't swallowed by that
+            # catch-all. Guarded on session_id in case the operator already
+            # navigated away from this particular review screen.
+            session_id = str(ev.get("session_id", ""))
+            screen = self.screen
+            if isinstance(screen, PostCallReviewScreen) and screen.session_id == session_id:
+                fresh_card = self._call_card_store.get_call_card(session_id)
+                if fresh_card:
+                    screen.on_saved(fresh_card)
+                else:
+                    screen.on_save_failed()
         elif event_type.startswith("call_card"):
             # Live Call Card capture events from the daemon (ti-913rw) — feed the
             # side panel. Runs on the UI thread (drained from the queue).
@@ -967,7 +981,12 @@ class IrisConsole(App):
             rep_name = self.brain.cfg.operator_name
             self.push_screen(
                 PostCallReviewScreen(
-                    contact, card, commitments, self._after_store, rep_name=rep_name
+                    contact,
+                    card,
+                    commitments,
+                    self._after_store,
+                    session_id,
+                    rep_name=rep_name,
                 )
             )
         except Exception:  # noqa: BLE001
@@ -1260,6 +1279,40 @@ class IrisConsole(App):
                 self._proxy.send({"cmd": "disclosure_skip", "session_id": message.session_id})
             except DaemonNotRunning:
                 self._w("[red]Daemon disconnected — skip not recorded[/]")
+
+    def on_save_requested(self, message: SaveRequested) -> None:
+        """Finalize this call's card server-side (ti-viv73) -- same
+        send()-then-ack mechanism as disclosure_ack/disclosure_skip above.
+        Deliberately does NOT flip the screen to its delta view on ack
+        success: it waits for the call_card_written_back broadcast (handled
+        in _on_daemon_event) so there is a single source of truth for
+        "did it actually happen," matching the AC.
+        """
+        screen = self.screen
+        matching_screen = (
+            screen
+            if isinstance(screen, PostCallReviewScreen)
+            and screen.session_id == message.session_id
+            else None
+        )
+        if self._proxy is None:
+            self._w("[red]Daemon disconnected — call card not saved[/]")
+            if matching_screen is not None:
+                matching_screen.on_save_failed()
+            return
+        try:
+            ack = self._proxy.send(
+                {"cmd": "finalize_call_card", "session_id": message.session_id}
+            )
+        except DaemonNotRunning:
+            self._w("[red]Daemon disconnected — call card not saved[/]")
+            if matching_screen is not None:
+                matching_screen.on_save_failed()
+            return
+        if not ack.get("ok", False):
+            self._w(f"[red]Save failed: {escape(str(ack.get('error', 'unknown error')))}[/]")
+            if matching_screen is not None:
+                matching_screen.on_save_failed()
 
     def on_fact_confirmed(self, message: FactConfirmed) -> None:
         self._call_card_store.confirm_fact(message.fact_id, True)
