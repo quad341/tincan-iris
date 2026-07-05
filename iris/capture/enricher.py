@@ -1,33 +1,36 @@
-"""PostCallEnricher — L3 post-call LLM extraction pass (ti-rnlqo.5.2).
+"""PostCallEnricher — L3 post-call LLM extraction pass (ti-rnlqo.5.2,
+ti-pkt2r.1).
 
-Runs as a daemon thread spawned by CallCardHost after call_ended. Uses
-instructor[anthropic] + Pydantic to find entities the L1 pipeline missed,
-upserts results into CallCardStore, then broadcasts call_card_enriched.
+Runs as a daemon thread spawned by CallCardHost after call_ended. Driven
+through the daemon's warm CallCardCloudSession (a vendor Claude Code TUI
+session, never a raw API key — see docs/adr/0001) to find entities the L1
+pipeline missed, upserts results into CallCardStore, then broadcasts
+call_card_enriched.
+
+Per FR6 (ti-pkt2r interim trust-gate policy), the transcript sent to the
+model is filtered to operator-speaker turns only — the far side's words
+haven't cleared a trust/consent gate yet, so they're withheld from this
+cloud pass until ti-pkt2r.2 lands the real per-turn trust relay.
 """
 from __future__ import annotations
 
-import concurrent.futures
 import logging
-import os
 import threading
-from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
+from iris.capture._llm_common import ask_structured
 from iris.capture.schemas import CapturedFact, FactType
 from iris.capture.store import CallCardStore
 from iris.capture.transcript import TranscriptStore
 
-if TYPE_CHECKING:
-    pass
-
 _log = logging.getLogger(__name__)
 
-_MODEL = "claude-haiku-4-5-20251001"
-_TIMEOUT_S = 30
-_SYSTEM = (
-    "You are a precise call-note extractor. "
-    "Do not re-extract facts in confirmed_entities."
+_SHAPE = (
+    '{"new_facts": [{"fact_type": "...", "raw_text": "...", '
+    '"normalized_value": "...", "transcript_turn_id": 0, "confidence": 0.0}], '
+    '"enriched_items": [{"description": "...", "owner": "...", '
+    '"due_date": null, "transcript_turn_id": 0, "confidence": 0.0}]}'
 )
 
 
@@ -54,22 +57,21 @@ class EnrichmentSchema(BaseModel):
     enriched_items: list[ActionItemExtract] # action items with clarified desc/dates
 
 
-# ── Helper ────────────────────────────────────────────────────────────────────
+def _build_prompt(confirmed_entities_block: str, transcript_block: str) -> str:
+    return (
+        f"Confirmed entities (do not re-extract):\n{confirmed_entities_block}"
+        f"\n\nOperator-side transcript:\n{transcript_block}"
+        "\n\nFind: (1) entity types spoken but NOT in the confirmed list; "
+        "(2) action items needing clearer descriptions or due dates.\n\n"
+        f"Reply with exactly this JSON shape, one line, no other text:\n{_SHAPE}"
+    )
 
-def _api_key(cfg: object) -> str:
-    try:
-        key = cfg.anthropic_api_key  # type: ignore[union-attr]
-        if key:
-            return key
-    except AttributeError:
-        pass
-    try:
-        key = cfg.call_card.anthropic_api_key  # type: ignore[union-attr]
-        if key:
-            return key
-    except AttributeError:
-        pass
-    return os.environ.get("IRIS_ANTHROPIC_API_KEY", "") or os.environ.get("ANTHROPIC_API_KEY", "")
+
+def _retry_prompt() -> str:
+    return (
+        "That reply was not valid JSON matching the required shape. Reply "
+        f"again with ONLY the JSON, one line, matching exactly:\n{_SHAPE}"
+    )
 
 
 # ── Thread ────────────────────────────────────────────────────────────────────
@@ -85,6 +87,7 @@ class PostCallEnricher(threading.Thread):
         transcript_store: TranscriptStore,
         api: object,    # DaemonAPI
         cfg: object,
+        cloud: object,  # CallCardCloudSession | None
     ) -> None:
         super().__init__(daemon=True, name=f"enricher-{session_id[:8]}")
         self._session_id = session_id
@@ -92,12 +95,12 @@ class PostCallEnricher(threading.Thread):
         self._transcript_store = transcript_store
         self._api = api
         self._cfg = cfg
+        self._cloud = cloud
 
     def run(self) -> None:
         session_id = self._session_id
-        api_key = _api_key(self._cfg)
-        if not api_key:
-            _log.warning("PostCallEnricher: no api_key configured, skipping")
+        if self._cloud is None:
+            _log.warning("PostCallEnricher: no cloud session configured, skipping")
             return
         if self._transcript_store.is_empty():
             _log.debug("PostCallEnricher: empty transcript, skipping")
@@ -114,52 +117,28 @@ class PostCallEnricher(threading.Thread):
                 if f.get("normalized_value")
             ) or "(none)"
 
+            # FR6 interim trust-gate policy: only operator-speaker turns are
+            # sent to the cloud pass — see module docstring.
+            operator_turns = [t for t in turns if t.speaker == "operator"]
             transcript_block = "\n".join(
-                f"{t.speaker}: {t.text}" for t in turns
+                f"{t.speaker}: {t.text}" for t in operator_turns
             )
 
-            user_prompt = (
-                f"Confirmed entities (do not re-extract):\n{confirmed_entities_block}"
-                f"\n\nFull transcript:\n{transcript_block}"
-                "\n\nFind: (1) entity types spoken but NOT in the confirmed list; "
-                "(2) action items needing clearer descriptions or due dates."
-            )
-
-            result = self._call_llm(api_key, user_prompt)
+            prompt = _build_prompt(confirmed_entities_block, transcript_block)
+            result = ask_structured(self._cloud, prompt, _retry_prompt(), EnrichmentSchema)
+            if result is None:
+                self._store.mark_enrichment_done(session_id, status=2)
+                _log.warning(
+                    "PostCallEnricher: no valid response for %s", session_id
+                )
+                return
             self._apply_result(session_id, result)
 
-        except concurrent.futures.TimeoutError:
-            self._store.mark_enrichment_done(session_id, status=2)
-            _log.warning(
-                "PostCallEnricher: enrichment timed out for %s", session_id
-            )
         except Exception as exc:
             self._store.mark_enrichment_done(session_id, status=2)
             _log.warning(
                 "PostCallEnricher: enrichment failed for %s: %s", session_id, exc
             )
-
-    def _call_llm(self, api_key: str, user_prompt: str) -> EnrichmentSchema:
-        import anthropic
-        import instructor
-
-        client = instructor.from_anthropic(
-            anthropic.Anthropic(api_key=api_key)
-        )
-
-        def _invoke() -> EnrichmentSchema:
-            return client.chat.completions.create(
-                model=_MODEL,
-                response_model=EnrichmentSchema,
-                max_retries=3,
-                max_tokens=2048,
-                system=_SYSTEM,
-                messages=[{"role": "user", "content": user_prompt}],
-            )
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-            future = ex.submit(_invoke)
-            return future.result(timeout=_TIMEOUT_S)
 
     def _apply_result(self, session_id: str, result: EnrichmentSchema) -> None:
 

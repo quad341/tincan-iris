@@ -12,6 +12,11 @@ WorkingDirectory={REPO_PATH}
 ExecStart={REPO_PATH}/.venv/bin/python -m iris.daemon
 Restart=on-failure
 RestartSec=5
+# Call Card's warm ClaudeTuiSession needs `tmux` and `claude` (ti-pkt2r.1) —
+# a systemd user unit's default PATH is minimal and often lacks both even
+# when an interactive shell has them (see `iris doctor`'s call-card-tmux /
+# call-card-claude checks).
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 # iris-brain intentionally has NO IPAddressDeny — it needs outbound for:
 #   - optional cloud Tier 2 (Haiku) calls

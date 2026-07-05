@@ -16,10 +16,12 @@ dependencies = [
 
 [project.optional-dependencies]
 console = ["textual>=8"]
-# L3 post-call enrichment: an OPTIONAL cloud LLM pass. L1 capture works without
-# it; when absent, the daemon logs a warning and skips enrichment (never silent).
+# L3 post-call enrichment: an OPTIONAL cloud LLM pass, driven through a warm
+# ClaudeTuiSession (vendor Claude Code TUI) rather than a raw API key — see
+# docs/adr/0001. L1 capture works without it; when pydantic is absent, the
+# daemon logs a warning and skips enrichment (never silent).
 call-card = [
-    "instructor[anthropic]>=1.0",
+    "pydantic>=2",
 ]
 
 [project.scripts]
