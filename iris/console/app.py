@@ -50,13 +50,23 @@ from .contacts import ContactsScreen
 from .contacts_logic import VERB_DESCRIPTION
 from .help_screen import HelpScreen
 from .list_view import PostCallListView
-from .call_card import CallCardPanel, DisclosureAcknowledged, DisclosureSkipped
+from .call_card import (
+    ActionItemConfirmed,
+    ActionItemEdited,
+    CallCardPanel,
+    DisclosureAcknowledged,
+    DisclosureSkipped,
+    FactConfirmed,
+    FactDismissed,
+    FactValueOverride,
+)
 from ..audio.endpoint import default_endpoint
 from ..audio.streaming import StreamingTranscriber
 from ..audio.stt import default_stt
 from ..audio.tts import default_tts
 from ..brain import Brain
 from ..call_control import TincanCallControl
+from ..capture.store import CallCardStore
 from ..fillers import filler_picker
 from ..proactive_delivery import ProactiveDelivery, SilenceTracker
 from ..proactive_store import ProactiveStore
@@ -456,6 +466,7 @@ class IrisConsole(App):
         self._await_answer: bool = False
         self._messages = MessageStore()
         self._roster = RosterStore()
+        self._call_card_store = CallCardStore()
         self._posture = PostureManager()
         self._dnd: bool = False
         self._dnd_expires: float | None = None
@@ -1193,6 +1204,28 @@ class IrisConsole(App):
                 self._proxy.send({"cmd": "disclosure_skip", "session_id": message.session_id})
             except DaemonNotRunning:
                 self._w("[red]Daemon disconnected — skip not recorded[/]")
+
+    def on_fact_confirmed(self, message: FactConfirmed) -> None:
+        self._call_card_store.confirm_fact(message.fact_id, True)
+
+    def on_fact_dismissed(self, message: FactDismissed) -> None:
+        self._call_card_store.confirm_fact(message.fact_id, False)
+
+    def on_fact_value_override(self, message: FactValueOverride) -> None:
+        self._call_card_store.confirm_fact(
+            message.fact_id, True, normalized_value=message.new_value
+        )
+
+    def on_action_item_confirmed(self, message: ActionItemConfirmed) -> None:
+        self._call_card_store.confirm_action_item(message.item_id, True)
+
+    def on_action_item_edited(self, message: ActionItemEdited) -> None:
+        self._call_card_store.confirm_action_item(
+            message.item_id,
+            True,
+            description=message.description,
+            due_date=message.due_date,
+        )
 
     def _do_arm_trust(self) -> None:
         """Arm the trust session; operator can then use [g] to grant the far party."""

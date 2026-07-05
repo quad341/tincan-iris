@@ -315,6 +315,7 @@ class FactValueOverride(Message):
 class _FactBaseCard(Widget):
     """Base for fact-feed cards; holds a CapturedFact and handles dismiss/confirm."""
 
+    can_focus = True
     aria_role = "article"
 
     DEFAULT_CSS = """
@@ -363,6 +364,9 @@ class CriticalFactCard(_FactBaseCard):
     }
     CriticalFactCard.-pulse-dim {
         border: heavy #7c5308;
+    }
+    CriticalFactCard:focus {
+        border: heavy #fbbf24;
     }
     """
 
@@ -464,9 +468,9 @@ class CriticalFactCard(_FactBaseCard):
 # ─────────────────────────────────────────────────────────────────
 
 class FactCard(_FactBaseCard):
-    """Normal-confidence fact card: teal border, confirm/dismiss only.
+    """Normal-confidence fact card: teal border, confirm/dismiss/edit.
 
-    Actions: [D] Confirm, [X] Dismiss. No edit mode (deferred to ti-tr1m5).
+    Actions: [D] Confirm, [E] Edit (inline, Enter=save / Esc=cancel), [X] Dismiss.
     ARIA: aria-live=polite.
     """
 
@@ -479,24 +483,77 @@ class FactCard(_FactBaseCard):
         padding: 1;
         margin-bottom: 1;
     }
+    FactCard:focus {
+        border: heavy #2dd4bf;
+    }
     """
+
+    def __init__(self, fact: CapturedFact, **kwargs: Any) -> None:
+        super().__init__(fact, **kwargs)
+        self._editing: bool = False
+        self._edit_buffer: str = ""
 
     def render(self) -> str:
         conf_bar = _render_confidence_bar(self._fact.confidence)
+        header = f"[bold #14b8a6]● FACT[/bold #14b8a6]  {conf_bar}"
+
+        if self._editing:
+            cursor = "▋"
+            return (
+                f"{header}\n"
+                f"[dim]{self._fact.raw_text}[/dim]\n"
+                f"[bold white]{self._edit_buffer}{cursor}[/bold white]\n"
+                f"[dim]Enter to confirm  •  Esc to cancel[/dim]"
+            )
+
         return (
-            f"[bold #14b8a6]● FACT[/bold #14b8a6]  {conf_bar}\n"
+            f"{header}\n"
             f"[dim]{self._fact.raw_text}[/dim]\n"
             f"[bold white]{self._fact.normalized_value}[/bold white]\n"
-            f"[dim]\\[D] Confirm  \\[X] Dismiss[/dim]"
+            f"[dim]\\[D] Confirm  \\[E] Edit  \\[X] Dismiss[/dim]"
         )
 
     def on_key(self, event: Any) -> None:
-        if event.key == "d":
+        if self._editing:
             event.stop()
-            self.action_confirm()
-        elif event.key == "x":
-            event.stop()
-            self.action_dismiss()
+            event.prevent_default()
+            if event.key == "escape":
+                self._editing = False
+                self._edit_buffer = ""
+                self.refresh()
+            elif event.key == "enter":
+                self._commit_edit()
+            elif event.key == "backspace":
+                self._edit_buffer = self._edit_buffer[:-1]
+                self.refresh()
+            elif event.character and event.character.isprintable():
+                self._edit_buffer += event.character
+                self.refresh()
+        else:
+            if event.key == "e":
+                event.stop()
+                self._editing = True
+                self._edit_buffer = self._fact.normalized_value
+                self.refresh()
+            elif event.key == "d":
+                event.stop()
+                self.action_confirm()
+            elif event.key == "x":
+                event.stop()
+                self.action_dismiss()
+
+    def _commit_edit(self) -> None:
+        new_value = self._edit_buffer.strip()
+        if not new_value:
+            # Empty buffer = user changed their mind; treat as cancel
+            self._editing = False
+            self._edit_buffer = ""
+            self.refresh()
+            return
+        self.post_message(FactValueOverride(self._fact.id, new_value))
+        self._editing = False
+        self._edit_buffer = ""
+        self.remove()
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -545,6 +602,7 @@ class ActionItemCard(Widget):
     ARIA: aria-live=polite.
     """
 
+    can_focus = True
     aria_role = "article"
 
     DEFAULT_CSS = """
@@ -553,6 +611,9 @@ class ActionItemCard(Widget):
         height: auto;
         padding: 1;
         margin-bottom: 1;
+    }
+    ActionItemCard:focus {
+        border: heavy #a5b4fc;
     }
     """
 
