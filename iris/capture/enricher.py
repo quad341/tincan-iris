@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
-import os
 import threading
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
+from iris.capture._llm_common import _api_key
 from iris.capture.schemas import CapturedFact, FactType
 from iris.capture.store import CallCardStore
 from iris.capture.transcript import TranscriptStore
@@ -52,24 +52,6 @@ class ActionItemExtract(BaseModel):
 class EnrichmentSchema(BaseModel):
     new_facts: list[FactExtract]           # entities NOT already in confirmed_entities
     enriched_items: list[ActionItemExtract] # action items with clarified desc/dates
-
-
-# ── Helper ────────────────────────────────────────────────────────────────────
-
-def _api_key(cfg: object) -> str:
-    try:
-        key = cfg.anthropic_api_key  # type: ignore[union-attr]
-        if key:
-            return key
-    except AttributeError:
-        pass
-    try:
-        key = cfg.call_card.anthropic_api_key  # type: ignore[union-attr]
-        if key:
-            return key
-    except AttributeError:
-        pass
-    return os.environ.get("IRIS_ANTHROPIC_API_KEY", "") or os.environ.get("ANTHROPIC_API_KEY", "")
 
 
 # ── Thread ────────────────────────────────────────────────────────────────────
