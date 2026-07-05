@@ -46,6 +46,34 @@ class Config:
     # iris/disclosure.py, which is a separate flow.
     call_card_disclosure_script: str = ""
 
+    # --- Call Card AFTER: post-call recap generator (ti-6a1y3). Facts/action
+    # items below this confidence are excluded from the recap LLM prompt
+    # unless the operator already confirmed them.
+    call_card_recap_confidence_threshold: float = 0.8
+
+    # --- Call Card L3 cloud LLM (ti-pkt2r.1): enrichment + recap are both
+    # driven through one warm ClaudeTuiSession (the vendor Claude Code TUI,
+    # never a raw API key — see docs/adr/0001 and CallCardCloudSession).
+    call_card_llm_enabled: bool = True
+    call_card_llm_model: str = "claude-haiku-4-5"
+    call_card_llm_tmux_session: str = "iris-callcard-llm"
+    call_card_llm_ready_timeout_s: float = 40.0
+    call_card_llm_ask_timeout_s: float = 120.0
+    call_card_llm_system_prompt: str = (
+        "You are a precise, silent JSON-extraction and note-writing assistant "
+        "for a phone-call notes application. Each request asks you to either "
+        "(1) extract structured facts/action items from a transcript excerpt, "
+        "or (2) write a short recap from a list of already-confirmed facts. "
+        "Rules, always: reply with ONLY the requested JSON, as a single line "
+        "with no embedded newlines — no prose, no markdown code fences, no "
+        "commentary before or after it. If asked to extract and there is "
+        "nothing to extract, reply with the schema's empty-list form, not an "
+        "explanation. If asked for a recap, restate only what the given facts "
+        "say — never introduce anything not present in them. Each request "
+        "restates its exact required JSON shape; follow that request's shape "
+        "exactly."
+    )
+
     # --- Screening (handling_rule='screen'). relay_timeout_secs: how long Iris
     # waits for the operator to decide before auto-pivoting to take_message.
     screening_relay_timeout_secs: float = 20.0

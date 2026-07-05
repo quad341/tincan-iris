@@ -7,6 +7,7 @@ import uuid
 from dataclasses import asdict
 
 from iris.capture.after_store import AfterStore
+from iris.capture.cloud_session import CallCardCloudSession
 from iris.capture.processor import L1CaptureProcessor
 from iris.capture.schemas import ActionItem, CapturedFact, DURABLE_FACT_TYPES, FactType
 from iris.capture.session import CaptureSession
@@ -42,6 +43,7 @@ class CallCardHost:
         self._processor = processor
         self._api = api
         self._cfg = cfg
+        self._cloud = CallCardCloudSession(cfg) if getattr(cfg, "call_card_llm_enabled", True) else None
         self._lock = threading.Lock()
         self._session: CaptureSession | None = None
         self._session_id: str | None = None
@@ -132,15 +134,19 @@ class CallCardHost:
             "fact_count": fact_count,
             "action_item_count": action_item_count,
         })
-        # L3 post-call enrichment is OPTIONAL (needs the `call-card` extra:
-        # instructor + pydantic + anthropic). L1 capture works without it — if the
-        # extra is absent, log loudly and skip (never a silent no-op).
+        # L3 post-call enrichment + recap are OPTIONAL (need the `call-card`
+        # extra: pydantic). L1 capture works without them — if the extra is
+        # absent, log loudly and skip (never a silent no-op). Recap needs
+        # nothing enricher doesn't already require, so one guard covers both
+        # imports.
         try:
             from iris.capture.enricher import PostCallEnricher  # noqa: PLC0415
+            from iris.capture.recap import PostCallRecapGenerator  # noqa: PLC0415
         except ImportError as exc:
             _log.warning(
-                "Post-call enrichment skipped — call-card LLM extra not installed "
-                "(%s); run `pip install -e '.[call-card]'` for the L3 pass.", exc,
+                "Post-call enrichment+recap skipped — call-card LLM extra not "
+                "installed (%s); run `pip install -e '.[call-card]'` for the "
+                "L3 pass.", exc,
             )
             return
         enricher = PostCallEnricher(
@@ -149,9 +155,27 @@ class CallCardHost:
             transcript_store=transcript_store,
             api=self._api,
             cfg=self._cfg,
+            cloud=self._cloud,
         )
         enricher.start()
-        # enricher is daemon=True; reference released so GC can collect when it finishes
+
+        recap = PostCallRecapGenerator(
+            session_id=session_id,
+            store=self._store,
+            enricher_thread=enricher,
+            api=self._api,
+            cfg=self._cfg,
+            cloud=self._cloud,
+            confidence_threshold=self._cfg.call_card_recap_confidence_threshold,
+        )
+        recap.start()
+        # Both threads are daemon=True; references released so GC can collect
+        # them once they finish (recap always outlives enricher via .join()).
+
+    def close(self) -> None:
+        """Stop the warm cloud session, if any — called once at daemon shutdown."""
+        if self._cloud is not None:
+            self._cloud.close()
 
     # ── Fact / action-item callbacks (called from audio threads) ─────────────
 
