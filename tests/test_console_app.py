@@ -1175,3 +1175,77 @@ def test_direct_call_connected_still_starts_ride_along_capture():
             await pilot.press("q")
 
     asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# JIT error hint — toast + status-bar clause (ti-00jr4.3 / ti-00jr4.5)
+#
+# The notify() and _refresh_status() strings both backslash-escape their
+# "[e]"/"[b]" tokens (e.g. r"...press \[e] to copy...") because Rich/Textual
+# markup treats an unescaped lowercase-leading "[x]" as an unrecognized style
+# tag and silently drops it on render -- checking the raw string would miss a
+# regression to an unescaped bracket, since the raw text still *contains*
+# "[e]"/"[b]" even when mangled. These tests assert against the markup-
+# rendered plain text (via Content.from_markup(...).plain), not the raw
+# string, so a reintroduced unescaped bracket actually fails the test.
+# ---------------------------------------------------------------------------
+
+def test_error_event_notifies_once_with_rendered_escaped_hint():
+    from textual.content import Content
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            calls = []
+            _orig_notify = app.notify
+            app.notify = lambda *a, **kw: calls.append((a, kw)) or _orig_notify(*a, **kw)
+
+            app.events.put(("error", "boom"))
+            await pilot.pause()
+
+            assert len(calls) == 1
+            args, kwargs = calls[0]
+            assert kwargs.get("severity") == "error"
+            assert Content.from_markup(args[0]).plain == (
+                "Error - press [e] to copy it, [b] to file a bug"
+            )
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_refresh_status_shows_rendered_error_hint_after_error_event():
+    from textual.content import Content
+    from textual.widgets import Static
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            app.events.put(("error", "boom"))
+            await pilot.pause()
+
+            status = app.query_one("#status", Static).render()
+            assert isinstance(status, Content)
+            assert "⚠ error just now — [e] copy · [b] file bug" in status.plain
+            await pilot.press("q")
+
+    asyncio.run(scenario())
+
+
+def test_refresh_status_omits_error_hint_when_no_error_yet():
+    from textual.widgets import Static
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            assert app._last_error == ""
+            app._refresh_status()
+            await pilot.pause()
+
+            plain = app.query_one("#status", Static).render().plain
+            assert "error just now" not in plain
+            assert "[e]" not in plain
+            assert "[b]" not in plain
+            await pilot.press("q")
+
+    asyncio.run(scenario())
