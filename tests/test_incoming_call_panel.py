@@ -216,6 +216,23 @@ def test_panel_choices_empty_for_take_message():
     assert "Decline" not in choices_text
 
 
+def test_panel_choices_lowercase_key_survives_markup_rendering():
+    """ti-40baw: a lowercase single-char key (e.g. 'g') must render as literal
+    '[g]' text. Previously this was the worst of the 5 broken sites -- BOTH the
+    brackets AND the key character vanished, because the key sat entirely
+    inside what Rich parsed as an unrecognized style-tag attempt, not just
+    inside the brackets around it. Existing panel tests above only use digit
+    keys ("1"/"2"/"3"), which Rich's markup grammar never touches -- they
+    would not catch a regression here."""
+    panel, statics = _make_panel()
+    from textual.content import Content
+
+    choices_g = [{"id": "grant", "label": "Grant", "key": "g"}]
+    panel.show("screen", "Unknown", "+1555", choices_g)
+    choices_text = statics["#call-choices"]._text
+    assert Content.from_markup(choices_text).plain == "[g] Grant"
+
+
 # ---------------------------------------------------------------------------
 # DaemonProxy fallback in IrisConsole
 # ---------------------------------------------------------------------------
