@@ -11,6 +11,7 @@ from iris.console.call_card import (
     CallCardPanel,
     CriticalFactCard,
     DisclosureCard,
+    DisclosureState,
     FactCard,
 )
 
@@ -85,4 +86,56 @@ def test_malformed_fact_is_ignored(monkeypatch):
 def test_unknown_event_is_ignored(monkeypatch):
     panel, cards = _panel(monkeypatch)
     panel.handle_event({"event": "totally_unrelated"})
+    assert cards == []
+
+
+# ---------------------------------------------------------------------------
+# call_card_disclosed / call_card_skipped -- reflect the daemon-driven
+# auto-disclose outcome onto the mounted DisclosureCard (ti-iv69h). Minimal/
+# functional only; the visual redesign is a separate, sibling bead.
+# ---------------------------------------------------------------------------
+
+def test_call_card_disclosed_forwards_to_mounted_disclosure_card(monkeypatch):
+    panel, _cards = _panel(monkeypatch)
+    panel.handle_event({
+        "event": "call_card_disclosure_needed", "session_id": "s1", "script": "AI is listening.",
+    })
+    results: list = []
+    monkeypatch.setattr(panel._disclosure, "set_disclosure_result", results.append)
+
+    panel.handle_event({"event": "call_card_disclosed", "session_id": "s1"})
+
+    assert results == [DisclosureState.DISCLOSED]
+
+
+def test_call_card_skipped_forwards_to_mounted_disclosure_card(monkeypatch):
+    panel, _cards = _panel(monkeypatch)
+    panel.handle_event({
+        "event": "call_card_disclosure_needed", "session_id": "s1", "script": "AI is listening.",
+    })
+    results: list = []
+    monkeypatch.setattr(panel._disclosure, "set_disclosure_result", results.append)
+
+    panel.handle_event({"event": "call_card_skipped", "session_id": "s1"})
+
+    assert results == [DisclosureState.SKIPPED]
+
+
+def test_call_card_disclosed_before_disclosure_needed_is_noop(monkeypatch):
+    # No DisclosureCard has been mounted yet -- must not crash on self._disclosure
+    # being None (e.g. a stray/duplicate broadcast arriving out of order).
+    panel, cards = _panel(monkeypatch)
+
+    panel.handle_event({"event": "call_card_disclosed", "session_id": "s1"})
+
+    assert panel._disclosure is None
+    assert cards == []
+
+
+def test_call_card_skipped_before_disclosure_needed_is_noop(monkeypatch):
+    panel, cards = _panel(monkeypatch)
+
+    panel.handle_event({"event": "call_card_skipped", "session_id": "s1"})
+
+    assert panel._disclosure is None
     assert cards == []

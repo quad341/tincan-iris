@@ -93,3 +93,35 @@ def test_main_passes_loaded_config_to_call_card_host(tmp_path, monkeypatch):
 
     assert captured_cfg is not None
     assert captured_cfg.call_card_disclosure_script == "wired end-to-end"
+
+
+# ---------------------------------------------------------------------------
+# main() forwards a real TTS instance to CallCardHost (ti-iv69h)
+# ---------------------------------------------------------------------------
+
+class _CapturedTTS(Exception):
+    def __init__(self, tts):
+        self.tts = tts
+
+
+def test_main_passes_default_tts_to_call_card_host(tmp_path, monkeypatch):
+    monkeypatch.setenv("IRIS_DB", str(tmp_path / "test.db"))
+
+    def _raise_with_tts(*, store, processor, api, cfg, tts=None):
+        raise _CapturedTTS(tts)
+
+    from iris.daemon import __main__ as daemon_main
+
+    sentinel_tts = object()
+    captured_tts = None
+    with patch("iris.daemon.call_card_host.CallCardHost", side_effect=_raise_with_tts), \
+         patch("iris.audio.tts.default_tts", return_value=sentinel_tts) as mock_default_tts:
+        try:
+            daemon_main.main()
+        except _CapturedTTS as exc:
+            captured_tts = exc.tts
+        else:
+            pytest.fail("main() did not construct CallCardHost -- nothing captured")
+
+    mock_default_tts.assert_called_once_with()
+    assert captured_tts is sentinel_tts

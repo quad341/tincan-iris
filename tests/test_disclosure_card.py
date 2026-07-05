@@ -21,6 +21,7 @@ from iris.console.call_card import (
     DisclosureAcknowledged,
     DisclosureCard,
     DisclosureSkipped,
+    DisclosureState,
 )
 
 
@@ -81,3 +82,52 @@ def test_disclosure_acknowledged_handler_name_matches_app_method():
 def test_disclosure_skipped_handler_name_matches_app_method():
     msg = DisclosureSkipped("s1")
     assert msg.handler_name == "on_disclosure_skipped"
+
+
+# ---------------------------------------------------------------------------
+# set_disclosure_result() -- the daemon-driven auto-disclose path (ti-iv69h).
+# Unlike action_disclose()/action_skip(), this must NOT post
+# DisclosureAcknowledged/DisclosureSkipped: the daemon already made the
+# transition (that's WHY this event exists), so posting again would just
+# re-send an already-applied ack/skip back to it.
+# ---------------------------------------------------------------------------
+
+def test_set_disclosure_result_disclosed_updates_state_without_posting(monkeypatch, tmp_path):
+    card, posted = _card(monkeypatch, tmp_path)
+
+    card.set_disclosure_result(DisclosureState.DISCLOSED)
+
+    assert card.state is DisclosureState.DISCLOSED
+    assert posted == []
+
+
+def test_set_disclosure_result_skipped_updates_state_without_posting(monkeypatch, tmp_path):
+    card, posted = _card(monkeypatch, tmp_path)
+
+    card.set_disclosure_result(DisclosureState.SKIPPED)
+
+    assert card.state is DisclosureState.SKIPPED
+    assert posted == []
+
+
+def test_set_disclosure_result_persists_state_to_disk(monkeypatch, tmp_path):
+    card, _posted = _card(monkeypatch, tmp_path, session_id="s1")
+
+    card.set_disclosure_result(DisclosureState.DISCLOSED)
+
+    reloaded = DisclosureCard("s1")
+    assert reloaded.state is DisclosureState.DISCLOSED
+
+
+def test_set_disclosure_result_is_noop_once_already_resolved(monkeypatch, tmp_path):
+    # Guard mirrors action_disclose/action_skip's own "already resolved" check --
+    # an operator's manual [S] keypress must win over a slightly-delayed automatic
+    # disclosure-succeeded broadcast landing after it (and vice versa).
+    card, posted = _card(monkeypatch, tmp_path)
+    card.action_skip()
+
+    card.set_disclosure_result(DisclosureState.DISCLOSED)
+
+    assert card.state is DisclosureState.SKIPPED
+    assert len(posted) == 1
+    assert isinstance(posted[0], DisclosureSkipped)
