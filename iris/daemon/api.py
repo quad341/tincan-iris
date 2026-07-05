@@ -9,7 +9,7 @@ Event types broadcast to all connected clients:
   incoming_call, screen_intro, call_connected, call_ended, posture, take_message_done
   brain_turn_started, brain_chunk, brain_reply
   call_card_started, call_card_disclosure_needed, call_card_fact, call_card_action_item,
-  call_card_ended, call_card_enriched
+  call_card_ended, call_card_enriched, call_card_written_back
 
 Commands accepted from clients:
   choose              — operator selects a call-handling action
@@ -23,6 +23,7 @@ Commands accepted from clients:
   disclosure_ack      — operator acknowledged AI disclosure (requires call_card_host)
   disclosure_skip     — operator explicitly declined AI disclosure (requires call_card_host)
   get_call_card       — return current call card snapshot (requires call_card_host)
+  finalize_call_card  — write confirmed facts/action-items to AfterStore (requires call_card_host)
 """
 from __future__ import annotations
 
@@ -233,6 +234,8 @@ class DaemonAPI:
             self._handle_disclosure_skip(cmd, writer)
         elif kind == "get_call_card":
             self._handle_get_call_card(cmd, writer)
+        elif kind == "finalize_call_card":
+            self._handle_finalize_call_card(cmd, writer)
         else:
             writer.write({"ack": kind or "unknown", "ok": False,
                           "error": f"Unknown command: {kind!r}"})
@@ -385,6 +388,17 @@ class DaemonAPI:
         session_id = cmd.get("session_id")
         result = self._call_card_host.get_call_card(session_id=session_id)  # type: ignore[attr-defined]
         writer.write({"ack": "get_call_card", "ok": True, "call_card": result})
+
+    def _handle_finalize_call_card(self, cmd: dict, writer: _ClientWriter) -> None:
+        if self._call_card_host is None:
+            writer.write({"ack": "finalize_call_card", "ok": False, "error": "call_card not configured"})
+            return
+        session_id = cmd.get("session_id", "")
+        if not session_id:
+            writer.write({"ack": "finalize_call_card", "ok": False, "error": "Missing session_id"})
+            return
+        self._call_card_host.finalize_writeback(session_id)  # type: ignore[attr-defined]
+        writer.write({"ack": "finalize_call_card", "ok": True})
 
     # --- PostureManager subscriber ---
 
