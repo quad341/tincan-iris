@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS call_log (
     agent_name      TEXT NOT NULL DEFAULT '',
     disclosed_at    REAL,
     outcome_summary TEXT NOT NULL DEFAULT '',
+    caller_number   TEXT,
     objective       TEXT,
     created_at      REAL NOT NULL
 );
@@ -79,6 +80,9 @@ class AfterStore:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(_DDL)
+            cols = {r[1] for r in self._conn.execute("PRAGMA table_info(call_log)")}
+            if "caller_number" not in cols:
+                self._conn.execute("ALTER TABLE call_log ADD COLUMN caller_number TEXT")
             self._conn.commit()
 
     def insert_call_log(
@@ -90,17 +94,18 @@ class AfterStore:
         agent_name: str,
         disclosed_at: float | None,
         outcome_summary: str,
+        caller_number: str = "",
     ) -> int:
         with self._lock:
             cur = self._conn.execute(
                 """
                 INSERT INTO call_log
                     (contact_id, session_id, started_at, ended_at, agent_name,
-                     disclosed_at, outcome_summary, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     disclosed_at, outcome_summary, caller_number, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (contact_id, session_id, started_at, ended_at, agent_name,
-                 disclosed_at, outcome_summary, time.time()),
+                 disclosed_at, outcome_summary, caller_number, time.time()),
             )
             self._conn.commit()
             return int(cur.lastrowid)
