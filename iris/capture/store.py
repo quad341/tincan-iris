@@ -336,6 +336,7 @@ class CallCardStore:
             ]
             return {
                 "session_id": session_id,
+                "caller_number": row["caller_number"],
                 "facts": facts,
                 "action_items": items,
                 "disclosure_ack": bool(row["disclosure_ack"]),

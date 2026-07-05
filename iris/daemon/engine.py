@@ -19,6 +19,7 @@ from typing import Callable
 
 from ..notify_sink import DesktopNotifySink
 from .policy import PolicyResolver
+from ..roster import SENTINEL_CONTACT_ID
 
 _log = logging.getLogger(__name__)
 
@@ -90,6 +91,7 @@ class HandlingEngine:
         self._call_card_host = call_card_host
         self._brain_host = brain_host
         self._pending_contact: object | None = None
+        self._pending_caller_number: str = ""
         self._attention = AttentionLock()
 
     # --- public entry points ---
@@ -116,6 +118,7 @@ class HandlingEngine:
             )
             return
 
+        self._pending_caller_number = caller_number
         result = self._resolver.resolve(caller_number, call_id)
         self._pending_contact = result.contact
         verb = result.verb
@@ -149,9 +152,7 @@ class HandlingEngine:
     def on_call_connected(self, call_id: str) -> None:
         """Set brain call context and notify call-card host that the call has been answered."""
         contact = self._pending_contact
-        caller_number = (
-            getattr(contact, "phone_e164", None) or ""
-        ) if contact is not None else ""
+        caller_number = self._pending_caller_number
 
         if self._brain_host is not None and contact is not None:
             self._brain_host.set_call_context(  # type: ignore[union-attr]
@@ -161,7 +162,7 @@ class HandlingEngine:
             )
 
         if self._call_card_host is not None:
-            contact_id = contact.id if contact is not None else None  # type: ignore[union-attr]
+            contact_id = contact.id if contact is not None else SENTINEL_CONTACT_ID  # type: ignore[union-attr]
             self._call_card_host.start_session(call_id, caller_number, contact_id)  # type: ignore[union-attr]
 
     def on_call_ended(self, call_id: str) -> None:
@@ -170,6 +171,7 @@ class HandlingEngine:
             self._call_card_host.stop_session(call_id)  # type: ignore[union-attr]
         self._attention.release(call_id)
         self._pending_contact = None
+        self._pending_caller_number = ""
         if self._brain_host is not None:
             self._brain_host.clear_call_context()  # type: ignore[union-attr]
 
