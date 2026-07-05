@@ -227,3 +227,67 @@ def test_empty_id_resolves_to_active_session_for_ack_and_stop(mock_session_cls):
     ended = [c.args[0] for c in api.broadcast.call_args_list
              if c.args[0].get("event") == "call_card_ended"]
     assert ended and ended[0]["session_id"] == minted
+
+
+# ---------------------------------------------------------------------------
+# stop_session -- PostCallRecapGenerator wiring (ti-ah76a / ti-6a1y3)
+#
+# Recap must start strictly after the enricher (it depends on
+# enricher_thread.join() to see L3-enriched facts), take confidence_threshold
+# from cfg.call_card_recap_confidence_threshold, and share the enricher's own
+# ImportError guard -- so a missing call-card LLM extra skips BOTH, not just
+# recap on its own.
+# ---------------------------------------------------------------------------
+
+@patch("iris.capture.recap.PostCallRecapGenerator")
+@patch("iris.capture.enricher.PostCallEnricher")
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_stop_session_starts_recap_generator_after_enricher_with_matching_args(
+    _mock_session_cls, mock_enricher_cls, mock_recap_cls,
+):
+    cfg = MagicMock(call_card_recap_confidence_threshold=0.42)
+    host = _make_host_with_cfg(cfg)
+
+    enricher_instance = MagicMock()
+    mock_enricher_cls.return_value = enricher_instance
+    recap_instance = MagicMock()
+
+    call_order: list[str] = []
+    enricher_instance.start.side_effect = lambda: call_order.append("enricher.start")
+
+    def _record_recap_init(**_kwargs):
+        call_order.append("recap.__init__")
+        return recap_instance
+
+    mock_recap_cls.side_effect = _record_recap_init
+    recap_instance.start.side_effect = lambda: call_order.append("recap.start")
+
+    host.start_session("s1", "+15550000")
+    host.stop_session("s1")
+
+    assert call_order == ["enricher.start", "recap.__init__", "recap.start"]
+    kwargs = mock_recap_cls.call_args.kwargs
+    assert kwargs["session_id"] == "s1"
+    assert kwargs["enricher_thread"] is enricher_instance
+    assert kwargs["confidence_threshold"] == 0.42
+
+
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_stop_session_skips_enricher_and_recap_when_recap_import_fails(
+    mock_session_cls, caplog,
+):
+    host, _store, _api = _make_host()
+
+    with patch.dict("sys.modules", {"iris.capture.recap": None}), \
+         patch("iris.capture.enricher.PostCallEnricher") as mock_enricher_cls:
+        host.start_session("s1", "+15550000")
+        with caplog.at_level(logging.WARNING, logger="iris.daemon.call_card_host"):
+            host.stop_session("s1")
+
+    # iris.capture.enricher's own import would succeed fine in isolation --
+    # the shared try/except means it never even gets constructed once the
+    # second (recap) import in the same block fails.
+    mock_enricher_cls.assert_not_called()
+    assert any(
+        "Post-call enrichment+recap skipped" in r.getMessage() for r in caplog.records
+    )
