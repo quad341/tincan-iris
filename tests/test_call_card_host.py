@@ -8,8 +8,15 @@ no CaptureSession mocking needed since _disclosure_script never touches capture.
 """
 from __future__ import annotations
 
+import base64
+import gzip
+import json
 import logging
+import sqlite3
+import sys
 from unittest.mock import MagicMock, patch
+
+import nacl.public
 
 from iris.daemon.call_card_host import _DEFAULT_DISCLOSURE, CallCardHost
 
@@ -19,6 +26,7 @@ def _make_host():
     processor = MagicMock()
     api = MagicMock()
     cfg = MagicMock()
+    cfg.eval_log_public_key = ""  # fail-closed default; MagicMock would otherwise auto-vivify truthy
     return CallCardHost(store=store, processor=processor, api=api, cfg=cfg), store, api
 
 
@@ -227,3 +235,133 @@ def test_empty_id_resolves_to_active_session_for_ack_and_stop(mock_session_cls):
     ended = [c.args[0] for c in api.broadcast.call_args_list
              if c.args[0].get("event") == "call_card_ended"]
     assert ended and ended[0]["session_id"] == minted
+
+
+# ---------------------------------------------------------------------------
+# eval log: write-only encrypted STT archive (ti-qi76c / ti-x46ji)
+#
+# CallCardHost.stop_session() constructs a real EvalLogStore() (default
+# constructor, no path arg) -- _DEFAULT_PATH is monkeypatched to a tmp file so
+# these tests never touch ~/.local/share/iris/eval_log.db. CaptureSession is
+# mocked per this file's convention; TranscriptStore is real (never mocked)
+# so turns can be appended and the resulting sealed blob independently
+# decrypted afterward. PostCallEnricher/PostCallRecapGenerator are mocked (or
+# their import poisoned) in every test below so eval-log coverage never
+# depends on incidental real L3-thread behavior.
+# ---------------------------------------------------------------------------
+
+def _eval_log_db_path(monkeypatch, tmp_path):
+    db_path = tmp_path / "eval_log.db"
+    monkeypatch.setattr("iris.capture.eval_log_store._DEFAULT_PATH", db_path)
+    return db_path
+
+
+@patch("iris.capture.recap.PostCallRecapGenerator")
+@patch("iris.capture.enricher.PostCallEnricher")
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_stop_session_eval_log_noop_when_no_public_key_configured(
+    mock_session_cls, _mock_enricher_cls, _mock_recap_cls, monkeypatch, tmp_path, caplog,
+):
+    db_path = _eval_log_db_path(monkeypatch, tmp_path)
+    host = _make_host_with_cfg(MagicMock(eval_log_public_key=""))
+
+    with caplog.at_level(logging.DEBUG, logger="iris.daemon.call_card_host"):
+        host.start_session("s1", "+15550000")
+        host.stop_session("s1")
+
+    assert not db_path.exists(), "no key configured -- EvalLogStore must never be constructed"
+    assert any("no eval_log_public_key configured" in r.getMessage() for r in caplog.records)
+
+
+@patch("iris.capture.recap.PostCallRecapGenerator")
+@patch("iris.capture.enricher.PostCallEnricher")
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_stop_session_eval_log_writes_exactly_one_row_when_key_configured(
+    mock_session_cls, _mock_enricher_cls, _mock_recap_cls, monkeypatch, tmp_path,
+):
+    db_path = _eval_log_db_path(monkeypatch, tmp_path)
+    private_key = nacl.public.PrivateKey.generate()
+    public_key_b64 = base64.b64encode(bytes(private_key.public_key)).decode()
+    host = _make_host_with_cfg(MagicMock(eval_log_public_key=public_key_b64))
+
+    host.start_session("s1", "+15550000")
+    host._session_transcript.append("hello", "operator", 0.0)
+    host._session_transcript.append("hi there", "far", 1.5)
+    host.stop_session("s1")
+
+    conn = sqlite3.connect(str(db_path))
+    rows = conn.execute(
+        "SELECT session_id, key_version, sealed_blob FROM eval_log_entries"
+    ).fetchall()
+    assert len(rows) == 1
+    session_id, key_version, sealed_blob = rows[0]
+    assert session_id == "s1"
+    assert key_version == 1
+
+    recovered = gzip.decompress(nacl.public.SealedBox(private_key).decrypt(sealed_blob))
+    turns = json.loads(recovered)
+    assert [t["text"] for t in turns] == ["hello", "hi there"]
+
+
+@patch("iris.capture.recap.PostCallRecapGenerator")
+@patch("iris.capture.enricher.PostCallEnricher")
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_stop_session_eval_log_writes_even_when_call_card_llm_disabled(
+    mock_session_cls, _mock_enricher_cls, _mock_recap_cls, monkeypatch, tmp_path,
+):
+    """The eval log has its own independent gate (cfg.eval_log_public_key) --
+    it must not also be tied to the L3 enrichment feature flag."""
+    db_path = _eval_log_db_path(monkeypatch, tmp_path)
+    private_key = nacl.public.PrivateKey.generate()
+    public_key_b64 = base64.b64encode(bytes(private_key.public_key)).decode()
+    cfg = MagicMock(eval_log_public_key=public_key_b64, call_card_llm_enabled=False)
+    host = _make_host_with_cfg(cfg)
+
+    host.start_session("s1", "+15550000")
+    host.stop_session("s1")
+
+    conn = sqlite3.connect(str(db_path))
+    count = conn.execute("SELECT COUNT(*) FROM eval_log_entries").fetchone()[0]
+    assert count == 1
+
+
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_stop_session_eval_log_writes_even_when_call_card_llm_extra_missing(
+    mock_session_cls, monkeypatch, tmp_path,
+):
+    """Structural regression guard: the eval-log block sits BEFORE the L3
+    enrichment import in stop_session() specifically so a missing/broken
+    call-card LLM extra (pydantic) can never silently also skip eval logging.
+    Poisoning the enricher/recap import (rather than mocking the classes)
+    proves the ordering, not just the config flag."""
+    db_path = _eval_log_db_path(monkeypatch, tmp_path)
+    private_key = nacl.public.PrivateKey.generate()
+    public_key_b64 = base64.b64encode(bytes(private_key.public_key)).decode()
+    host = _make_host_with_cfg(MagicMock(eval_log_public_key=public_key_b64))
+    host.start_session("s1", "+15550000")
+
+    with patch.dict(sys.modules, {"iris.capture.enricher": None, "iris.capture.recap": None}):
+        host.stop_session("s1")
+
+    conn = sqlite3.connect(str(db_path))
+    count = conn.execute("SELECT COUNT(*) FROM eval_log_entries").fetchone()[0]
+    assert count == 1
+
+
+@patch("iris.capture.recap.PostCallRecapGenerator")
+@patch("iris.capture.enricher.PostCallEnricher")
+@patch("iris.daemon.call_card_host.CaptureSession")
+def test_stop_session_eval_log_missing_pynacl_logs_warning_and_does_not_raise(
+    mock_session_cls, _mock_enricher_cls, _mock_recap_cls, monkeypatch, tmp_path, caplog,
+):
+    db_path = _eval_log_db_path(monkeypatch, tmp_path)
+    public_key_b64 = base64.b64encode(bytes(32)).decode()
+    host = _make_host_with_cfg(MagicMock(eval_log_public_key=public_key_b64))
+    host.start_session("s1", "+15550000")
+
+    with patch.dict(sys.modules, {"nacl.public": None}), \
+         caplog.at_level(logging.WARNING, logger="iris.daemon.call_card_host"):
+        host.stop_session("s1")  # must not raise
+
+    assert not db_path.exists()
+    assert any("PyNaCl not installed" in r.getMessage() for r in caplog.records)
