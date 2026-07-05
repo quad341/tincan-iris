@@ -61,12 +61,14 @@ from .call_card import (
     FactDismissed,
     FactValueOverride,
 )
+from .post_call_review import PostCallReviewScreen
 from ..audio.endpoint import default_endpoint
 from ..audio.streaming import StreamingTranscriber
 from ..audio.stt import default_stt
 from ..audio.tts import default_tts
 from ..brain import Brain
 from ..call_control import TincanCallControl
+from ..capture.after_store import AfterStore
 from ..capture.store import CallCardStore
 from ..fillers import filler_picker
 from ..proactive_delivery import ProactiveDelivery, SilenceTracker
@@ -468,6 +470,8 @@ class IrisConsole(App):
         self._messages = MessageStore()
         self._roster = RosterStore()
         self._call_card_store = CallCardStore()
+        self._after_store = AfterStore()
+        self._post_call_review_shown: set[str] = set()
         self._posture = PostureManager()
         self._dnd: bool = False
         self._dnd_expires: float | None = None
@@ -784,6 +788,26 @@ class IrisConsole(App):
             self._dnd = ev.get("dnd", False)
             self._dnd_expires = ev.get("expires_in_s")
             self._refresh_status()
+        elif event_type == "call_card_recap_ready":
+            # Primary Post-Call Review trigger (ti-qyo3p): recap generated,
+            # so the LLM-summary path succeeded — show the review screen now
+            # rather than waiting for the call_card_ended fallback below.
+            self.query_one(CallCardPanel).handle_event(ev)
+            session_id = ev.get("session_id")
+            if session_id is not None:
+                self._maybe_show_post_call_review(str(session_id))
+        elif event_type == "call_card_ended":
+            # NFR2 fallback (ti-qyo3p): no API key configured means
+            # call_card_recap_ready never fires. Give the recap a couple of
+            # seconds to arrive anyway; _maybe_show_post_call_review's dedup
+            # guard makes this a no-op if it already has.
+            self.query_one(CallCardPanel).handle_event(ev)
+            session_id = ev.get("session_id")
+            if session_id is not None:
+                self.set_timer(
+                    2.5,
+                    lambda sid=str(session_id): self._maybe_show_post_call_review(sid),
+                )
         elif event_type.startswith("call_card"):
             # Live Call Card capture events from the daemon (ti-913rw) — feed the
             # side panel. Runs on the UI thread (drained from the queue).
@@ -915,6 +939,37 @@ class IrisConsole(App):
             active = store.active_list(session_id)
             if active is not None and store.get_items(active.id):
                 self.push_screen(PostCallListView(store, active))
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _maybe_show_post_call_review(self, session_id: str) -> None:
+        """Push PostCallReviewScreen (ti-qyo3p) for a finished call.
+
+        Called from both the "call_card_recap_ready" event (primary trigger)
+        and a bounded-wait fallback timer off "call_card_ended" (NFR2: no
+        API key configured, so no recap event ever arrives). The dedup guard
+        makes whichever fires first win and the other a no-op.
+        """
+        if session_id in self._post_call_review_shown:
+            return
+        try:
+            card = self._call_card_store.get_call_card(session_id)
+            if not card:
+                return
+            contact_id = card.get("contact_id")
+            if contact_id is None:
+                return
+            contact = self._roster.get(contact_id)
+            if contact is None:
+                return
+            self._post_call_review_shown.add(session_id)
+            commitments = self._after_store.get_open_commitments(contact_id)
+            rep_name = self.brain.cfg.operator_name
+            self.push_screen(
+                PostCallReviewScreen(
+                    contact, card, commitments, self._after_store, rep_name=rep_name
+                )
+            )
         except Exception:  # noqa: BLE001
             pass
 
@@ -1366,8 +1421,12 @@ class IrisConsole(App):
             # convention); Textual's priority-binding dispatch checks the App
             # before the Screen, so without this gate "q" would quit the app
             # instead of closing help. Suppressing "quit" here falls through
-            # to HelpScreen's own binding in the same priority pass.
-            return not isinstance(self.screen, HelpScreen)
+            # to HelpScreen's own binding in the same priority pass. Same
+            # deal for PostCallReviewScreen (ti-qyo3p). ContactsScreen and
+            # PostCallListView have the identical priority=True "q" binding
+            # but aren't listed here — a pre-existing gap, not introduced by
+            # this bead; tracked separately rather than widened here.
+            return not isinstance(self.screen, (HelpScreen, PostCallReviewScreen))
         return True
 
     def _send_choose(self, index: int) -> None:
