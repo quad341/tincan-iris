@@ -23,7 +23,7 @@ import pytest
 
 from iris.daemon.engine import HandlingEngine
 from iris.daemon.policy import PolicyResolver, ResolveResult
-from iris.roster import Contact
+from iris.roster import Contact, SENTINEL_CONTACT_ID
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +68,12 @@ def _mock_resolver(contact: Contact | None = None, verb: str = "screen") -> Magi
     return resolver
 
 
-def _make_engine(*, brain_host: object | None = None, contact: Contact | None = None) -> HandlingEngine:
+def _make_engine(
+    *,
+    brain_host: object | None = None,
+    contact: Contact | None = None,
+    call_card_host: object | None = None,
+) -> HandlingEngine:
     """HandlingEngine with mocked dependencies; brain_host injected for TC1/TC2."""
     c = _contact() if contact is None else contact
     resolver = _mock_resolver(contact=c)
@@ -79,6 +84,7 @@ def _make_engine(*, brain_host: object | None = None, contact: Contact | None = 
         notify_sink=MagicMock(),
         broadcast=MagicMock(),
         brain_host=brain_host,
+        call_card_host=call_card_host,
     )
 
 
@@ -120,6 +126,50 @@ def test_call_connected_no_contact_does_not_set_brain_context():
     engine.on_call_connected("call-unknown")
 
     brain_host.set_call_context.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# ti-v8474: CallConnected → HandlingEngine → CallCardHost.start_session
+# (SENTINEL_CONTACT_ID substitution + caller_number sourcing)
+# ---------------------------------------------------------------------------
+
+
+def test_call_connected_no_contact_uses_sentinel_contact_id_for_call_card():
+    """Unresolved caller (no roster entry) — call_card_host.start_session must get
+    SENTINEL_CONTACT_ID, not None, so the AFTER writeback FK always has a value."""
+    call_card_host = MagicMock()
+    resolver = _mock_resolver(contact=None, verb="screen")
+    engine = HandlingEngine(
+        ctrl=MagicMock(),
+        tts=None,
+        resolver=resolver,
+        notify_sink=MagicMock(),
+        broadcast=MagicMock(),
+        call_card_host=call_card_host,
+    )
+    engine.on_incoming_call("+19999999999", call_id="call-unknown")
+    engine.on_call_connected("call-unknown")
+
+    call_card_host.start_session.assert_called_once_with(
+        "call-unknown", "+19999999999", SENTINEL_CONTACT_ID
+    )
+
+
+def test_call_connected_with_contact_passes_contact_id_and_pending_caller_number():
+    """Resolved caller — call_card_host.start_session gets the contact's id, and the
+    caller_number from self._pending_caller_number (the raw incoming number), not
+    contact.phone_e164 — the two can differ (e.g. unnormalized vs. roster-stored
+    form), and only _pending_caller_number is the correct source post ti-llzx9."""
+    call_card_host = MagicMock()
+    contact = _contact(id=42, display_name="Alice", phone_e164="+15550001111")
+    engine = _make_engine(contact=contact, call_card_host=call_card_host)
+
+    engine.on_incoming_call("+1-555-000-1111", call_id="call-1")
+    engine.on_call_connected("call-1")
+
+    call_card_host.start_session.assert_called_once_with(
+        "call-1", "+1-555-000-1111", 42
+    )
 
 
 # ---------------------------------------------------------------------------

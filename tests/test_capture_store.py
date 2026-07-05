@@ -54,6 +54,12 @@ def test_load_or_create_creates_row(store):
     assert card["session_id"] == "sess-1"
 
 
+def test_get_call_card_includes_caller_number(store):
+    store.load_or_create("sess-1", "+15550000")
+    card = store.get_call_card("sess-1")
+    assert card["caller_number"] == "+15550000"
+
+
 def test_load_or_create_idempotent(store):
     store.load_or_create("sess-1", "+15550000")
     store.load_or_create("sess-1", "+15550000")  # must not raise

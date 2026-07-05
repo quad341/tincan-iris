@@ -12,6 +12,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from iris.daemon.call_card_host import CallCardHost
+from iris.roster import SENTINEL_CONTACT_ID
 
 
 def _make_host():
@@ -58,18 +59,63 @@ def test_no_call_card_is_noop(mock_after_cls, _mock_notes):
 
 @patch("iris.daemon.call_card_host.NotesStore")
 @patch("iris.daemon.call_card_host.AfterStore")
-def test_no_resolved_contact_skips_writeback(mock_after_cls, _mock_notes):
-    """contact_id is None (unregistered number) — AfterStore's NOT NULL FK has
-    nowhere to write, so writeback is skipped and written_back stays 0 for a
-    clean retry (no rows, no mark, no raise)."""
+def test_none_contact_id_substitutes_sentinel_and_writes_back(mock_after_cls, _mock_notes):
+    """contact_id is None (legacy pre-fix row, written before on_call_connected started
+    substituting SENTINEL_CONTACT_ID for unresolved callers, ti-llzx9) — finalize_writeback
+    must self-heal it to SENTINEL_CONTACT_ID and proceed with the write rather than skip
+    it, so written_back is no longer stuck at 0 forever."""
     host, store, api = _make_host()
-    store.get_call_card.return_value = {"contact_id": None}
+    after = mock_after_cls.return_value
+    after.insert_call_log.return_value = 99
+    store.get_call_card.return_value = {
+        "contact_id": None,
+        "started_at": 10.0,
+        "ended_at": 20.0,
+        "disclosure_ack_ts": None,
+        "outcome_summary": "",
+        "caller_number": "+15550001234",
+        "action_items": [],
+        "facts": [],
+    }
 
     host.finalize_writeback("sess-anon")
 
-    mock_after_cls.assert_not_called()
-    store.mark_written_back.assert_not_called()
-    api.broadcast.assert_not_called()
+    after.insert_call_log.assert_called_once_with(
+        SENTINEL_CONTACT_ID, "sess-anon", 10.0, 20.0,
+        agent_name="iris", disclosed_at=None, outcome_summary="",
+        caller_number="+15550001234",
+    )
+    store.mark_written_back.assert_called_once_with("sess-anon")
+    api.broadcast.assert_called_once()
+
+
+@patch("iris.daemon.call_card_host.NotesStore")
+@patch("iris.daemon.call_card_host.AfterStore")
+def test_contact_id_already_sentinel_is_not_resubstituted(mock_after_cls, _mock_notes):
+    """contact_id already 0 (SENTINEL_CONTACT_ID) must pass through unchanged. Guards
+    against a falsy-check regression (`if not contact_id`), which would misfire on 0
+    and re-substitute a value that was already correct."""
+    host, store, api = _make_host()
+    after = mock_after_cls.return_value
+    after.insert_call_log.return_value = 7
+    store.get_call_card.return_value = {
+        "contact_id": SENTINEL_CONTACT_ID,
+        "started_at": 1.0,
+        "ended_at": 2.0,
+        "disclosure_ack_ts": None,
+        "outcome_summary": "",
+        "caller_number": "",
+        "action_items": [],
+        "facts": [],
+    }
+
+    host.finalize_writeback("sess-zero")
+
+    after.insert_call_log.assert_called_once_with(
+        SENTINEL_CONTACT_ID, "sess-zero", 1.0, 2.0,
+        agent_name="iris", disclosed_at=None, outcome_summary="",
+        caller_number="",
+    )
 
 
 # --- happy path -------------------------------------------------------------
@@ -86,6 +132,7 @@ def test_happy_path_writes_filtered_rows_and_marks(mock_after_cls, mock_notes_cl
         "ended_at": 200.0,
         "disclosure_ack_ts": 150.0,
         "outcome_summary": "resolved",
+        "caller_number": "+15550009999",
         "action_items": [
             _action_item(owner="far", description="they send check", amount="$50",
                          due_date="2026-08-01", transcript_turn_id=3, transcript_offset_s=9.0),
@@ -105,6 +152,7 @@ def test_happy_path_writes_filtered_rows_and_marks(mock_after_cls, mock_notes_cl
     after.insert_call_log.assert_called_once_with(
         7, "sess-x", 100.0, 200.0,
         agent_name="iris", disclosed_at=150.0, outcome_summary="resolved",
+        caller_number="+15550009999",
     )
 
     # Only the two CONFIRMED action items become commitments; direction maps

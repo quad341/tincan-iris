@@ -10,6 +10,7 @@ get_*/resolve_* read/mutate surface.
 from __future__ import annotations
 
 import sqlite3
+import time
 
 import pytest
 
@@ -54,6 +55,59 @@ def test_init_is_idempotent(db):
     assert len(s2.get_open_commitments(cid)) == 1
 
 
+def test_migrate_adds_caller_number_column_to_pre_existing_db(tmp_path):
+    """A call_log table created before ti-hb2dx's caller_number plumbing has no such
+    column. Opening it via AfterStore must add the column (self-healing the backlog)
+    without raising, preserve the existing row, and be a no-op on a second open."""
+    db_path = tmp_path / "legacy_roster.db"
+
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE call_log (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            contact_id      INTEGER NOT NULL,
+            session_id      TEXT NOT NULL UNIQUE,
+            started_at      REAL,
+            ended_at        REAL,
+            agent_name      TEXT NOT NULL DEFAULT '',
+            disclosed_at    REAL,
+            outcome_summary TEXT NOT NULL DEFAULT '',
+            objective       TEXT,
+            created_at      REAL NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO call_log (contact_id, session_id, outcome_summary, created_at) "
+        "VALUES (?, ?, ?, ?)",
+        (1, "legacy-sess", "went fine", time.time()),
+    )
+    conn.commit()
+    conn.close()
+
+    store = AfterStore(db_path)  # triggers the caller_number migration on open
+
+    cols = {r[1] for r in store._conn.execute("PRAGMA table_info(call_log)")}
+    assert "caller_number" in cols
+
+    row = store._conn.execute(
+        "SELECT session_id, contact_id, caller_number FROM call_log WHERE session_id=?",
+        ("legacy-sess",),
+    ).fetchone()
+    assert row["session_id"] == "legacy-sess"
+    assert row["contact_id"] == 1
+    assert row["caller_number"] is None  # back-filled as NULL, not fabricated
+
+    # Re-opening the now-migrated db must not raise (no duplicate-column error) and
+    # must leave the data untouched.
+    store2 = AfterStore(db_path)
+    row2 = store2._conn.execute(
+        "SELECT session_id FROM call_log WHERE session_id=?", ("legacy-sess",)
+    ).fetchone()
+    assert row2["session_id"] == "legacy-sess"
+
+
 # --- call_log ---------------------------------------------------------------
 
 def test_insert_call_log_returns_rowid(store, contact_id):
@@ -72,6 +126,17 @@ def test_call_log_contact_fk_is_enforced(store):
     rather than silently orphan."""
     with pytest.raises(sqlite3.IntegrityError):
         store.insert_call_log(999_999, "sess-orphan", None, None, "iris", None, "")
+
+
+def test_insert_call_log_persists_caller_number(store, contact_id):
+    log_id = store.insert_call_log(
+        contact_id, "sess-caller", 100.0, 200.0, "iris", None, "",
+        caller_number="+15550001234",
+    )
+    row = store._conn.execute(
+        "SELECT caller_number FROM call_log WHERE id=?", (log_id,)
+    ).fetchone()
+    assert row["caller_number"] == "+15550001234"
 
 
 # --- commitment -------------------------------------------------------------
