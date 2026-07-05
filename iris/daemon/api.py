@@ -339,6 +339,7 @@ class DaemonAPI:
         return {
             "level": status.level,
             "checked_at": status.checked_at,
+            "failing": [c.name for c in status.checks if c.required and c.status.value != "ok"],
             "checks": [
                 {
                     "name": c.name,
