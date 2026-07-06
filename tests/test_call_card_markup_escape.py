@@ -191,3 +191,121 @@ def test_disclosure_card_script_remains_unescaped(monkeypatch, tmp_path):
     # Exact (not substring-loose) containment: if _script were ever escaped,
     # this line would instead read "...like \[$50] verbatim..." and fail here.
     assert f"[yellow]{script}[/yellow]" in card.render()
+
+
+# ---------------------------------------------------------------------------
+# escape_for_content() -- backslash-adjacent-bracket coverage (ti-o1l40)
+# ---------------------------------------------------------------------------
+#
+# ti-o1l40: escape_for_content() mirrored rich.markup.escape()'s "double the
+# existing backslashes, then add one" formula. But Content.from_markup()'s
+# tokenizer opens/closes on a single-character (non-parity-aware) lookbehind
+# and its text-extraction step does a blanket '.replace("\[", "[")' that
+# consumes exactly ONE backslash per adjacent bracket no matter how many
+# preceded it. Doubling therefore over-escaped by one character whenever the
+# input already had a backslash before a bracket. Fixed by adding exactly one
+# backslash instead of doubling. Each round-trip below is confirmed (by a
+# differential check against the pre-fix formula) to only hold after that
+# fix -- the pre-fix formula leaves a stray backslash in the rendered output.
+
+
+def test_single_backslash_before_bracket_mid_string_round_trips():
+    raw = "path C:\\[literal] here"
+    assert _plain(escape_for_content(raw)) == raw
+
+
+def test_single_backslash_before_bracket_start_of_string_round_trips():
+    raw = "\\[literal] at the start"
+    assert _plain(escape_for_content(raw)) == raw
+
+
+def test_double_backslash_before_bracket_round_trips():
+    raw = "windows path C:\\\\[literal] here"
+    assert _plain(escape_for_content(raw)) == raw
+
+
+def test_triple_backslash_before_bracket_round_trips():
+    raw = "odd case C:\\\\\\[literal] here"
+    assert _plain(escape_for_content(raw)) == raw
+
+
+def test_multiple_brackets_only_one_backslash_adjacent_round_trips():
+    raw = "[$50] and C:\\[literal] and [50%]"
+    assert _plain(escape_for_content(raw)) == raw
+
+
+# ---------------------------------------------------------------------------
+# escape_for_content() -- trailing backslash through the real call-site
+# wrapping pattern (ti-o1l40)
+# ---------------------------------------------------------------------------
+
+
+def test_trailing_double_backslash_through_wrapped_pattern_preserves_character_count():
+    """A trailing backslash *run* of even length (already "escaped-looking",
+    or any count >= 2) with nothing following it in the original string hit a
+    second, narrower ti-o1l40 bug: the pre-fix pad only fired "if the
+    trailing count is odd", so an even-length run passed through unpadded and
+    Content.from_markup's one-backslash-per-bracket consumption silently
+    dropped a backslash character. Fixed by padding on ANY nonzero trailing
+    count. Run through the actual f"[dim]{...}[/dim]" call-site pattern used
+    by call_card.py's render() methods, not bare escape_for_content() output
+    -- the character loss only shows up once something is concatenated
+    after it.
+    """
+    raw = "reference 12-345\\\\"  # two literal trailing backslashes
+    rendered = f"[dim]{escape_for_content(raw)}[/dim]\nnext line"
+    assert _plain(rendered) == raw + "[/dim]\nnext line"
+
+
+def test_trailing_single_backslash_through_wrapped_pattern_documents_residual_tag_leak():
+    """A single trailing backslash immediately followed by a caller-appended
+    tag is a documented, not-fully-closeable edge case (see
+    escape_for_content()'s own docstring): the pad guarantees the backslash
+    *character* survives, but escape_for_content() cannot see or protect a
+    tag the caller concatenates after its return value, so "[/dim]" leaks as
+    literal text below. This is unchanged by ti-o1l40 -- confirmed identical
+    against the pre-fix formula -- so it is NOT a regression guard for that
+    fix. It pins the currently-accepted behavior so a future change doesn't
+    silently make it worse (e.g. losing the backslash character too, not
+    just the tag boundary). Contrast with the double-backslash test above,
+    which IS a genuine ti-o1l40 regression guard.
+    """
+    raw = "call me back at 555\\"  # one literal trailing backslash
+    rendered = f"[dim]{escape_for_content(raw)}[/dim]\nnext line"
+    assert _plain(rendered) == raw + "[/dim]\nnext line"
+
+
+# ---------------------------------------------------------------------------
+# Card integration -- backslash-adjacent-bracket and trailing-backslash
+# content through real render() sinks (ti-o1l40)
+# ---------------------------------------------------------------------------
+
+
+def test_critical_fact_card_display_mode_preserves_backslash_adjacent_bracket():
+    raw_text = "path C:\\[literal] here"
+    fact = _fact(raw_text, "normal value")
+    rendered = _plain(CriticalFactCard(fact).render())
+    assert raw_text in rendered
+
+
+def test_critical_fact_card_display_mode_preserves_trailing_double_backslash():
+    trailing = "trailing value\\\\"  # two literal trailing backslashes
+    fact = _fact("plain raw text", trailing)
+    rendered = _plain(CriticalFactCard(fact).render())
+    assert trailing in rendered
+
+
+def test_action_item_card_edit_mode_preserves_backslash_in_edit_buffer_fields():
+    """Matches ti-gx6rp's no-mount construction style: build the card
+    directly, flip it into edit mode, and set the edit buffers by hand."""
+    item = _action_item("original", "original owner", None)
+    card = ActionItemCard(item)
+    card._editing = True
+    edit_desc = "update C:\\[Users] now"
+    edit_owner = "owner name\\\\"  # two literal trailing backslashes
+    card._edit_desc = edit_desc
+    card._edit_owner = edit_owner
+    card._edit_due = "no due"
+    rendered = _plain(card.render())
+    assert edit_desc in rendered
+    assert edit_owner in rendered
