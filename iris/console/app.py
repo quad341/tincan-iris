@@ -49,6 +49,7 @@ from ..prefs import PreferencesStore
 from . import diagnostics
 from .contacts import ContactsScreen
 from .contacts_logic import VERB_DESCRIPTION
+from .health_screen import HealthScreen
 from .help_screen import HelpScreen
 from .list_view import PostCallListView
 from .call_card import (
@@ -417,6 +418,7 @@ class IrisConsole(App):
         Binding("e", "copy_last_error", "copy error", show=False),
         Binding("b", "file_bug", "file a bug"),
         Binding("K", "contacts", "book"),
+        Binding("H", "health_panel", "health"),
         Binding("q", "quit", "quit", priority=True),
         Binding("1", "choose_1", "put through", show=False),
         Binding("2", "choose_2", "take message", show=False),
@@ -473,6 +475,7 @@ class IrisConsole(App):
         self._dnd_expires: float | None = None
         self._proxy: DaemonProxy | None = None  # set in on_mount if daemon is running
         self._mode: str = "direct"  # "proxy" or "direct"; set in on_mount
+        self._baseline: dict | None = None  # last-known BaselineStatus payload (ti-pugo3.3.2)
         self._incoming_call_id: str | None = None
         self._incoming_verb: str | None = None
         self._incoming_choices: list[dict] = []
@@ -519,6 +522,10 @@ class IrisConsole(App):
                 on_event=lambda ev: self.events.put(("daemon_event", ev)),
                 on_disconnect=lambda: self.events.put(("daemon_event", {"event": "disconnected"})),
             )
+            try:
+                self._baseline = proxy.send({"cmd": "status"}).get("state", {}).get("baseline")
+            except DaemonNotRunning:
+                pass  # health pill/panel just show "pending" until the first broadcast
             self._w("[dim]Daemon connected — brain turns via socket[/]")
             eff = self._posture.effective()
             self._dnd = eff["dnd"]
@@ -784,6 +791,12 @@ class IrisConsole(App):
             self._dnd = ev.get("dnd", False)
             self._dnd_expires = ev.get("expires_in_s")
             self._refresh_status()
+        elif event_type == "baseline":
+            # Live broadcast (ti-pugo3.3.1): fields spread at the top level
+            # alongside "event", unlike the nested {"state": {"baseline": ...}}
+            # shape the initial "status" snapshot uses above.
+            self._baseline = {k: v for k, v in ev.items() if k != "event"}
+            self._refresh_status()
         elif event_type.startswith("call_card"):
             # Live Call Card capture events from the daemon (ti-913rw) — feed the
             # side panel. Runs on the UI thread (drained from the queue).
@@ -792,8 +805,10 @@ class IrisConsole(App):
             self._w("[yellow]Daemon disconnected — switched to direct mode[/]")
             self._proxy = None
             self._mode = "direct"
+            self._baseline = None
             self.ctrl.start()
             self._posture.subscribe(lambda e: self.events.put(("posture_changed", e)))
+            self._refresh_status()
 
     # --- ti-veyx: seamless phone-call ride-along (adopt the live SCO endpoint) ---
 
@@ -983,11 +998,33 @@ class IrisConsole(App):
         if not self._dispatch(cmd, speaker):
             self._w("[dim](busy — one sec)[/]")
 
+    def _health_pill(self) -> str:
+        """Status-strip baseline health pill (ti-pugo3.3.2) — [H] opens detail.
+
+        Glyphs mirror doctor.py's own ✓/!/✗ vocabulary and the "(N)" count is
+        len(failing) straight from the wire payload — per the design doc,
+        these are not cosmetic choices: color is never the only signal (WCAG
+        1.4.1), and operators may already know these glyphs from `iris doctor`.
+        """
+        if self._baseline is None:
+            return "[dim]⚪ health…[/]"
+        level = self._baseline.get("level", "unknown")
+        n = len(self._baseline.get("failing", []))
+        if level == "green":
+            return "[#56d364]🟢 health ✓[/]"
+        if level == "yellow":
+            return f"[#d29922]🟡 health !({n})[/]"
+        if level == "red":
+            return f"[#f38ba8]🔴 health ✗({n})[/]"
+        return "[dim]⚪ health…[/]"
+
     def _refresh_status(self) -> None:
         import os as _os  # noqa: PLC0415
         c = self.conductor
         mode_pill = "🟢 daemon" if self._mode == "proxy" else "🟡 direct"
         parts = [mode_pill, c.state.value.upper()]
+        if self._mode == "proxy":
+            parts.append(self._health_pill())
         if c.muted:
             parts.append("[b]MUTED[/]")
         # Audio mode label (startup-time env var)
@@ -1159,6 +1196,10 @@ class IrisConsole(App):
     def action_contacts(self) -> None:
         """Open the full-width Contacts management panel ([K])."""
         self.push_screen(ContactsScreen(self._roster))
+
+    def action_health_panel(self) -> None:
+        """Open the baseline health detail panel ([H])."""
+        self.push_screen(HealthScreen(self._baseline, direct_mode=self._mode != "proxy"))
 
     def action_approve(self) -> None:
         """Placeholder for future approve workflow (e.g. send a drafted reply)."""
@@ -1362,12 +1403,13 @@ class IrisConsole(App):
         if action == "copy_last":
             return bool(self._last_iris_reply)
         if action == "quit":
-            # HelpScreen's own "q" is priority=True (matches ContactsScreen's
-            # convention); Textual's priority-binding dispatch checks the App
+            # HelpScreen/HealthScreen/ContactsScreen each bind their own "q" as
+            # priority=True; Textual's priority-binding dispatch checks the App
             # before the Screen, so without this gate "q" would quit the app
-            # instead of closing help. Suppressing "quit" here falls through
-            # to HelpScreen's own binding in the same priority pass.
-            return not isinstance(self.screen, HelpScreen)
+            # instead of closing whichever of these screens is active.
+            # Suppressing "quit" here falls through to the screen's own
+            # binding in the same priority pass.
+            return not isinstance(self.screen, (HelpScreen, HealthScreen, ContactsScreen))
         return True
 
     def _send_choose(self, index: int) -> None:
