@@ -9,6 +9,8 @@ from iris.audio.endpoint import (
     LocalAudio,
     TincanSCOAudio,
     VirtualDeviceAudio,
+    _MultiPlayback,
+    _Playback,
     _pick_bluez,
     _pw_link_nodes,
     default_endpoint,
@@ -218,3 +220,62 @@ def test_default_endpoint_iris_capture_target_wins_over_va_aec(monkeypatch):
     ep = default_endpoint()
     assert isinstance(ep, VirtualDeviceAudio)
     assert ep.capture_target == "my_explicit_src"
+
+
+# --- _Playback / _MultiPlayback.stopped (ti-429tt consent-integrity fix) -----
+#
+# stopped distinguishes "played to completion" from "cut short" -- callers
+# (CallCardHost._run_auto_disclose) key a side effect (disclosure_ack) off
+# this, so it must flip to True as of the first line of .stop(), before the
+# interrupt signal is even sent, never left for a caller to race against.
+
+def test_playback_stopped_starts_false():
+    pb = _Playback(MagicMock())
+    assert pb.stopped is False
+
+
+def test_playback_wait_does_not_flip_stopped():
+    pb = _Playback(MagicMock())
+    pb.wait()
+    assert pb.stopped is False
+
+
+def test_playback_stopped_is_true_before_the_signal_is_sent():
+    fake_proc = MagicMock()
+    pb = _Playback(fake_proc)
+
+    def _assert_already_stopped(*_args, **_kwargs):
+        assert pb.stopped is True
+
+    fake_proc.send_signal.side_effect = _assert_already_stopped
+    pb.stop()
+
+    fake_proc.send_signal.assert_called_once()
+    assert pb.stopped is True
+
+
+def test_multi_playback_stopped_starts_false():
+    pb = _MultiPlayback([MagicMock(), MagicMock()])
+    assert pb.stopped is False
+
+
+def test_multi_playback_wait_does_not_flip_stopped():
+    pb = _MultiPlayback([MagicMock(), MagicMock()])
+    pb.wait()
+    assert pb.stopped is False
+
+
+def test_multi_playback_stopped_is_true_before_any_signal_is_sent():
+    fake_procs = [MagicMock(), MagicMock()]
+    pb = _MultiPlayback(fake_procs)
+
+    def _assert_already_stopped(*_args, **_kwargs):
+        assert pb.stopped is True
+
+    for p in fake_procs:
+        p.send_signal.side_effect = _assert_already_stopped
+    pb.stop()
+
+    for p in fake_procs:
+        p.send_signal.assert_called_once()
+    assert pb.stopped is True

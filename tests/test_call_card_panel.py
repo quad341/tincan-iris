@@ -6,11 +6,13 @@ Stubs the mount hooks so no Textual App is required.
 """
 from __future__ import annotations
 
+from iris.console import call_card
 from iris.console.call_card import (
     ActionItemCard,
     CallCardPanel,
     CriticalFactCard,
     DisclosureCard,
+    DisclosureState,
     FactCard,
 )
 
@@ -86,3 +88,51 @@ def test_unknown_event_is_ignored(monkeypatch):
     panel, cards = _panel(monkeypatch)
     panel.handle_event({"event": "totally_unrelated"})
     assert cards == []
+
+
+# ---------------------------------------------------------------------------
+# session_id mismatch guard on call_card_disclosed/call_card_skipped
+# (ti-429tt consent-integrity fix). A stale daemon event for a session this
+# panel has already moved on from must not touch the *current* card
+# (ti-429tt adjudication, ti-fjsmz finding 1).
+# ---------------------------------------------------------------------------
+
+def _panel_with_disclosure(monkeypatch, tmp_path, session_id="A"):
+    # Redirect disk persistence away from the real ~/.local/share/iris (same
+    # convention as test_disclosure_card.py's _card() helper).
+    monkeypatch.setattr(call_card, "_STATE_DIR", tmp_path)
+    panel, _cards = _panel(monkeypatch)
+    panel._session_id = session_id
+    panel._disclosure = DisclosureCard(session_id)
+    return panel
+
+
+def test_disclosed_for_mismatched_session_id_leaves_card_untouched(monkeypatch, tmp_path):
+    panel = _panel_with_disclosure(monkeypatch, tmp_path, "A")
+    panel.handle_event({"event": "call_card_disclosed", "session_id": "B"})
+    assert panel._disclosure.state is DisclosureState.EXPANDED
+
+
+def test_disclosed_for_matching_session_id_updates_card(monkeypatch, tmp_path):
+    panel = _panel_with_disclosure(monkeypatch, tmp_path, "A")
+    panel.handle_event({"event": "call_card_disclosed", "session_id": "A"})
+    assert panel._disclosure.state is DisclosureState.DISCLOSED
+
+
+def test_disclosed_with_omitted_session_id_falls_back_to_current_and_updates(monkeypatch, tmp_path):
+    # Matches the existing fallback idiom: event.get("session_id", self._session_id).
+    panel = _panel_with_disclosure(monkeypatch, tmp_path, "A")
+    panel.handle_event({"event": "call_card_disclosed"})  # no session_id key at all
+    assert panel._disclosure.state is DisclosureState.DISCLOSED
+
+
+def test_skipped_for_mismatched_session_id_leaves_card_untouched(monkeypatch, tmp_path):
+    panel = _panel_with_disclosure(monkeypatch, tmp_path, "A")
+    panel.handle_event({"event": "call_card_skipped", "session_id": "B"})
+    assert panel._disclosure.state is DisclosureState.EXPANDED
+
+
+def test_skipped_for_matching_session_id_updates_card(monkeypatch, tmp_path):
+    panel = _panel_with_disclosure(monkeypatch, tmp_path, "A")
+    panel.handle_event({"event": "call_card_skipped", "session_id": "A"})
+    assert panel._disclosure.state is DisclosureState.SKIPPED
