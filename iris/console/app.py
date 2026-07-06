@@ -1403,13 +1403,15 @@ class IrisConsole(App):
         if action == "copy_last":
             return bool(self._last_iris_reply)
         if action == "quit":
-            # HelpScreen/HealthScreen/ContactsScreen each bind their own "q" as
-            # priority=True; Textual's priority-binding dispatch checks the App
-            # before the Screen, so without this gate "q" would quit the app
-            # instead of closing whichever of these screens is active.
-            # Suppressing "quit" here falls through to the screen's own
-            # binding in the same priority pass.
-            return not isinstance(self.screen, (HelpScreen, HealthScreen, ContactsScreen))
+            # HelpScreen/HealthScreen/ContactsScreen/PostCallListView each bind
+            # their own "q" as priority=True; Textual's priority-binding
+            # dispatch checks the App before the Screen, so without this gate
+            # "q" would quit the app instead of closing whichever of these
+            # screens is active. Suppressing "quit" here falls through to the
+            # screen's own binding in the same priority pass.
+            return not isinstance(
+                self.screen, (HelpScreen, HealthScreen, ContactsScreen, PostCallListView)
+            )
         return True
 
     def _send_choose(self, index: int) -> None:
