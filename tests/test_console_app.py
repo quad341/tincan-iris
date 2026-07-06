@@ -1337,3 +1337,65 @@ def test_refresh_status_proactive_queue_cycle_hint_survives_markup_rendering():
             await pilot.press("q")
 
     asyncio.run(scenario())
+
+
+# --- check_action "quit" isinstance gate (ti-gzyag, ti-eppmx) -----------------
+#
+# PostCallListView (like HelpScreen/ContactsScreen) binds its own priority=True
+# "q" to close itself. IrisConsole's own "q" is also priority=True and bound to
+# "quit", and Textual checks priority bindings App-first — so without a gate in
+# check_action, "q" falls through to app-level quit instead of the screen's own
+# binding. NOTE: App.exit() only sets app._exit synchronously; it does not pop
+# the screen or flip is_running within the same pump cycle, so assert on
+# app._exit directly rather than screen identity/is_running (false negative
+# discovered the hard way while building ti-eppmx's fix).
+
+
+def test_quit_gated_while_post_call_list_view_active():
+    """Pressing "q" while PostCallListView is active must NOT quit the app —
+    it must fall through to the screen's own "q" binding (pop back to whatever
+    was beneath it)."""
+    from unittest.mock import MagicMock
+
+    from iris.console.list_view import PostCallListView
+    from iris.list_store import CallList
+
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            base_screen = app.screen
+
+            store = MagicMock()
+            store.get_items.return_value = []
+            call_list = CallList(
+                id=1, session_id="s", title="t", status="active",
+                created_at=0.0, updated_at=0.0,
+            )
+            view = PostCallListView(store, call_list)
+            app.push_screen(view)
+            await pilot.pause()
+            assert app.screen is view
+
+            await pilot.press("q")
+            await pilot.pause()
+
+            assert app._exit is False        # did NOT quit
+            assert app.screen is base_screen  # popped back to what was beneath
+
+            await pilot.press("q")  # base screen is ungated — actually quit now
+
+    asyncio.run(scenario())
+
+
+def test_quit_fires_on_base_screen():
+    """Negative case guarding against the gate over-broadening: with no gated
+    screen pushed (app's own base screen active), "q" must still quit."""
+    async def scenario():
+        app = IrisConsole()
+        async with app.run_test() as pilot:
+            assert app._exit is False
+            await pilot.press("q")
+            await pilot.pause()
+            assert app._exit is True
+
+    asyncio.run(scenario())
