@@ -76,6 +76,39 @@ def test_started_reads_daemon_caller_keys(monkeypatch):
     assert "Mom" in panel.border_title
 
 
+def test_started_escapes_dollar_bracket_caller_name(monkeypatch):
+    # Checks the parsed Content directly: the public border_title getter
+    # re-serializes through Content.markup, which has the same narrow
+    # '[a-z#/@]' escape gap and can't round-trip '$'/'%' brackets safely.
+    panel, _ = _panel(monkeypatch)
+    panel.handle_event({
+        "event": "call_card_started", "session_id": "s1",
+        "caller_number": "+15551234567", "contact_name": "[$50]",
+    })
+    assert panel._border_title.plain == "Call Card · [$50]"
+
+
+def test_started_escapes_percent_bracket_caller_name(monkeypatch):
+    panel, _ = _panel(monkeypatch)
+    panel.handle_event({
+        "event": "call_card_started", "session_id": "s1",
+        "caller_number": "+15551234567", "contact_name": "[50%]",
+    })
+    assert panel._border_title.plain == "Call Card · [50%]"
+
+
+def test_started_neutralizes_fake_style_tag_caller_name(monkeypatch):
+    # Pre-fix this shape was accepted as real styling (a genuine bold-red
+    # span, tag brackets stripped from .plain) instead of shown literally.
+    panel, _ = _panel(monkeypatch)
+    panel.handle_event({
+        "event": "call_card_started", "session_id": "s1",
+        "caller_number": "+15551234567", "contact_name": "[bold red]hacked[/bold red]",
+    })
+    assert panel._border_title.plain == "Call Card · [bold red]hacked[/bold red]"
+    assert panel._border_title.spans == []
+
+
 def test_malformed_fact_is_ignored(monkeypatch):
     panel, cards = _panel(monkeypatch)
     panel.handle_event({"event": "call_card_fact", "session_id": "s1", "fact": {"bogus": 1}})
