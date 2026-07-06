@@ -66,6 +66,8 @@ def on_baseline_transition(new: BaselineStatus, previous: BaselineStatus | None)
 
 
 def _notify_degraded(status: BaselineStatus, *, is_reminder: bool = False) -> None:
+    if _notify_sink is None:
+        return
     failing = [c for c in status.checks if c.required and c.status != DoctorStatus.OK]
     title = "Iris: still degraded (daily reminder)" if is_reminder else f"Iris baseline: {status.level}"
     body = "; ".join(
@@ -77,6 +79,8 @@ def _notify_degraded(status: BaselineStatus, *, is_reminder: bool = False) -> No
 
 
 def _notify_recovered() -> None:
+    if _notify_sink is None:
+        return
     _notify_sink.notify(
         "Iris baseline: back to green", "All baseline checks passing again.", urgency="normal"
     )
