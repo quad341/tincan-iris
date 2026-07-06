@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from rich.markup import escape
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import ScrollableContainer
@@ -27,6 +26,7 @@ from textual.widgets import Footer, Static
 
 from iris.capture.schemas import ActionItem, CapturedFact, FactType
 from iris.console._confidence_bar import render_confidence_bar as _render_confidence_bar
+from iris.console._markup import escape_for_content
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -409,15 +409,15 @@ class CriticalFactCard(_FactBaseCard):
             cursor = "▋"
             return (
                 f"{header}\n"
-                f"[dim]{escape(self._fact.raw_text)}[/dim]\n"
-                f"[bold white]{escape(self._edit_buffer)}{cursor}[/bold white]\n"
+                f"[dim]{escape_for_content(self._fact.raw_text)}[/dim]\n"
+                f"[bold white]{escape_for_content(self._edit_buffer)}{cursor}[/bold white]\n"
                 f"[dim]Enter to confirm  •  Esc to cancel[/dim]"
             )
 
         return (
             f"{header}\n"
-            f"[dim]{escape(self._fact.raw_text)}[/dim]\n"
-            f"[bold white]{escape(self._fact.normalized_value)}[/bold white]\n"
+            f"[dim]{escape_for_content(self._fact.raw_text)}[/dim]\n"
+            f"[bold white]{escape_for_content(self._fact.normalized_value)}[/bold white]\n"
             f"[dim]\\[D] Confirm  \\[E] Edit  \\[X] Dismiss[/dim]"
         )
 
@@ -502,15 +502,15 @@ class FactCard(_FactBaseCard):
             cursor = "▋"
             return (
                 f"{header}\n"
-                f"[dim]{escape(self._fact.raw_text)}[/dim]\n"
-                f"[bold white]{escape(self._edit_buffer)}{cursor}[/bold white]\n"
+                f"[dim]{escape_for_content(self._fact.raw_text)}[/dim]\n"
+                f"[bold white]{escape_for_content(self._edit_buffer)}{cursor}[/bold white]\n"
                 f"[dim]Enter to confirm  •  Esc to cancel[/dim]"
             )
 
         return (
             f"{header}\n"
-            f"[dim]{escape(self._fact.raw_text)}[/dim]\n"
-            f"[bold white]{escape(self._fact.normalized_value)}[/bold white]\n"
+            f"[dim]{escape_for_content(self._fact.raw_text)}[/dim]\n"
+            f"[bold white]{escape_for_content(self._fact.normalized_value)}[/bold white]\n"
             f"[dim]\\[D] Confirm  \\[E] Edit  \\[X] Dismiss[/dim]"
         )
 
@@ -670,17 +670,17 @@ class ActionItemCard(Widget):
         if self._editing:
             cursor = "▋"
             lines = [
-                f"[bold #818cf8]✓ ACTION ITEM[/bold #818cf8]  [dim]Owner: {escape(self._edit_owner)}{cursor if self._edit_field == 2 else ''}[/dim]",
-                f"[bold white]{escape(self._edit_desc)}{cursor if self._edit_field == 0 else ''}[/bold white]",
-                f"[dim]Due: {escape(self._edit_due)}{cursor if self._edit_field == 1 else ''}[/dim]",
+                f"[bold #818cf8]✓ ACTION ITEM[/bold #818cf8]  [dim]Owner: {escape_for_content(self._edit_owner)}{cursor if self._edit_field == 2 else ''}[/dim]",
+                f"[bold white]{escape_for_content(self._edit_desc)}{cursor if self._edit_field == 0 else ''}[/bold white]",
+                f"[dim]Due: {escape_for_content(self._edit_due)}{cursor if self._edit_field == 1 else ''}[/dim]",
                 "[dim]Tab to switch field  •  Enter to save  •  Esc to cancel[/dim]",
             ]
             return "\n".join(lines)
 
         return (
-            f"[bold #818cf8]✓ ACTION ITEM[/bold #818cf8]  [dim]Owner: {escape(owner_str)}[/dim]\n"
-            f"[bold white]{escape(self._item.description)}[/bold white]\n"
-            f"[dim]Due: {escape(due_str)}[/dim]\n"
+            f"[bold #818cf8]✓ ACTION ITEM[/bold #818cf8]  [dim]Owner: {escape_for_content(owner_str)}[/dim]\n"
+            f"[bold white]{escape_for_content(self._item.description)}[/bold white]\n"
+            f"[dim]Due: {escape_for_content(due_str)}[/dim]\n"
             f"[dim]\\[D] Confirm  \\[E] Edit[/dim]"
         )
 
