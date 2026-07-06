@@ -33,7 +33,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from rich.markup import escape
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
@@ -47,6 +46,7 @@ from ..daemon.proxy import DaemonNotRunning, DaemonProxy
 from ..message_store import MessageStore
 from ..prefs import PreferencesStore
 from . import diagnostics
+from ._markup import escape_for_content
 from .contacts import ContactsScreen
 from .contacts_logic import VERB_DESCRIPTION
 from .help_screen import HelpScreen
@@ -354,12 +354,12 @@ class IncomingCallPanel(Widget, can_focus=False):
         choices: list[dict],
     ) -> None:
         """Display the panel for an incoming call."""
-        header = f"📞 INCOMING CALL — {escape(verb)}"
-        display_name = escape(caller_name or caller_number or "(unknown)")
-        caller_line = f"{display_name}  [dim]·[/]  {escape(caller_number)}" if caller_name else escape(caller_number)
+        header = f"📞 INCOMING CALL — {escape_for_content(verb)}"
+        display_name = escape_for_content(caller_name or caller_number or "(unknown)")
+        caller_line = f"{display_name}  [dim]·[/]  {escape_for_content(caller_number)}" if caller_name else escape_for_content(caller_number)
         body = VERB_DESCRIPTION.get(verb, "")
         choice_keys = "  ".join(
-            rf"[b]\[{c['key']}][/] {escape(c['label'])}" for c in choices
+            rf"[b]\[{c['key']}][/] {escape_for_content(c['label'])}" for c in choices
         ) if choices else ""
 
         self.query_one("#call-header", Static).update(header)
@@ -372,7 +372,7 @@ class IncomingCallPanel(Widget, can_focus=False):
 
     def update_intro(self, text: str) -> None:
         """Update the screening intro transcript."""
-        self.query_one("#call-intro", Static).update(f'Caller: "{escape(text)}"')
+        self.query_one("#call-intro", Static).update(f'Caller: "{escape_for_content(text)}"')
 
     def update_countdown(self, seconds_remaining: int) -> None:
         """Update the auto-message countdown (screen verb)."""
@@ -568,12 +568,12 @@ class IrisConsole(App):
                 if kind == "transcript":
                     text, ms = ev[1], ev[2]
                     self._w(
-                        f"[bold]you[/]  › {escape(text) or '(heard nothing)'}"
+                        f"[bold]you[/]  › {escape_for_content(text) or '(heard nothing)'}"
                         f"  [dim]⟮stt {ms:.0f}ms⟯[/]"
                     )
                 elif kind == "reply":
                     self._last_iris_reply = ev[1]
-                    self._w(f"[bold cyan]iris[/] › {escape(ev[1])}")
+                    self._w(f"[bold cyan]iris[/] › {escape_for_content(ev[1])}")
                     self._w(f"        [dim]⟮{ev[2]} · {ev[3]}⟯[/]")
                     # If Iris asked a question, listen for the answer without a wake
                     # word — the window opens when she stops speaking (state → IDLE).
@@ -583,7 +583,7 @@ class IrisConsole(App):
                 elif kind == "heard_far":
                     self._on_heard_far_main(ev[1], ev[2] if len(ev) > 2 else "")
                 elif kind == "error":
-                    self._w(f"[red]✗ {escape(ev[1])}[/]")
+                    self._w(f"[red]✗ {escape_for_content(ev[1])}[/]")
                     self._last_error = ev[1]
                     self.notify(
                         r"Error - press \[e] to copy it, \[b] to file a bug",
@@ -678,10 +678,10 @@ class IrisConsole(App):
                         contact_name=contact_name,
                     )
                     self._w(
-                        f"[b]📩 Message from {escape(caller_name)}[/]"
-                        + (f" ({escape(caller_number)})" if caller_number else "")
+                        f"[b]📩 Message from {escape_for_content(caller_name)}[/]"
+                        + (f" ({escape_for_content(caller_number)})" if caller_number else "")
                     )
-                    self._w(f"   [dim]{escape(transcript[:120])}{'…' if len(transcript) > 120 else ''}[/]")
+                    self._w(f"   [dim]{escape_for_content(transcript[:120])}{'…' if len(transcript) > 120 else ''}[/]")
                     self._w(f"   [dim]msg-id:{msg.id}  ·  say 'mark read {msg.id}' or 'call back {msg.id}'[/]")
                 elif kind == "proactive_badge":
                     self._proactive_badge = ev[1][:40] if ev[1] else ""
@@ -690,14 +690,14 @@ class IrisConsole(App):
                     self._toggle_notification_binding()
                 elif kind == "proactive_tts":
                     self._w(
-                        f"[b yellow]🔔[/] {escape(ev[1]) if len(ev) > 1 else ''}  [dim](proactive)[/]"
+                        f"[b yellow]🔔[/] {escape_for_content(ev[1]) if len(ev) > 1 else ''}  [dim](proactive)[/]"
                     )
                 elif kind == "mayor_reply":
                     # ti-h9di.3: mayor reply delivered via SSE listener.
                     # Display in transcript (no-audio path); also speak if unmuted.
                     reply_text = ev[1] if len(ev) > 1 else ""
                     if reply_text:
-                        self._w(f"[b magenta]mayor[/] → iris: {escape(reply_text)}")
+                        self._w(f"[b magenta]mayor[/] → iris: {escape_for_content(reply_text)}")
                         if self.conductor.state is State.IDLE:
                             self.run_worker(
                                 lambda t=reply_text: self.conductor.say(t),
@@ -764,7 +764,7 @@ class IrisConsole(App):
                 self._incoming_choices,
             )
             self.notify(
-                f"Incoming call: {escape(caller_name or caller_number)}",
+                f"Incoming call: {escape_for_content(caller_name or caller_number)}",
                 severity="warning",
             )
             self.refresh_bindings()
@@ -812,7 +812,7 @@ class IrisConsole(App):
                 capture_output=True, text=True, timeout=15,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            self._w(f"[dim]aec {action} failed: {escape(str(exc))}[/]")
+            self._w(f"[dim]aec {action} failed: {escape_for_content(str(exc))}[/]")
             return False
         return proc.returncode == 0
 
@@ -900,11 +900,11 @@ class IrisConsole(App):
         kind = ev[1] if len(ev) > 1 else ""
         if kind == "lookup_done" and len(ev) >= 4:
             item_id, result = ev[2], ev[3]
-            log.write(f"[dim cyan]⟨list: lookup done — {escape(str(result)[:60])}⟩[/]")
+            log.write(f"[dim cyan]⟨list: lookup done — {escape_for_content(str(result)[:60])}⟩[/]")
             panel.on_lookup_done(item_id, result)
         elif kind == "lookup_failed" and len(ev) >= 4:
             item_id, msg = ev[2], ev[3]
-            log.write(f"[dim red]⟨list: lookup failed — {escape(str(msg))}⟩[/]")
+            log.write(f"[dim red]⟨list: lookup failed — {escape_for_content(str(msg))}⟩[/]")
             panel.on_lookup_failed(item_id, msg)
 
     def _maybe_show_post_call_list(self, session_id: str) -> None:
@@ -937,12 +937,12 @@ class IrisConsole(App):
                 # Within the active-listening window opened by a bare wake-word:
                 # treat this utterance as a command without requiring "Iris, …".
                 self._follow_up_until = 0.0
-                self._w(f"[bold]you[/] → iris: {escape(text)}")
+                self._w(f"[bold]you[/] → iris: {escape_for_content(text)}")
                 self._dispatch(text, speaker)
             else:
-                self._w(f"[dim]· {escape(text)}[/]")  # overheard, not for Iris
+                self._w(f"[dim]· {escape_for_content(text)}[/]")  # overheard, not for Iris
             return
-        self._w(f"[bold]you[/] → iris: {escape(text)}")
+        self._w(f"[bold]you[/] → iris: {escape_for_content(text)}")
         if not cmd:
             # Bare wake-word ("Hey Iris"): speak an ack and open a follow-up window.
             self._follow_up_until = time.monotonic() + _FOLLOW_UP_S
@@ -975,9 +975,9 @@ class IrisConsole(App):
             return  # ti-gbz4.2 + ti-rqhn: far party suppressed UNTIL consent announced
         cmd = address(text)
         if cmd is None:
-            self._w(f"[dim]them: {escape(text)}[/]")  # respondent, not addressing Iris
+            self._w(f"[dim]them: {escape_for_content(text)}[/]")  # respondent, not addressing Iris
             return
-        self._w(f"[magenta]them[/] → iris: {escape(text)}")
+        self._w(f"[magenta]them[/] → iris: {escape_for_content(text)}")
         if not cmd:
             return
         if not self._dispatch(cmd, speaker):
@@ -1017,7 +1017,7 @@ class IrisConsole(App):
                     rf"[b yellow]🔔 {self._proactive_queue_count} pending  ·  press \[n] to cycle[/]"
                 )
             else:
-                parts.append(f"[b yellow]🔔 {escape(self._proactive_badge)}[/]")
+                parts.append(f"[b yellow]🔔 {escape_for_content(self._proactive_badge)}[/]")
         if self._last_error:
             parts.append(r"[b red]⚠ error just now — \[e] copy · \[b] file bug[/]")
         if self._dnd:
@@ -1231,7 +1231,7 @@ class IrisConsole(App):
     def _do_arm_trust(self) -> None:
         """Arm the trust session; operator can then use [g] to grant the far party."""
         self.conductor.arm()
-        name = escape(self._call_contact_name or "contact")
+        name = escape_for_content(self._call_contact_name or "contact")
         self._w(rf"[b yellow]ARM TRUST — {name} armed; press \[g] to grant far access[/]")
         self.notify(rf"Trust armed for {name}; press \[g] to grant")
         self._refresh_status()
@@ -1330,7 +1330,7 @@ class IrisConsole(App):
                 try:
                     subprocess.run(cmd, input=text.encode(), check=True)
                 except Exception as e:  # noqa: BLE001
-                    self.notify(f"Clipboard error: {escape(str(e))}", severity="error")
+                    self.notify(f"Clipboard error: {escape_for_content(str(e))}", severity="error")
                     return
                 break
         self.notify("Copied (best-effort).", severity="information")
@@ -1391,8 +1391,8 @@ class IrisConsole(App):
             except DaemonNotRunning:
                 self._w("[red]Daemon disconnected — choice not sent[/]")
                 return
-        self._w(f"[cyan]→ {escape(label)}[/]")
-        self.notify(f"Choice: {escape(label)}", severity="information")
+        self._w(f"[cyan]→ {escape_for_content(label)}[/]")
+        self.notify(f"Choice: {escape_for_content(label)}", severity="information")
 
     def action_choose_1(self) -> None:
         self._send_choose(1)
