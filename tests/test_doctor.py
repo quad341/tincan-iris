@@ -383,7 +383,7 @@ def test_tincand_deep_check_all_pass():
     from iris.doctor import _tincand_deep_check
     status = {"call_setup_ready": True, "adapter_warning": "", "connected": True}
     with patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
-         patch("iris.doctor._tincand_get_status", return_value=status):
+         patch("iris.doctor.get_tincand_status", return_value=status):
         lines = _tincand_deep_check("tincand", "tincand.service")
     assert any("✓" in ln and "health" in ln for ln in lines)
     assert any("✓" in ln and "SELinux" in ln for ln in lines)
@@ -397,7 +397,7 @@ def test_tincand_deep_check_health_unreachable():
     status = {"call_setup_ready": True, "adapter_warning": "", "connected": False}
     with patch("iris.doctor.urllib.request.urlopen",
                side_effect=urllib.error.URLError("refused")), \
-         patch("iris.doctor._tincand_get_status", return_value=status):
+         patch("iris.doctor.get_tincand_status", return_value=status):
         lines = _tincand_deep_check("tincand", "tincand.service")
     assert any("✗" in ln and "health" in ln for ln in lines)
 
@@ -406,7 +406,7 @@ def test_tincand_deep_check_selinux_missing():
     from iris.doctor import _tincand_deep_check
     status = {"call_setup_ready": False, "adapter_warning": "", "connected": False}
     with patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
-         patch("iris.doctor._tincand_get_status", return_value=status):
+         patch("iris.doctor.get_tincand_status", return_value=status):
         lines = _tincand_deep_check("tincand", "tincand.service")
     selinux_line = next((ln for ln in lines if "SELinux" in ln), None)
     assert selinux_line is not None
@@ -418,7 +418,7 @@ def test_tincand_deep_check_adapter_mismatch():
     from iris.doctor import _tincand_deep_check
     status = {"call_setup_ready": True, "adapter_warning": "iPhone on hci0 (built-in)", "connected": False}
     with patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
-         patch("iris.doctor._tincand_get_status", return_value=status):
+         patch("iris.doctor.get_tincand_status", return_value=status):
         lines = _tincand_deep_check("tincand", "tincand.service")
     mismatch = next((ln for ln in lines if "mismatch" in ln.lower() or "adapter" in ln.lower()), None)
     assert mismatch is not None
@@ -429,7 +429,7 @@ def test_tincand_deep_check_adapter_mismatch():
 def test_tincand_deep_check_dbus_unavailable():
     from iris.doctor import _tincand_deep_check
     with patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
-         patch("iris.doctor._tincand_get_status", side_effect=Exception("no dbus")):
+         patch("iris.doctor.get_tincand_status", side_effect=Exception("no dbus")):
         lines = _tincand_deep_check("tincand", "tincand.service")
     assert any("?" in ln and ("D-Bus" in ln or "unavailable" in ln) for ln in lines)
 
@@ -465,7 +465,7 @@ def test_json_includes_tincand_detail(capsys):
     status = {"call_setup_ready": True, "adapter_warning": "", "connected": True, "device_discovered": False}
     with patch("iris.doctor.subprocess.run", return_value=_mock_active()), \
          patch("iris.doctor.urllib.request.urlopen", return_value=_mock_health_ok()), \
-         patch("iris.doctor._tincand_get_status", return_value=status):
+         patch("iris.doctor.get_tincand_status", return_value=status):
         doctor_main(["--check", "tincand", "--json"])
     out = json.loads(capsys.readouterr().out)
     tincand_svc = next((s for s in out["services"] if s["name"] == "tincand"), None)
