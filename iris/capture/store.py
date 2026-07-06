@@ -231,6 +231,46 @@ class CallCardStore:
                 )
             self._conn.commit()
 
+    def upsert_enriched_fact(
+        self,
+        session_id: str,
+        fact_type: str,
+        raw_text: str,
+        normalized_value: str,
+        transcript_turn_id: int,
+        confidence: float,
+    ) -> None:
+        """Refresh raw_text/confidence for an existing (session_id, fact_type,
+        normalized_value) fact (e.g. L1's bare match gains L3 cue-context);
+        insert with source_layer=3 if no such fact exists yet. Unlike
+        upsert_enriched_action_item, the match is layer-agnostic so repeated
+        mentions within a single enrichment pass also collapse onto each other.
+        """
+        now = time.time()
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                UPDATE captured_facts
+                SET raw_text=?, confidence=?
+                WHERE session_id=? AND fact_type=? AND normalized_value=?
+                """,
+                (raw_text, confidence, session_id, fact_type, normalized_value),
+            )
+            if cur.rowcount == 0:
+                from uuid import uuid4
+                self._conn.execute(
+                    """
+                    INSERT INTO captured_facts
+                        (id, session_id, fact_type, raw_text, normalized_value, critical,
+                         confidence, confirmed, transcript_turn_id, transcript_offset_s,
+                         speaker, source_layer, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (uuid4().hex, session_id, fact_type, raw_text, normalized_value,
+                     0, confidence, None, transcript_turn_id, 0.0, "", 3, now),
+                )
+            self._conn.commit()
+
     # ── Action items ──────────────────────────────────────────────
 
     def add_action_item(self, item: ActionItem) -> None:
