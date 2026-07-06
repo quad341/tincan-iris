@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import degradation_notify
 from ._socket_path import daemon_pid_path
 from .api import DaemonAPI
 from .brain_host import BrainHost
@@ -189,6 +190,7 @@ def main() -> int:
 
     resolver = PolicyResolver(roster=roster, posture=posture)
     notify = DesktopNotifySink()
+    degradation_notify.init(notify)
     engine = HandlingEngine(
         ctrl=ctrl,
         tts=None,
@@ -235,9 +237,10 @@ def main() -> int:
     if call_card_host is not None:
         call_card_host._api = api
 
-    # ti-pugo3.2 (not yet built) will pass on_transition= here to decide when a
-    # baseline change is worth notifying about; this daemon only computes+caches.
-    heartbeat = BaselineHeartbeat(is_daemon_socket_healthy=api.is_healthy)
+    heartbeat = BaselineHeartbeat(
+        is_daemon_socket_healthy=api.is_healthy,
+        on_transition=degradation_notify.on_baseline_transition,
+    )
     api.set_heartbeat(heartbeat)
 
     _log.info("iris daemon: Brain and BrainHost initialized")
