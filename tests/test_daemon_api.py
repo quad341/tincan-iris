@@ -378,3 +378,110 @@ def test_client_count(api, tmp_sock):
     sock2.close()
     # Give server time to detect disconnect
     time.sleep(0.1)
+
+
+# ---------------------------------------------------------------------------
+# is_healthy / set_heartbeat / _baseline_snapshot (ti-hxqpz items 11-13)
+# ---------------------------------------------------------------------------
+
+
+def test_is_healthy_false_when_server_never_started(posture, engine, tmp_sock):
+    """Not started via the `api` fixture -- self._server is still None."""
+    a = DaemonAPI(posture=posture, engine=engine, socket_path=tmp_sock)
+    assert a.is_healthy() is False
+
+
+def test_is_healthy_true_when_socket_path_is_a_real_socket(api):
+    assert api.is_healthy() is True
+
+
+def test_is_healthy_false_on_oserror_when_socket_path_missing(api, tmp_sock):
+    api.stop()
+    assert not tmp_sock.exists()
+    assert api.is_healthy() is False
+
+
+def test_is_healthy_false_when_path_exists_but_is_not_a_socket(api, tmp_sock):
+    api.stop()
+    tmp_sock.write_text("not a socket")
+    assert api.is_healthy() is False
+
+
+def test_baseline_snapshot_none_when_no_heartbeat_wired(api):
+    """The common case in most existing DaemonAPI tests -- constructed without
+    set_heartbeat()."""
+    assert api._baseline_snapshot() is None
+
+
+def test_baseline_snapshot_none_when_heartbeat_wired_but_no_tick_completed(api):
+    heartbeat = MagicMock()
+    heartbeat.latest.return_value = None
+    api.set_heartbeat(heartbeat)
+
+    assert api._baseline_snapshot() is None
+
+
+def test_baseline_snapshot_full_shape_once_a_tick_exists(api):
+    from iris.daemon.heartbeat import BaselineStatus
+    from iris.doctor import AssetCheckResult, DoctorStatus
+
+    checks = [
+        AssetCheckResult("daemon-socket", DoctorStatus.OK, True, detail="listening"),
+        AssetCheckResult("tincand-connected", DoctorStatus.DOWN, True, detail="iPhone not connected"),
+        AssetCheckResult("call-audio-aec", DoctorStatus.ABSENT, False, detail="blocked on tincand"),
+    ]
+    status = BaselineStatus(level="red", checks=checks, checked_at=1234.5)
+    heartbeat = MagicMock()
+    heartbeat.latest.return_value = status
+    api.set_heartbeat(heartbeat)
+
+    snapshot = api._baseline_snapshot()
+
+    assert snapshot["level"] == "red"
+    assert snapshot["checked_at"] == 1234.5
+    assert snapshot["failing"] == ["tincand-connected"]
+    assert [c["name"] for c in snapshot["checks"]] == [
+        "daemon-socket", "tincand-connected", "call-audio-aec",
+    ]
+    assert snapshot["checks"][1]["status"] == "down"
+
+
+def test_baseline_snapshot_failing_excludes_non_required_and_passing_checks(api):
+    from iris.daemon.heartbeat import BaselineStatus
+    from iris.doctor import AssetCheckResult, DoctorStatus
+
+    checks = [
+        AssetCheckResult("ok-required", DoctorStatus.OK, True),
+        AssetCheckResult("down-required", DoctorStatus.DOWN, True),
+        AssetCheckResult("degraded-optional", DoctorStatus.DEGRADED, False),
+        AssetCheckResult("absent-optional", DoctorStatus.ABSENT, False),
+    ]
+    status = BaselineStatus(level="red", checks=checks, checked_at=1.0)
+    heartbeat = MagicMock()
+    heartbeat.latest.return_value = status
+    api.set_heartbeat(heartbeat)
+
+    snapshot = api._baseline_snapshot()
+
+    assert snapshot["failing"] == ["down-required"]
+    assert set(snapshot["failing"]) <= {c["name"] for c in snapshot["checks"]}
+
+
+def test_status_command_includes_baseline_when_heartbeat_wired(api, tmp_sock):
+    from iris.daemon.heartbeat import BaselineStatus
+    from iris.doctor import AssetCheckResult, DoctorStatus
+
+    status = BaselineStatus(
+        level="green", checks=[AssetCheckResult("daemon-socket", DoctorStatus.OK, True)], checked_at=42.0,
+    )
+    heartbeat = MagicMock()
+    heartbeat.latest.return_value = status
+    api.set_heartbeat(heartbeat)
+
+    rfile, wfile, sock = _connect(tmp_sock)
+    try:
+        ack = _send_recv(rfile, wfile, {"cmd": "status"})
+        assert ack["state"]["baseline"]["level"] == "green"
+        assert ack["state"]["baseline"]["checked_at"] == 42.0
+    finally:
+        sock.close()

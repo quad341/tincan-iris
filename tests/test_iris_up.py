@@ -188,7 +188,7 @@ def test_bring_up_tincand_dbus_error():
     with patch("iris.up._unit_known", return_value=True), \
          patch("iris.up._is_active", return_value=True), \
          patch("iris.up._health_ok", return_value=True), \
-         patch("iris.up._tincand_dbus_status", side_effect=Exception("no dbus")), \
+         patch("iris.up.get_tincand_status", side_effect=Exception("no dbus")), \
          patch("iris.up.time.sleep"):
         result = _bring_up_tincand()
     assert result["reason"] == "dbus-error"
@@ -205,7 +205,7 @@ def test_bring_up_tincand_happy_path():
     with patch("iris.up._unit_known", return_value=True), \
          patch("iris.up._is_active", return_value=True), \
          patch("iris.up._health_ok", return_value=True), \
-         patch("iris.up._tincand_dbus_status", return_value=status):
+         patch("iris.up.get_tincand_status", return_value=status):
         result = _bring_up_tincand()
     assert result["reason"] == "ok"
     assert result["health"] is True
@@ -224,7 +224,7 @@ def test_bring_up_tincand_adapter_warning():
     with patch("iris.up._unit_known", return_value=True), \
          patch("iris.up._is_active", return_value=True), \
          patch("iris.up._health_ok", return_value=True), \
-         patch("iris.up._tincand_dbus_status", return_value=status):
+         patch("iris.up.get_tincand_status", return_value=status):
         result = _bring_up_tincand()
     assert result["reason"] == "ok"
     assert result["adapter_warning"] == "iPhone on hci0 (built-in)"

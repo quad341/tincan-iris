@@ -231,3 +231,37 @@ def test_enrichment_degraded_with_fix_when_deps_missing(monkeypatch):
     r = _enrichment_result(monkeypatch, probe_rc=1)
     assert r.status is DoctorStatus.DEGRADED
     assert "pip install" in (r.fix or "")
+
+
+# ---------------------------------------------------------------------------
+# check_call_card_enrichment timeout_s (ti-hxqpz item 10) — heartbeat calls
+# this with timeout_s=3.0 instead of the CLI's own 20.0 default.
+# ---------------------------------------------------------------------------
+
+
+def test_enrichment_propagates_custom_timeout_to_subprocess_run(monkeypatch):
+    monkeypatch.setattr(doctor, "_daemon_python", lambda: "/usr/bin/python3.14")
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["timeout"] = kw.get("timeout")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(doctor.subprocess, "run", fake_run)
+    doctor.check_call_card_enrichment(timeout_s=3.0)
+
+    assert captured["timeout"] == 3.0
+
+
+def test_enrichment_default_timeout_is_20_when_called_without_override(monkeypatch):
+    monkeypatch.setattr(doctor, "_daemon_python", lambda: "/usr/bin/python3.14")
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["timeout"] = kw.get("timeout")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(doctor.subprocess, "run", fake_run)
+    doctor.check_call_card_enrichment()
+
+    assert captured["timeout"] == 20.0

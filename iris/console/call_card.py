@@ -882,9 +882,9 @@ class CallCardView(App):
         self._caller_phone = event.get("caller_phone", "")
         self._topic = event.get("topic", "")
         self._session_id = event.get("session_id", self._session_id)
-        header = f"📞 Iris Call Card | {self._caller_phone}"
+        header = f"📞 Iris Call Card | {escape_for_content(self._caller_phone)}"
         if self._topic:
-            header += f" · {self._topic}"
+            header += f" · {escape_for_content(self._topic)}"
         self.call_from_thread(self.query_one("#header-bar", Static).update, header)
 
     def _handle_fact(self, event: dict) -> None:
@@ -999,7 +999,7 @@ class CallCardPanel(ScrollableContainer):
         if ev == "call_card_started":
             self._session_id = event.get("session_id", "")
             caller = event.get("contact_name") or event.get("caller_number") or "call"
-            self.border_title = f"Call Card · {caller}"
+            self.border_title = f"Call Card · {escape_for_content(caller)}"
             self.border_subtitle = ""
             self.show_panel()
         elif ev == "call_card_disclosure_needed":
