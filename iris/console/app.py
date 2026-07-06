@@ -411,6 +411,7 @@ class IrisConsole(App):
         Binding("i", "interrupt", "stop", priority=True),
         Binding("m", "mute", "mute"),
         Binding("d", "toggle_dnd", "dnd", show=False),
+        Binding("s", "suppress_disclosure", "suppress", show=False),
         Binding("n", "notification", "next notif", show=False),
         Binding("c", "commands", "cmds"),
         Binding("y", "copy_last", "copy reply", show=False),
@@ -1138,6 +1139,14 @@ class IrisConsole(App):
     def action_call_card_panel(self) -> None:
         """Toggle the live Call Card side panel."""
         self.query_one(CallCardPanel).toggle_panel()
+
+    def action_suppress_disclosure(self) -> None:
+        """Global override: [S] suppresses the active call's disclosure
+        regardless of focus. DisclosureCard's own on_key already handles
+        this when the card has focus; this covers the operator having
+        navigated elsewhere during the ~9s auto-disclosure window.
+        """
+        self.query_one(CallCardPanel).suppress_active_disclosure()
 
     def action_list_panel(self) -> None:
         """Toggle the right-side list panel (WCAG 2.1 AA: [L] moves focus in, [Esc] returns)."""
