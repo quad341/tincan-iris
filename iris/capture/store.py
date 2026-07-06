@@ -245,6 +245,11 @@ class CallCardStore:
         insert with source_layer=3 if no such fact exists yet. Unlike
         upsert_enriched_action_item, the match is layer-agnostic so repeated
         mentions within a single enrichment pass also collapse onto each other.
+
+        Rows the operator already confirmed are never overwritten in place --
+        confirmed is the durable-writeback gate (call_card_host.finalize_writeback),
+        so a later enrichment pass that would otherwise match a confirmed row
+        instead inserts a fresh, unconfirmed source_layer=3 row for review.
         """
         now = time.time()
         with self._lock:
@@ -253,6 +258,7 @@ class CallCardStore:
                 UPDATE captured_facts
                 SET raw_text=?, confidence=?
                 WHERE session_id=? AND fact_type=? AND normalized_value=?
+                    AND (confirmed IS NULL OR confirmed=0)
                 """,
                 (raw_text, confidence, session_id, fact_type, normalized_value),
             )
