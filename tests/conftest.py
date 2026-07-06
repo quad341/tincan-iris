@@ -9,6 +9,11 @@ Store() shares real on-disk state — with the user's actual data, with other
 tests, and (in this gc-rig factory setup) with other concurrent sessions
 sharing the same $HOME. See ti-c4z98.
 
+IrisConsole.__init__ also unconditionally opens its own session log
+(_open_log(), $IRIS_LOG_FILE, default ~/.local/state/iris/console.log) —
+same hazard (accumulates writes across runs/sessions, chmod(0o600) because
+it may carry call content/contact PII) — isolated below the same way.
+
 Below, monkeypatch the module-level constants directly rather than relying
 on each store's optional path= param, so the ~30+ existing bare-construction
 call sites are fixed retroactively with no per-test changes.
@@ -62,3 +67,6 @@ def _isolate_default_store_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
     # Daemon exclusivity lock — see module docstring above.
     monkeypatch.setattr(daemon_main, "_PID_PATH", tmp_path / "daemon.pid")
+
+    # Console session log — see module docstring above.
+    monkeypatch.setenv("IRIS_LOG_FILE", str(tmp_path / "console.log"))
