@@ -16,6 +16,8 @@ from textual.containers import VerticalScroll
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, RichLog, Static
 
+from iris.console._markup import escape_for_content
+
 # Mirrors iris/doctor.py's _SYMBOL glyph vocabulary exactly (operators already
 # know these from `iris doctor`'s own CLI output) — kept as a small local
 # string-keyed copy since the wire payload gives plain status strings, not
@@ -148,8 +150,9 @@ class HealthScreen(Screen):
             return ""
         lines = ["[#f38ba8]FIXES[/]", ""]
         for c in broken:
-            fix = c.get("fix") or "(no fix available — see docs)"
-            lines.append(f"{c.get('name', '')}  →  {fix}")
+            name = escape_for_content(c.get("name", ""))
+            fix = escape_for_content(c.get("fix") or "(no fix available — see docs)")
+            lines.append(f"{name}  →  {fix}")
         return "\n".join(lines)
 
 
@@ -188,11 +191,13 @@ def _format_row(check: dict) -> tuple[str, str, str, str]:
     status = check.get("status", "unknown")
     glyph = _STATUS_GLYPH.get(status, "?")
     required = bool(check.get("required", False))
+    name = escape_for_content(check.get("name", ""))
+    detail = escape_for_content(check.get("detail", ""))
     cells = (
-        f"{glyph} {check.get('name', '')}",
+        f"{glyph} {name}",
         status,
         "yes" if required else "no",
-        check.get("detail", ""),
+        detail,
     )
     if not required:
         return tuple(f"[dim]{cell}[/]" for cell in cells)
