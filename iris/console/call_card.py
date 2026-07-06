@@ -34,7 +34,7 @@ from iris.console._markup import escape_for_content
 # ─────────────────────────────────────────────────────────────────
 
 class DisclosureState(str, Enum):
-    EXPANDED = "expanded"
+    DISCLOSING = "disclosing"  # was EXPANDED — disclose-by-default redesign (ti-n9vey)
     DISCLOSED = "disclosed"
     SKIPPED = "skipped"
 
@@ -71,14 +71,17 @@ _STATE_DIR = Path.home() / ".local" / "share" / "iris"
 
 
 class DisclosureCard(Widget):
-    """AI disclosure modal gate — focus-trapped; acknowledges AI listening consent.
+    """AI disclosure status card — reflects auto-disclosure, never blocks the operator.
 
-    NOT a _BaseCard subclass — modal widget, not a feed card.
+    NOT a _BaseCard subclass — not a feed card in the usual sense.
 
-    Expanded state: orange border, amber header, yellow script body, [D]/[S] buttons.
+    Disclosing state: blue border/header, calm script body, [D] Force / [S] Suppress
+    hints. Border/header shift to amber if no daemon broadcast arrives within 12s
+    (``_stalled``). Does not trap focus — disclosure now happens automatically;
+    the operator may navigate away at any time (see ti-n9vey).
     Collapsed badge: '✓ AI Disclosed' (green) or '⊘ Skipped' (gray).
     Disk persistence: ~/.local/share/iris/disclosure-{session_id}.json.
-    On re-init with matching session_id, loads saved state — skips expansion.
+    On re-init with matching session_id, loads saved state — skips the disclosing display.
     """
 
     COMPONENT_CLASSES: set[str] = set()
@@ -88,7 +91,7 @@ class DisclosureCard(Widget):
     DEFAULT_CSS = """
     DisclosureCard {
         height: auto;
-        border: heavy #f97316;
+        border: heavy #38bdf8;
         padding: 1;
         margin-bottom: 1;
     }
@@ -96,6 +99,9 @@ class DisclosureCard(Widget):
         border: none;
         padding: 0 1;
         height: auto;
+    }
+    DisclosureCard.-stalled {
+        border: heavy #f59e0b;
     }
     """
 
@@ -109,20 +115,21 @@ class DisclosureCard(Widget):
         super().__init__(**kwargs)
         self._session_id = session_id
         self._script = script or _DISCLOSURE_SCRIPT
-        self._focused_btn: str = "disclose"
+        self._stalled: bool = False
+        self._stall_timer: Any = None
 
         saved = self._load_state()
         self._state: DisclosureState = (
-            saved if saved is not None else DisclosureState.EXPANDED
+            saved if saved is not None else DisclosureState.DISCLOSING
         )
 
         self._disclose_btn = _VirtualButton(
-            label="[D] Disclosed",
-            aria_label="Disclosed",
+            label="[D] Force",
+            aria_label="Force disclosure now",
         )
         self._skip_btn = _VirtualButton(
-            label="[S] Skip",
-            aria_label="Skip",
+            label="[S] Suppress",
+            aria_label="Suppress — permanently skip disclosure for this call",
         )
 
     # ── Disk I/O ──────────────────────────────────────────────────
@@ -148,8 +155,21 @@ class DisclosureCard(Widget):
     # ── Textual lifecycle ─────────────────────────────────────────
 
     def on_mount(self) -> None:
-        if self._state is not DisclosureState.EXPANDED:
+        if self._state is not DisclosureState.DISCLOSING:
             self.add_class("-badge")
+        else:
+            self._stall_timer = self.set_timer(12.0, self._on_stalled)
+
+    def _on_stalled(self) -> None:
+        """No daemon broadcast within 12s — escalate to amber (§2b, ti-n9vey).
+
+        Re-checks state rather than cancelling the timer, so a late firing
+        after the card already resolved is a harmless no-op.
+        """
+        if self._state is DisclosureState.DISCLOSING:
+            self._stalled = True
+            self.add_class("-stalled")
+            self.refresh()
 
     def query_one(self, selector: str, *args: Any, **kwargs: Any) -> Any:
         if selector == "#disclose-btn":
@@ -162,65 +182,43 @@ class DisclosureCard(Widget):
 
     def render(self) -> str:
         if self._state is DisclosureState.DISCLOSED:
-            return "[bold green]✓ AI Disclosed[/bold green]"
+            return "[bold #22c55e]✓ AI Disclosed[/bold #22c55e]"
         if self._state is DisclosureState.SKIPPED:
             return "[#999999]⊘ Skipped[/#999999]"
 
-        # Expanded modal — highlight the focused button
-        d_style = (
-            "[bold underline green]"
-            if self._focused_btn == "disclose"
-            else "[green]"
-        )
-        s_style = (
-            "[bold underline #999999]"
-            if self._focused_btn == "skip"
-            else "[#999999]"
-        )
+        if self._stalled:
+            header = (
+                "[bold #f59e0b]🔊 Disclosing… (taking longer than usual)[/bold #f59e0b]"
+            )
+        else:
+            header = "[bold #38bdf8]🔊 Disclosing…[/bold #38bdf8]"
 
         lines = [
-            "[bold yellow]⚠ DISCLOSURE REQUIRED[/bold yellow]",
+            header,
             "",
-            f"[yellow]{self._script}[/yellow]",
+            f"[#cbd5e1]{self._script}[/#cbd5e1]",
             "",
-            f"{d_style}\\[D] Disclosed[/]  {s_style}\\[S] Skip[/]",
+            "[dim]\\[D] Force   \\[S] Suppress[/dim]",
         ]
         return "\n".join(lines)
 
-    # ── Input / focus trap ────────────────────────────────────────
+    # ── Input ─────────────────────────────────────────────────────
 
     def on_key(self, event: Any) -> None:
-        if self._state is not DisclosureState.EXPANDED:
+        if self._state is not DisclosureState.DISCLOSING:
             return
-
         key = event.key
-        if key in ("tab", "shift+tab"):
-            event.stop()
-            event.prevent_default()
-            self._focused_btn = (
-                "skip" if self._focused_btn == "disclose" else "disclose"
-            )
-            self.refresh()
-        elif key == "escape":
-            event.stop()
-            self.action_skip()
-        elif key == "enter":
-            event.stop()
-            if self._focused_btn == "disclose":
-                self.action_disclose()
-            else:
-                self.action_skip()
-        elif key == "d":
+        if key in ("d", "enter"):
             event.stop()
             self.action_disclose()
-        elif key == "s":
+        elif key in ("s", "escape"):
             event.stop()
             self.action_skip()
 
     # ── Actions ───────────────────────────────────────────────────
 
     def action_disclose(self) -> None:
-        if self._state is not DisclosureState.EXPANDED:
+        if self._state is not DisclosureState.DISCLOSING:
             return
         self._state = DisclosureState.DISCLOSED
         self._save_state()
@@ -230,7 +228,7 @@ class DisclosureCard(Widget):
         self._return_focus()
 
     def action_skip(self) -> None:
-        if self._state is not DisclosureState.EXPANDED:
+        if self._state is not DisclosureState.DISCLOSING:
             return
         self._state = DisclosureState.SKIPPED
         self._save_state()
@@ -246,6 +244,20 @@ class DisclosureCard(Widget):
             feed.focus()
         except Exception:
             pass
+
+    def apply_daemon_state(self, state: DisclosureState) -> None:
+        """Reconcile an authoritative call_card_disclosed/call_card_skipped
+        broadcast. The daemon is the audit-of-record (NFR-03) — it always
+        wins — but no-op if we already show this state, so an operator-
+        initiated optimistic update doesn't visibly flicker when the
+        daemon's echo of that same transition arrives moments later.
+        """
+        if self._state == state:
+            return
+        self._state = state
+        self._save_state()
+        self.add_class("-badge")
+        self.refresh()
 
     # ── Public state access ───────────────────────────────────────
 
@@ -950,6 +962,7 @@ class CallCardPanel(ScrollableContainer):
         super().__init__(**kwargs)
         self.border_title = "Call Card"
         self._session_id = ""
+        self._disclosure_card: DisclosureCard | None = None
 
     def compose(self) -> ComposeResult:
         # A visible empty state so [V] on an idle console shows the panel is there
@@ -975,6 +988,11 @@ class CallCardPanel(ScrollableContainer):
     def toggle_panel(self) -> None:
         self.toggle_class("visible-panel")
 
+    def suppress_active_disclosure(self) -> None:
+        """Global [S] override reaching this call's card regardless of focus."""
+        if self._disclosure_card is not None:
+            self._disclosure_card.action_skip()
+
     def handle_event(self, event: dict) -> None:
         """Route one ``call_card_*`` daemon event into the panel. Unknown → ignored."""
         ev = event.get("event", "")
@@ -987,9 +1005,24 @@ class CallCardPanel(ScrollableContainer):
         elif ev == "call_card_disclosure_needed":
             self._session_id = event.get("session_id", self._session_id)
             self.show_panel()
-            self._prepend(
-                DisclosureCard(self._session_id or "default", script=event.get("script"))
+            self._disclosure_card = DisclosureCard(
+                self._session_id or "default", script=event.get("script")
             )
+            self._prepend(self._disclosure_card)
+            try:
+                self._disclosure_card.focus()
+            except Exception:
+                pass
+        elif ev == "call_card_disclosed":
+            if event.get("session_id", self._session_id) != self._session_id:
+                return
+            if self._disclosure_card is not None:
+                self._disclosure_card.apply_daemon_state(DisclosureState.DISCLOSED)
+        elif ev == "call_card_skipped":
+            if event.get("session_id", self._session_id) != self._session_id:
+                return
+            if self._disclosure_card is not None:
+                self._disclosure_card.apply_daemon_state(DisclosureState.SKIPPED)
         elif ev == "call_card_fact":
             try:
                 fact = _fact_from_dict(event.get("fact", event))
