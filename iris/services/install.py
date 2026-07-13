@@ -23,12 +23,17 @@ UNITS: list[UnitSpec] = [
     UnitSpec("iris-llama",   "iris-llama.service.tmpl"),
     UnitSpec("iris-whisper", "iris-whisper.service.tmpl"),
     UnitSpec("iris-kokoro",  "iris-kokoro.service.tmpl"),
+    UnitSpec("iris-brain",   "iris-brain.service.tmpl"),
 ]
 
-# iris-brain.service ran `python -m iris.voice` (interactive REPL) under systemd,
-# which exits immediately on EOF from stdin — crash-loop. Dropped from managed units;
-# the console embeds its own Brain in-process. Stale unit is retired on install.
-_RETIRED_UNITS: list[str] = ["iris-brain"]
+# iris-brain.service originally ran `python -m iris.voice` (interactive REPL)
+# under systemd, which exits immediately on EOF from stdin — crash-loop — so it
+# was dropped from managed units and retired here. That crash-loop bug is fixed
+# (iris-brain.service.tmpl now targets `python -m iris.daemon`; see the
+# regression guard in _validate_exec_starts()) and the daemon is reinstated in
+# UNITS above (ti-omwom). Left empty rather than deleted so a future retirement
+# has a ready-made mechanism.
+_RETIRED_UNITS: list[str] = []
 
 
 def _python_main() -> Path:
@@ -63,6 +68,20 @@ def _validate_exec_starts() -> list[str]:
         except Exception as exc:  # noqa: BLE001
             errors.append(f"  ✗ brain python import check failed: {exc}")
 
+    # Regression guard for the original crash-loop bug: iris-brain must launch
+    # the daemon, not the old `python -m iris.voice` REPL (which exits on EOF
+    # from stdin and crash-loops under systemd).
+    brain_exec_start = next(
+        (line for line in _render("iris-brain.service.tmpl").splitlines()
+         if line.startswith("ExecStart=")),
+        "",
+    )
+    if "-m iris.daemon" not in brain_exec_start:
+        errors.append(
+            f"  ✗ iris-brain.service.tmpl ExecStart does not target iris.daemon: "
+            f"{brain_exec_start!r}"
+        )
+
     return errors
 
 
@@ -94,11 +113,18 @@ def _linger_enabled() -> bool:
     return (Path("/var/lib/systemd/linger") / user).exists()
 
 
-def install(dry_run: bool = False) -> int:
-    """Install or update Iris systemd user services. Returns 0 on success, 1 on any failure."""
+def install(dry_run: bool = False, with_daemon: bool = True) -> int:
+    """Install or update Iris systemd user services. Returns 0 on success, 1 on any failure.
+
+    with_daemon=False (--no-daemon) skips installing iris-brain.service only —
+    it does not stop or disable an iris-brain unit left over from a prior
+    install; use `iris daemon stop` / `systemctl --user disable iris-brain`
+    for that.
+    """
     # Retire obsolete units FIRST — cleanup is independent of the new-install
-    # preflight, so a stale/crash-looping unit (iris-brain) is dropped even when
-    # the venvs aren't ready to install the new ones yet.
+    # preflight, so a stale/retired unit is dropped even when the venvs aren't
+    # ready to install the new ones yet. _RETIRED_UNITS is empty today; the
+    # mechanism is kept for the next retirement.
     if not dry_run:
         _SYSTEMD_USER.mkdir(parents=True, exist_ok=True)
         for name in _RETIRED_UNITS:
@@ -132,10 +158,13 @@ def install(dry_run: bool = False) -> int:
     prefix = "[dry-run] " if dry_run else ""
     print(f"\n{prefix}Installing Iris systemd user services…\n")
 
+    units = UNITS if with_daemon else [spec for spec in UNITS if spec.name != "iris-brain"]
+
     changed: list[str] = []
     failed: list[str] = []
+    brain_newly_installed = False
 
-    for spec in UNITS:
+    for spec in units:
         content = _render(spec.template)
         dest = _SYSTEMD_USER / f"{spec.name}.service"
 
@@ -150,6 +179,8 @@ def install(dry_run: bool = False) -> int:
                 label = "(updated)" if existing else ""
                 print(f"  Writing {dest}    ✓ {label}".rstrip())
             changed.append(spec.name)
+            if spec.name == "iris-brain" and existing is None:
+                brain_newly_installed = True
 
     print()
 
@@ -165,7 +196,7 @@ def install(dry_run: bool = False) -> int:
     print("  ✓")
 
     print("\n  Enabling and starting services…")
-    for spec in UNITS:
+    for spec in units:
         if spec.name not in changed:
             print(f"    {spec.name}    skipped (unchanged)")
             continue
@@ -180,6 +211,13 @@ def install(dry_run: bool = False) -> int:
 
     print("\n  Services installed. Run 'iris doctor' to verify health.\n")
     print("  Note: tincand.service is managed separately — see the tincand project.")
+
+    if brain_newly_installed:
+        print(
+            "\n  ℹ  iris-brain was newly enabled — it has outbound network access\n"
+            "     (no IPAddressDeny) for optional cloud Tier 2 (Haiku) calls,\n"
+            "     calendar, and web-search APIs. Opt out next time with --no-daemon."
+        )
 
     if not _linger_enabled() and not dry_run:
         user = os.environ.get("USER", "$USER")
