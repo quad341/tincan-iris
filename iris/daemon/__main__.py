@@ -27,7 +27,7 @@ from ._socket_path import daemon_pid_path
 from .api import DaemonAPI
 from .brain_host import BrainHost
 from .engine import HandlingEngine
-from .heartbeat import BaselineHeartbeat
+from .heartbeat import BaselineHeartbeat, BaselineStatus
 from .message_event_source import MessageEventSource
 from .policy import PolicyResolver
 from .posture import PostureManager, PostureWatcher
@@ -237,9 +237,16 @@ def main() -> int:
     if call_card_host is not None:
         call_card_host._api = api
 
+    def _on_baseline_transition(new: BaselineStatus, previous: BaselineStatus | None) -> None:
+        # Compose, don't replace (ti-pugo3.3.1): degradation_notify's desktop
+        # notifications (ti-pugo3.2) and the console broadcast both need every
+        # transition. BaselineHeartbeat only accepts one on_transition callable.
+        degradation_notify.on_baseline_transition(new, previous)
+        api._on_baseline_transition(new, previous)
+
     heartbeat = BaselineHeartbeat(
         is_daemon_socket_healthy=api.is_healthy,
-        on_transition=degradation_notify.on_baseline_transition,
+        on_transition=_on_baseline_transition,
     )
     api.set_heartbeat(heartbeat)
 

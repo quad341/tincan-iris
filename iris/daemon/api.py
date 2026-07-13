@@ -6,7 +6,7 @@ Clients connect, receive events, and send commands on the same connection.
 Socket: ~/.local/run/iris/daemon.sock (mode 0600); override with $IRIS_DAEMON_SOCK.
 
 Event types broadcast to all connected clients:
-  incoming_call, screen_intro, call_connected, call_ended, posture, take_message_done
+  incoming_call, screen_intro, call_connected, call_ended, posture, baseline, take_message_done
   brain_turn_started, brain_chunk, brain_reply
   call_card_started, call_card_disclosure_needed, call_card_fact, call_card_action_item,
   call_card_ended, call_card_enriched, call_card_written_back
@@ -38,7 +38,7 @@ from pathlib import Path
 
 from ._socket_path import daemon_socket_path
 from .brain_host import BrainHost
-from .heartbeat import BaselineHeartbeat
+from .heartbeat import BaselineHeartbeat, BaselineStatus
 from .posture import PostureManager
 
 _log = logging.getLogger(__name__)
@@ -336,6 +336,10 @@ class DaemonAPI:
         status = self._heartbeat.latest()
         if status is None:
             return None
+        return self._status_payload(status)
+
+    @staticmethod
+    def _status_payload(status: BaselineStatus) -> dict:
         return {
             "level": status.level,
             "checked_at": status.checked_at,
@@ -351,6 +355,16 @@ class DaemonAPI:
                 for c in status.checks
             ],
         }
+
+    def _on_baseline_transition(self, new: BaselineStatus, previous: BaselineStatus | None) -> None:  # noqa: ARG002
+        """BaselineHeartbeat's on_transition callback — forward as a `baseline` event (ti-pugo3.3.1).
+
+        Composed alongside degradation_notify.on_baseline_transition in
+        __main__.py, not in place of it — both must keep firing on every
+        transition. `previous` isn't needed here: connected clients just want
+        the current status, the same shape `_baseline_snapshot()` returns.
+        """
+        self.broadcast({"event": "baseline", **self._status_payload(new)})
 
     def _handle_turn(self, cmd: dict, writer: _ClientWriter) -> None:
         if self._brain_host is None:
