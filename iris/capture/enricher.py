@@ -12,7 +12,7 @@ import os
 import threading
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from iris.capture.schemas import CapturedFact, FactType
 from iris.capture.store import CallCardStore
@@ -27,7 +27,11 @@ _MODEL = "claude-haiku-4-5-20251001"
 _TIMEOUT_S = 30
 _SYSTEM = (
     "You are a precise call-note extractor. "
-    "Do not re-extract facts in confirmed_entities."
+    "Do not re-extract facts in confirmed_entities. "
+    "If the same commitment or task is mentioned more than once, including "
+    "rephrased restatements, output ONE action item covering every turn it "
+    "was mentioned in — never emit more than one entry for the same "
+    "underlying task."
 )
 
 
@@ -42,10 +46,24 @@ class FactExtract(BaseModel):
 
 
 class ActionItemExtract(BaseModel):
-    description: str
+    description: str = Field(
+        description=(
+            "A single clear, concise statement of the commitment or task, "
+            "paraphrased in your own words. If this task is mentioned or "
+            "restated more than once in the call, write ONE description "
+            "covering all of its mentions — never one entry per mention."
+        )
+    )
     owner: str              # 'operator' | 'far' | 'unknown'
     due_date: str | None    # ISO date or null
-    transcript_turn_id: int
+    transcript_turn_ids: list[int] = Field(
+        description=(
+            "Every transcript turn ID where this task was mentioned or "
+            "restated, earliest first. If the same task comes up again "
+            "later in the call, add that turn here instead of creating a "
+            "separate action item for it."
+        )
+    )
     confidence: float
 
 
@@ -122,7 +140,9 @@ class PostCallEnricher(threading.Thread):
                 f"Confirmed entities (do not re-extract):\n{confirmed_entities_block}"
                 f"\n\nFull transcript:\n{transcript_block}"
                 "\n\nFind: (1) entity types spoken but NOT in the confirmed list; "
-                "(2) action items needing clearer descriptions or due dates."
+                "(2) action items needing clearer descriptions or due dates — "
+                "consolidate repeated or rephrased mentions of the same task "
+                "into a single entry covering all of its turns."
             )
 
             result = self._call_llm(api_key, user_prompt)
@@ -184,14 +204,23 @@ class PostCallEnricher(threading.Thread):
             self._store.add_fact(fact)
 
         for ai in result.enriched_items:
+            if not ai.transcript_turn_ids:
+                continue
+            primary_turn, *duplicate_turns = ai.transcript_turn_ids
             self._store.upsert_enriched_action_item(
                 session_id=session_id,
-                turn_id=ai.transcript_turn_id,
+                turn_id=primary_turn,
                 description=ai.description,
                 owner=ai.owner,
                 due_date=ai.due_date,
                 confidence=ai.confidence,
             )
+            if duplicate_turns:
+                # Other turns where this same task was mentioned already have
+                # their own L1 rows (iris/capture/processor.py fires once per
+                # matched turn) — remove them now that upsert above collapsed
+                # everything into the single row at primary_turn.
+                self._store.delete_action_items_by_turn(session_id, duplicate_turns)
 
         self._store.mark_enrichment_done(session_id, status=1)
         self._api.broadcast({  # type: ignore[union-attr]
