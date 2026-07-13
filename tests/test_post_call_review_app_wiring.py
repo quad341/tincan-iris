@@ -39,7 +39,11 @@ import pytest
 pytest.importorskip("textual")
 
 from iris.console.app import IrisConsole  # noqa: E402
-from iris.console.post_call_review import PostCallReviewScreen, SaveRequested  # noqa: E402
+from iris.console.post_call_review import (  # noqa: E402
+    PostCallReviewScreen,
+    SaveRequested,
+    _ReviewPhase,
+)
 from iris.daemon.proxy import DaemonNotRunning  # noqa: E402
 from iris.roster import Contact  # noqa: E402
 
@@ -229,9 +233,16 @@ def test_on_save_requested_ack_ok_writes_nothing_and_does_not_touch_screen():
 
 
 def test_on_save_requested_does_not_fail_screen_for_different_session_id():
-    """The operator saved sess-1, then navigated to a screen reviewing sess-2
-    before the ack for sess-1 arrived. sess-1's ack must not reach into sess-2's
-    (unrelated, still-REVIEWING) screen.
+    """sess-1 is saving elsewhere while the operator is on a screen for
+    sess-2 that is independently mid-save too. sess-1's failure ack must
+    not reach into sess-2's unrelated SAVING screen.
+
+    other_screen is put in SAVING (not left at the REVIEWING default)
+    specifically so this test exercises the session_id guard in
+    on_save_requested: on_save_failed() has its own internal phase guard
+    (no-ops unless SAVING) that would otherwise independently mask a
+    missing/broken session_id guard, since a REVIEWING screen wouldn't
+    observably change either way.
     """
     app = IrisConsole()
     other_screen = _review_screen("sess-2")
@@ -242,11 +253,12 @@ def test_on_save_requested_does_not_fail_screen_for_different_session_id():
             app._w = lambda *a, **k: None
             await app.push_screen(other_screen)
             await pilot.pause()
+            other_screen._phase = _ReviewPhase.SAVING
             app.on_save_requested(SaveRequested("sess-1"))
             await pilot.pause()
 
     asyncio.run(scenario())
-    assert other_screen._phase.value == "reviewing"
+    assert other_screen._phase is _ReviewPhase.SAVING
     assert other_screen._save_failed is False
 
 
@@ -302,13 +314,18 @@ def test_call_card_written_back_is_noop_when_screen_does_not_match():
         async with app.run_test() as pilot:
             await app.push_screen(other_screen)
             await pilot.pause()
+            # SAVING (not the REVIEWING default): on_saved()/on_save_failed()
+            # each no-op unless SAVING, which would mask a missing/broken
+            # session_id guard below -- see the sibling test's docstring in
+            # test_on_save_requested_does_not_fail_screen_for_different_session_id.
+            other_screen._phase = _ReviewPhase.SAVING
             # Must not raise even though the event is for a session with no
             # matching screen currently pushed.
             app._on_daemon_event({"event": "call_card_written_back", "session_id": "sess-1"})
             await pilot.pause()
 
     asyncio.run(scenario())
-    assert other_screen._phase.value == "reviewing"
+    assert other_screen._phase is _ReviewPhase.SAVING
     assert other_screen._save_failed is False
 
 
