@@ -2,8 +2,10 @@
 
 Ensures whisper+kokoro are running (starts them via systemctl if needed),
 checks llama is reachable on :8080 (operator-managed; warns but does not block),
-starts tincand if inactive and waits for readiness (optional; reports status
-but does not block on failure), then hands off to the console.
+ensures iris-brain is active if installed (starts it when inactive; warns but
+does not block when missing or failed to start), starts tincand if inactive
+and waits for readiness (optional; reports status but does not block on
+failure), then hands off to the console.
 
 Llama is intentionally NOT started here — the operator shares a single llama
 instance across multiple tools; starting a competing one would break things.
@@ -21,6 +23,7 @@ _MANAGED_SERVICES = ["iris-whisper", "iris-kokoro"]
 _LLAMA_URL = "http://127.0.0.1:8080/health"
 _TINCAND_URL = "http://127.0.0.1:9001/health"
 _HEALTH_TIMEOUT = 5.0
+_BRAIN_UNIT = "iris-brain.service"
 _TINCAND_UNIT = "tincand.service"
 _TINCAND_WAIT_S = 10
 _DBUS_RETRIES = 3
@@ -197,7 +200,22 @@ def bring_up(*, launch_console: bool = True) -> int:
         print("    ⚠ llama-server is not running on :8080 — Iris brain needs it.")
         print("      Start it manually before using Iris.  (Iris will launch but won't respond.)")
 
-    # 3. Tincand — optional; start if inactive, wait for readiness, report status.
+    # 3. iris-brain — optional daemon; start if installed but inactive. Unlike
+    # whisper/kokoro this never blocks bring-up (FR-05): missing or failed is
+    # a warning only, since the console still works via its direct-mode fallback.
+    print("  checking iris-brain…", end="", flush=True)
+    if not _unit_known(_BRAIN_UNIT):
+        print(" not installed")
+        print("    ⚠ iris-brain is not installed — run 'iris install-services' to enable.")
+        print("      Iris will still work via direct mode when you start the console.")
+    elif _is_active("iris-brain"):
+        print(" already active ✓")
+    else:
+        print()  # newline before _start_service's own progress line
+        if not _start_service("iris-brain"):
+            print("    iris-brain is optional — iris will start without it (direct mode).")
+
+    # 4. Tincand — optional; start if inactive, wait for readiness, report status.
     print("  checking tincand…", end="", flush=True)
     tincand_result = _bring_up_tincand()
     print()  # newline after the "checking tincand…" line
