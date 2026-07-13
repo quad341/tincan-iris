@@ -518,6 +518,89 @@ def test_focus_after_saved_focuses_recap_banner():
 
 
 # ---------------------------------------------------------------------------
+# Footer literal text (ti-qciaa, follow-up from ti-n94dj review finding #3):
+# the phase-dependent footer hints and the unconfirmed-count pluralization
+# were previously exercised only behaviorally (footer content changes across
+# phase transitions), never asserted verbatim -- so a wording regression in
+# _render_footer() wouldn't be caught by the suite.
+# ---------------------------------------------------------------------------
+
+def test_saving_phase_footer_shows_saving_hint():
+    screen = _make_screen()
+    footer = None
+
+    async def scenario():
+        nonlocal footer
+        app = _ReviewHostApp(screen)
+        async with app.run_test(size=(100, 40)) as pilot:
+            await pilot.pause()
+            screen.action_save()
+            await pilot.pause()
+            footer = _footer_text(screen)
+
+    asyncio.run(scenario())
+    assert "saving…" in footer
+
+
+def test_saved_phase_footer_shows_close_hint():
+    screen = _make_screen()
+    footer = None
+
+    async def scenario():
+        nonlocal footer
+        app = _ReviewHostApp(screen)
+        async with app.run_test(size=(100, 40)) as pilot:
+            await pilot.pause()
+            screen.action_save()
+            await pilot.pause()
+            screen.on_saved(_call_card())
+            await pilot.pause()
+            footer = _footer_text(screen)
+
+    asyncio.run(scenario())
+    assert "[q] Close" in footer
+
+
+def test_footer_unconfirmed_count_singular_wording():
+    facts = [_fact(id="crit-unconfirmed", fact_type=FactType.ACCOUNT_ID.value, critical=True, confirmed=None)]
+    screen = _make_screen(call_card=_call_card(facts=facts, action_items=[]))
+    footer = None
+
+    async def scenario():
+        nonlocal footer
+        app = _ReviewHostApp(screen)
+        async with app.run_test(size=(100, 40)) as pilot:
+            await pilot.pause()
+            screen.action_save()
+            await pilot.pause()
+            footer = _footer_text(screen)
+
+    asyncio.run(scenario())
+    assert screen._unconfirmed_count == 1
+    assert "1 item not reviewed — still available next time" in footer
+
+
+def test_footer_unconfirmed_count_plural_wording():
+    facts = [_fact(id="crit-unconfirmed", fact_type=FactType.ACCOUNT_ID.value, critical=True, confirmed=None)]
+    items = [_item(id="item-unconfirmed", confirmed=None)]
+    screen = _make_screen(call_card=_call_card(facts=facts, action_items=items))
+    footer = None
+
+    async def scenario():
+        nonlocal footer
+        app = _ReviewHostApp(screen)
+        async with app.run_test(size=(100, 40)) as pilot:
+            await pilot.pause()
+            screen.action_save()
+            await pilot.pause()
+            footer = _footer_text(screen)
+
+    asyncio.run(scenario())
+    assert screen._unconfirmed_count == 2
+    assert "2 items not reviewed — still available next time" in footer
+
+
+# ---------------------------------------------------------------------------
 # Delta view: promotion filter must mirror CallCardHost.finalize_writeback
 # exactly (ti-hb2dx) -- facts need confirmed AND a durable fact_type; action
 # items promote on confirmed alone, regardless of owner/direction.
