@@ -115,13 +115,13 @@ def test_bring_up_all_healthy_returns_0(capsys):
 
 
 # ---------------------------------------------------------------------------
-# install.py: iris-brain retired + removed from UNITS
+# install.py: iris-brain reinstated in UNITS, always-on daemon (ti-omwom/ti-kzkfv)
 # ---------------------------------------------------------------------------
 
-def test_iris_brain_not_in_install_units():
+def test_iris_brain_in_install_units():
     from iris.services.install import UNITS
     names = {spec.name for spec in UNITS}
-    assert "iris-brain" not in names
+    assert "iris-brain" in names
 
 
 def test_iris_brain_not_in_doctor_services():
@@ -130,7 +130,7 @@ def test_iris_brain_not_in_doctor_services():
     assert "iris-brain" not in names
 
 
-def test_install_retires_stale_brain_unit(tmp_path, capsys):
+def test_install_does_not_retire_iris_brain_unit(tmp_path, capsys):
     from iris.services.install import install
     brain_unit = tmp_path / "iris-brain.service"
     brain_unit.write_text("[Unit]\nDescription=old brain\n")
@@ -149,7 +149,7 @@ def test_install_retires_stale_brain_unit(tmp_path, capsys):
         install(dry_run=False)
 
     stop_cmds = [c for c in systemctl_calls if "stop" in c]
-    assert any("iris-brain" in " ".join(c) for c in stop_cmds)
+    assert not any("iris-brain" in " ".join(c) for c in stop_cmds)
 
 
 # ---------------------------------------------------------------------------
