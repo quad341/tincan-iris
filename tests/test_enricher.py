@@ -1,24 +1,19 @@
 """PostCallEnricher fact dedup / cue-context / action-item collapse (ti-3p688.4).
 
-Covers ti-3p688.1 (done on this branch: CallCardStore.upsert_enriched_fact
-dedupes by (fact_type, normalized_value), refreshing raw_text so a bare L1
-match gains L3 cue-context, and never overwrites an already-confirmed row in
-place -- see the ti-f34mq review of commit 3bb4da5, addressed in 36b7a99) and
-ti-3p688.2 (NOT yet built: action-item extraction tightening). Tests run at
-the PostCallEnricher._apply_result seam -- a real CallCardStore(":memory:")
-wired through a real PostCallEnricher, calling _apply_result directly with a
+Covers ti-3p688.1 (CallCardStore.upsert_enriched_fact dedupes by (fact_type,
+normalized_value), refreshing raw_text so a bare L1 match gains L3
+cue-context, and never overwrites an already-confirmed row in place -- see
+the ti-f34mq review of commit 3bb4da5, addressed in 36b7a99) and ti-3p688.2
+(action-item extraction tightening: ActionItemExtract.transcript_turn_ids
+lets a single LLM-consolidated item name every turn it was mentioned at,
+including any turn already flagged during the call, so
+PostCallEnricher._apply_result's upsert_enriched_action_item + trailing
+delete_action_items_by_turn collapse them onto one row). Tests run at the
+PostCallEnricher._apply_result seam -- a real CallCardStore(":memory:") wired
+through a real PostCallEnricher, calling _apply_result directly with a
 constructed EnrichmentSchema -- so a passing test means the store actually
 collapsed/preserved rows, not that a mock was called. This skips only the
 LLM call itself (_call_llm), which _apply_result never touches.
-
-test_repeated_action_item_mentions_collapse_to_one_clarified_item is TDD-ahead
-and is EXPECTED TO FAIL today: CallCardStore.upsert_enriched_action_item's
-dedup key is (session_id, transcript_turn_id, source_layer=1), which only
-matches a rephrased mention landing on the *same* transcript turn as the
-original L1 item. A near-duplicate mention from a later turn -- the realistic
-case ti-3p688.2 exists to fix -- currently falls through to a fresh INSERT
-instead of collapsing. This pins the target contract for the builder; it is
-not a bug in this test.
 """
 from __future__ import annotations
 
@@ -154,7 +149,7 @@ def test_confirmed_fact_not_overwritten_by_later_enrichment(store):
 
 
 # ---------------------------------------------------------------------------
-# ti-3p688.2 -- action-item extraction tightening (NOT YET BUILT)
+# ti-3p688.2 -- action-item extraction tightening
 # ---------------------------------------------------------------------------
 
 def test_repeated_action_item_mentions_collapse_to_one_clarified_item(store):
@@ -172,14 +167,16 @@ def test_repeated_action_item_mentions_collapse_to_one_clarified_item(store):
         new_facts=[],
         enriched_items=[ActionItemExtract(
             description="Call back Tuesday", owner="operator",
-            due_date="2026-07-14", transcript_turn_id=40, confidence=0.9,
+            due_date="2026-07-14", transcript_turn_ids=[5, 40], confidence=0.9,
         )],
     ))
 
-    # EXPECTED TO FAIL today: upsert_enriched_action_item's dedup key is
-    # (session_id, transcript_turn_id, source_layer=1); turn_id=40 doesn't
-    # match the turn_id=5 L1 row, so this falls through to an INSERT instead
-    # of collapsing onto the same task -- exactly the gap ti-3p688.2 exists
-    # to close.
+    # transcript_turn_ids names both the original L1 turn (5) and the new
+    # restatement's turn (40), per the already-flagged-items contract in
+    # PostCallEnricher._SYSTEM. _apply_result sorts these to pick turn 5 as
+    # primary -- matching the L1 row's (session_id, transcript_turn_id,
+    # source_layer=1) key so upsert_enriched_action_item updates it in place
+    # -- then deletes any row at the remaining turns (40; a no-op here since
+    # only turn 5 was seeded), leaving exactly one collapsed row.
     items = store.get_call_card("sess-1")["action_items"]
     assert len(items) == 1
