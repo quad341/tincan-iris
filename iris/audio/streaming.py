@@ -101,6 +101,12 @@ class StreamingTranscriber:
         self._worker: subprocess.Popen | None = None
         self._reader: threading.Thread | None = None
         self._ready = threading.Event()
+        # Confidence for the most recent on_text() call — a side channel rather
+        # than an on_text() param, since on_text is a shared callback contract
+        # (console direct-mode, tests) that predates confidence data. Set just
+        # before on_text() fires; only CaptureSession reads these (ti-3p688.3).
+        self.last_no_speech_prob: float | None = None
+        self.last_avg_logprob: float | None = None
 
     def available(self) -> bool:
         return all(Path(p).exists() for p in (self.python, self.model, _STREAM_SCRIPT))
@@ -211,6 +217,8 @@ class StreamingTranscriber:
             if msg.get("ready"):
                 self._ready.set()
             elif "text" in msg:
+                self.last_no_speech_prob = msg.get("no_speech_prob")
+                self.last_avg_logprob = msg.get("avg_logprob")
                 self.on_text(msg["text"], self.label)
         # Pipeline ended. If nobody asked it to stop, the recorder/worker died
         # underneath us — surface it instead of going silently deaf.

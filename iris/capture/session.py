@@ -7,6 +7,7 @@ import time
 from typing import Callable
 
 from iris.audio.streaming import StreamingTranscriber
+from iris.capture.asr_gate import is_hallucinated_segment
 from iris.capture.processor import L1CaptureProcessor
 from iris.capture.schemas import ActionItem, CapturedFact
 from iris.capture.store import CallCardStore
@@ -58,9 +59,22 @@ class CaptureSession:
     def _utterance_callback(self, text: str, speaker: str) -> None:
         t0 = self._start_time
         offset_s = time.time() - t0 if t0 is not None else 0.0
-        self._on_utterance(text, speaker, offset_s)
+        src = self._op if speaker == self._op.label else self._far
+        self._on_utterance(
+            text, speaker, offset_s,
+            no_speech_prob=src.last_no_speech_prob,
+            avg_logprob=src.last_avg_logprob,
+        )
 
-    def _on_utterance(self, text: str, speaker: str, offset_s: float) -> None:
+    def _on_utterance(
+        self,
+        text: str,
+        speaker: str,
+        offset_s: float,
+        *,
+        no_speech_prob: float | None = None,
+        avg_logprob: float | None = None,
+    ) -> None:
         # The only live trace that capture is hearing anything — without it a
         # silent far channel is indistinguishable from a broken one (ti-wunrs).
         _log.info(
@@ -68,6 +82,15 @@ class CaptureSession:
         )
         try:
             turn_id = self._transcript_store.append(text, speaker, offset_s)
+            if no_speech_prob is not None and is_hallucinated_segment(
+                text, no_speech_prob, avg_logprob
+            ):
+                _log.info(
+                    "CaptureSession %s: [%s] gated ASR hallucination "
+                    "(no_speech_prob=%.2f avg_logprob=%s): %.80s",
+                    self._session_id, speaker, no_speech_prob, avg_logprob, text,
+                )
+                return
             results = self._processor.process(text, speaker, turn_id, offset_s)
             for result in results:
                 if isinstance(result, CapturedFact):

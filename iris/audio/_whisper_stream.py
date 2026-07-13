@@ -78,7 +78,18 @@ def main() -> int:
         avg_no_speech = sum(s.no_speech_prob for s in segs) / len(segs)
         if not text or avg_no_speech > args.no_speech:
             return
-        print(json.dumps({"text": text}), flush=True)
+        # avg_logprob catches what the no_speech average above misses: confident-
+        # sounding gibberish (low no_speech_prob, poor logprob) — see ti-3p688.3 /
+        # iris.capture.asr_gate, which gates on this downstream in the main process.
+        avg_logprob = sum(s.avg_logprob for s in segs) / len(segs)
+        print(
+            json.dumps({
+                "text": text,
+                "no_speech_prob": avg_no_speech,
+                "avg_logprob": avg_logprob,
+            }),
+            flush=True,
+        )
 
     stdin = sys.stdin.buffer
     preroll: list = []
