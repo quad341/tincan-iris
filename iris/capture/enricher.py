@@ -28,10 +28,15 @@ _TIMEOUT_S = 30
 _SYSTEM = (
     "You are a precise call-note extractor. "
     "Do not re-extract facts in confirmed_entities. "
+    "Transcript turns and already-flagged action items are labeled with "
+    "their turn ID in brackets, e.g. '[12]'. "
     "If the same commitment or task is mentioned more than once, including "
     "rephrased restatements, output ONE action item covering every turn it "
     "was mentioned in — never emit more than one entry for the same "
-    "underlying task."
+    "underlying task. If a later turn clarifies or restates a task that "
+    "already appears in the already-flagged list, you MUST include that "
+    "item's turn ID in transcript_turn_ids so it merges instead of "
+    "duplicating."
 )
 
 
@@ -61,7 +66,9 @@ class ActionItemExtract(BaseModel):
             "Every transcript turn ID where this task was mentioned or "
             "restated, earliest first. If the same task comes up again "
             "later in the call, add that turn here instead of creating a "
-            "separate action item for it."
+            "separate action item for it. If this consolidates an entry "
+            "from the already-flagged action items list, its turn ID must "
+            "be included here too."
         )
     )
     confidence: float
@@ -125,6 +132,7 @@ class PostCallEnricher(threading.Thread):
             turns = self._transcript_store.get_turns()
             card = self._store.get_call_card(session_id)
             facts = card.get("facts", [])
+            action_items = card.get("action_items", [])
 
             confirmed_entities_block = "\n".join(
                 f"{f['fact_type']}: {f['normalized_value']}"
@@ -132,17 +140,25 @@ class PostCallEnricher(threading.Thread):
                 if f.get("normalized_value")
             ) or "(none)"
 
+            existing_action_items_block = "\n".join(
+                f"[{i['transcript_turn_id']}] {i['description']}"
+                for i in action_items
+            ) or "(none)"
+
             transcript_block = "\n".join(
-                f"{t.speaker}: {t.text}" for t in turns
+                f"[{t.turn_id}] {t.speaker}: {t.text}" for t in turns
             )
 
             user_prompt = (
                 f"Confirmed entities (do not re-extract):\n{confirmed_entities_block}"
-                f"\n\nFull transcript:\n{transcript_block}"
+                f"\n\nAction items already flagged during the call, by turn ID "
+                f"they originated at:\n{existing_action_items_block}"
+                f"\n\nFull transcript (turn ID in brackets):\n{transcript_block}"
                 "\n\nFind: (1) entity types spoken but NOT in the confirmed list; "
                 "(2) action items needing clearer descriptions or due dates — "
                 "consolidate repeated or rephrased mentions of the same task "
-                "into a single entry covering all of its turns."
+                "into a single entry covering all of its turns, including any "
+                "turn already listed above under already-flagged action items."
             )
 
             result = self._call_llm(api_key, user_prompt)
@@ -206,7 +222,12 @@ class PostCallEnricher(threading.Thread):
         for ai in result.enriched_items:
             if not ai.transcript_turn_ids:
                 continue
-            primary_turn, *duplicate_turns = ai.transcript_turn_ids
+            # sorted+deduped: the Field description only *asks* the LLM for
+            # earliest-first, unique turn IDs — nothing enforces it, and an
+            # unsorted or repeated turn ID would misplace the consolidated
+            # row or make delete_action_items_by_turn erase it immediately
+            # after upsert_enriched_action_item writes it (ti-nv20g finding 2).
+            primary_turn, *duplicate_turns = sorted(set(ai.transcript_turn_ids))
             self._store.upsert_enriched_action_item(
                 session_id=session_id,
                 turn_id=primary_turn,
