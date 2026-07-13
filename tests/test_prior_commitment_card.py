@@ -31,7 +31,7 @@ from datetime import date
 import pytest
 
 from iris.capture.after_store import AfterStore
-from iris.console.call_card import PriorCommitmentCard
+from iris.console.call_card import CommitmentResolved, PriorCommitmentCard
 from iris.roster import RosterStore
 
 
@@ -225,6 +225,54 @@ def test_action_break_after_honor_does_not_also_resolve():
     card.action_honor()
     card.action_break()
     assert store.calls == [(9, "honored")]
+
+
+# --- CommitmentResolved posting (ti-viv73, screen-side bookkeeping) --------
+#
+# post_message() doesn't require a mounted App to avoid raising (confirmed
+# empirically), unlike remove() -- so these monkeypatch both the same way
+# test_disclosure_card.py does for DisclosureCard's Message posting, without
+# needing a Pilot/run_test() harness this module's other tests don't pay for
+# either.
+
+def test_action_honor_posts_commitment_resolved_honored():
+    card, _ = _card(commitment=_commitment(id=42))
+    posted = []
+    card.post_message = lambda msg: posted.append(msg)
+    card.action_honor()
+    assert len(posted) == 1
+    assert isinstance(posted[0], CommitmentResolved)
+    assert posted[0].commitment_id == 42
+    assert posted[0].status == "honored"
+
+
+def test_action_break_posts_commitment_resolved_broken():
+    card, _ = _card(commitment=_commitment(id=42))
+    posted = []
+    card.post_message = lambda msg: posted.append(msg)
+    card.action_break()
+    assert len(posted) == 1
+    assert isinstance(posted[0], CommitmentResolved)
+    assert posted[0].commitment_id == 42
+    assert posted[0].status == "broken"
+
+
+def test_action_honor_posts_before_removing_the_card():
+    card, _ = _card(commitment=_commitment(id=42))
+    order = []
+    card.post_message = lambda msg: order.append(("posted", msg))
+    card.remove = lambda: order.append(("removed", None))
+    card.action_honor()
+    assert [step for step, _ in order] == ["posted", "removed"]
+
+
+def test_action_honor_second_call_does_not_repost_commitment_resolved():
+    card, _ = _card()
+    posted = []
+    card.post_message = lambda msg: posted.append(msg)
+    card.action_honor()
+    card.action_honor()
+    assert len(posted) == 1
 
 
 def test_on_key_h_calls_action_honor(monkeypatch):
