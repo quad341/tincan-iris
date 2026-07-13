@@ -541,7 +541,7 @@ class PostCallReviewScreen(Screen):
         return None
 
     def _seam_contract_text(self, commitment: dict) -> str:
-        who = self._rep_name or "your rep"
+        who = escape(self._rep_name or "your rep")
         due = escape(commitment.get("due_date") or "—")
         date_str = _format_short_date(commitment.get("captured_at"))
         description = escape(commitment.get("description", ""))
