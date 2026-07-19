@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from rich.markup import escape
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import ScrollableContainer
@@ -818,12 +817,12 @@ class PriorCommitmentCard(Widget):
     # ── Rendering ──────────────────────────────────────────────────
 
     def render(self) -> str:
-        description = escape(self._commitment["description"])
+        description = escape_for_content(self._commitment["description"])
         raw_due = self._commitment.get("due_date")
-        due_str = escape(raw_due) if raw_due else "—"
+        due_str = escape_for_content(raw_due) if raw_due else "—"
 
         if self.is_broken:
-            who = escape(self._who(capitalize=False))
+            who = escape_for_content(self._who(capitalize=False))
             header = (
                 f"[bold #f87171]⚠ BROKEN COMMITMENT[/bold #f87171]  "
                 f"[dim]{self.days_overdue}d overdue[/dim]"
@@ -835,7 +834,7 @@ class PriorCommitmentCard(Widget):
             footer = "[dim]\\[H] Honor anyway  \\[B] Confirm broken[/dim]"
             return f"{header}\n{body}\n{footer}"
 
-        who = escape(self._who(capitalize=True))
+        who = escape_for_content(self._who(capitalize=True))
         header = "[bold #818cf8]⏳ OPEN COMMITMENT[/bold #818cf8]"
         body = f"[bold white]{who} promised {description}[/bold white]\n[dim]Due: {due_str}[/dim]"
         footer = "[dim]\\[H] Honor  \\[B] Broken[/dim]"

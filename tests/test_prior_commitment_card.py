@@ -29,6 +29,7 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
+from textual.content import Content
 
 from iris.capture.after_store import AfterStore
 from iris.console.call_card import PriorCommitmentCard
@@ -155,6 +156,59 @@ def test_open_render_i_promised_says_you():
     text = card.render()
     assert "You promised" in text
     assert "Maria" not in text
+
+
+# --- markup escaping: bracket-shaped content must survive Content.from_markup
+#
+# ti-w0dvp review (reissue ti-ta4ly): render() used rich.markup.escape() instead
+# of this file's hardened escape_for_content() (iris/console/_markup.py).
+# rich.markup.escape() only escapes '[' when followed by a Rich tag-opening
+# character ([a-z#/@]); Textual's Content.from_markup() tokenizer opens a tag
+# on ANY unescaped '[', so bracket-shaped content like "[20% off]" sailed
+# through unescaped and was then silently deleted (not mis-styled) by
+# Content.from_markup(). Mirrors tests/test_call_card_markup_escape.py's
+# _plain()-via-Content.from_markup convention -- asserting on the raw string
+# would miss this class of regression, since the raw text still contains the
+# bracket even when Content.from_markup would go on to swallow it.
+
+def _plain(markup: str) -> str:
+    return Content.from_markup(markup).plain
+
+
+def test_broken_render_preserves_bracket_shaped_description():
+    commitment = _commitment(
+        due_date="2026-06-01",
+        description="send the check, they offered [20% off] if paid early",
+    )
+    card, _ = _card(commitment=commitment, rep_name="Maria", now=date(2026, 6, 5))
+    text = _plain(card.render())
+    assert "send the check, they offered [20% off] if paid early" in text
+
+
+def test_open_render_preserves_bracket_shaped_description():
+    commitment = _commitment(due_date="2026-07-01", description="pay the [$50] deposit")
+    card, _ = _card(commitment=commitment, now=date(2026, 6, 5))
+    text = _plain(card.render())
+    assert "pay the [$50] deposit" in text
+
+
+def test_broken_render_preserves_bracket_shaped_rep_name():
+    commitment = _commitment(due_date="2026-06-01")
+    card, _ = _card(commitment=commitment, rep_name="[Support Team]", now=date(2026, 6, 5))
+    text = _plain(card.render())
+    assert "[Support Team] promised" in text
+
+
+def test_open_render_preserves_bracket_shaped_due_date():
+    # Non-ISO due_date fails _due_date_obj() parsing (caught ValueError) and
+    # falls through to the open branch -- irrelevant here, this only pins
+    # that due_str itself is escaped, regardless of overdue state.
+    commitment = _commitment(
+        due_date="[50%] paid, remainder due 2026-07-01", description="send the check"
+    )
+    card, _ = _card(commitment=commitment, now=date(2026, 6, 5))
+    text = _plain(card.render())
+    assert "[50%] paid, remainder due 2026-07-01" in text
 
 
 # --- CSS class reflects computed state --------------------------------------
