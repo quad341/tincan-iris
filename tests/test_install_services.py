@@ -346,3 +346,42 @@ class TestPythonPreflight:
              patch("iris.services.install.subprocess.run", return_value=ok_proc):
             errors = _validate_exec_starts()
         assert errors == []
+
+    def test_validate_exec_starts_detects_non_daemon_brain_exec_start(self, tmp_path):
+        """Regression guard (ti-hih1l): iris-brain.service.tmpl's ExecStart must
+        target iris.daemon. The original crash-loop bug (PR#120) had it running
+        `python -m iris.voice` (an interactive REPL that exits on EOF from stdin
+        under systemd) -- confirm _validate_exec_starts() actually flags that."""
+        repo = _make_venvs(tmp_path)
+        ok_proc = MagicMock(returncode=0, stdout="", stderr="")
+
+        def _bad_render(template):
+            if template == "iris-brain.service.tmpl":
+                return (
+                    "[Service]\n"
+                    "ExecStart={REPO_PATH}/.venv/bin/python -m iris.voice\n"
+                )
+            return ""
+
+        with patch("iris.services.install._REPO_PATH", repo), \
+             patch("iris.services.install.subprocess.run", return_value=ok_proc), \
+             patch("iris.services.install._render", side_effect=_bad_render):
+            errors = _validate_exec_starts()
+        assert len(errors) >= 1
+        assert any("ExecStart" in e and "iris.daemon" in e for e in errors)
+
+    def test_validate_exec_starts_detects_missing_brain_exec_start_line(self, tmp_path):
+        """Same regression guard, degenerate case: template has no ExecStart=
+        line at all (e.g. a botched edit), not just a mismatched one."""
+        repo = _make_venvs(tmp_path)
+        ok_proc = MagicMock(returncode=0, stdout="", stderr="")
+
+        def _no_exec_start_render(template):
+            return "[Service]\nType=simple\n"
+
+        with patch("iris.services.install._REPO_PATH", repo), \
+             patch("iris.services.install.subprocess.run", return_value=ok_proc), \
+             patch("iris.services.install._render", side_effect=_no_exec_start_render):
+            errors = _validate_exec_starts()
+        assert len(errors) >= 1
+        assert any("ExecStart" in e for e in errors)
