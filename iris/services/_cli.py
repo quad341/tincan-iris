@@ -16,8 +16,16 @@ def main() -> int:
         action="store_true",
         help="Print what would be done without writing files or running systemctl.",
     )
+    parser.add_argument(
+        "--no-daemon",
+        action="store_true",
+        help="Skip installing iris-brain.service (the always-on call-handling daemon).",
+    )
     try:
         args = parser.parse_args()
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else 1
-    return install(dry_run=args.dry_run)
+    kwargs: dict[str, bool] = {"dry_run": args.dry_run}
+    if args.no_daemon:
+        kwargs["with_daemon"] = False
+    return install(**kwargs)
