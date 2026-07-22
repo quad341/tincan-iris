@@ -357,6 +357,22 @@ class CallCardStore:
                 )
             self._conn.commit()
 
+    def delete_action_items_by_turn(
+        self, session_id: str, turn_ids: list[int], source_layer: int = 1
+    ) -> None:
+        """Remove action-item rows at the given turns.
+
+        Used after upsert_enriched_action_item folds several restatements of
+        the same task into one row at a primary turn, to drop the other L1
+        rows so the task no longer appears more than once.
+        """
+        with self._lock:
+            self._conn.executemany(
+                "DELETE FROM action_items WHERE session_id=? AND transcript_turn_id=? AND source_layer=?",
+                [(session_id, turn_id, source_layer) for turn_id in turn_ids],
+            )
+            self._conn.commit()
+
     # ── Read ──────────────────────────────────────────────────────
 
     def get_call_card(self, session_id: str) -> dict:
