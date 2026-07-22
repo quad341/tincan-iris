@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from datetime import date
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Footer, Static
 
+from iris.capture.after_store import AfterStore
 from iris.capture.schemas import ActionItem, CapturedFact, FactType
 from iris.console._confidence_bar import render_confidence_bar as _render_confidence_bar
 from iris.console._markup import escape_for_content
@@ -722,6 +724,147 @@ class ActionItemCard(Widget):
         hook = getattr(self.app, "reminder_hook", None)
         if hook is not None:
             hook.create_reminder(self._item.description)
+
+
+# ─────────────────────────────────────────────────────────────────
+# PriorCommitmentCard — "Since last time" open-commitment display (ti-w0dvp)
+# ─────────────────────────────────────────────────────────────────
+
+class PriorCommitmentCard(Widget):
+    """Displays one open commitment row from AfterStore.get_open_commitments().
+
+    "Broken" is a computed overdue-vs-due_date display state, not a DB status --
+    get_open_commitments() only ever returns status='open' rows. [H]/[B] resolve
+    the commitment via the AfterStore reference the caller passed in, then
+    remove() itself, mirroring FactCard/ActionItemCard's remove-after-resolve
+    idiom. A _resolved guard mirrors DisclosureCard's already-resolved no-repost
+    check so a second action_honor()/action_break() can't double-write or
+    double-remove().
+    """
+
+    can_focus = True
+    aria_role = "article"
+
+    DEFAULT_CSS = """
+    PriorCommitmentCard {
+        height: auto;
+        padding: 1;
+        margin-bottom: 1;
+    }
+    PriorCommitmentCard.-broken {
+        border: solid #f87171;
+    }
+    PriorCommitmentCard.-open {
+        border: solid #818cf8;
+    }
+    PriorCommitmentCard:focus {
+        border: heavy #a5b4fc;
+    }
+    """
+
+    def __init__(
+        self,
+        commitment: dict,
+        store: AfterStore,
+        *,
+        rep_name: str = "",
+        _now: date | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self._commitment = commitment
+        self._store = store
+        self._rep_name = rep_name
+        self._now = _now
+        self._resolved = False
+
+    # ── Overdue computation ────────────────────────────────────────
+
+    def _due_date_obj(self) -> date | None:
+        raw = self._commitment.get("due_date")
+        if not raw:
+            return None
+        try:
+            return date.fromisoformat(raw)
+        except ValueError:
+            return None
+
+    @property
+    def days_overdue(self) -> int:
+        due = self._due_date_obj()
+        if due is None:
+            return 0
+        today = self._now or date.today()
+        diff = (today - due).days
+        return diff if diff > 0 else 0
+
+    @property
+    def is_broken(self) -> bool:
+        return self.days_overdue > 0
+
+    def _who(self, *, capitalize: bool) -> str:
+        if self._commitment["direction"] == "i_promised":
+            return "You" if capitalize else "you"
+        if self._rep_name:
+            return self._rep_name
+        return "Your rep" if capitalize else "your rep"
+
+    # ── Textual lifecycle ──────────────────────────────────────────
+
+    def on_mount(self) -> None:
+        self.add_class("-broken" if self.is_broken else "-open")
+
+    # ── Rendering ──────────────────────────────────────────────────
+
+    def render(self) -> str:
+        description = escape_for_content(self._commitment["description"])
+        raw_due = self._commitment.get("due_date")
+        due_str = escape_for_content(raw_due) if raw_due else "—"
+
+        if self.is_broken:
+            who = escape_for_content(self._who(capitalize=False))
+            header = (
+                f"[bold #f87171]⚠ BROKEN COMMITMENT[/bold #f87171]  "
+                f"[dim]{self.days_overdue}d overdue[/dim]"
+            )
+            body = (
+                f"[bold white]{who} promised {description} by {due_str} "
+                f"— it didn't happen.[/bold white]"
+            )
+            footer = "[dim]\\[H] Honor anyway  \\[B] Confirm broken[/dim]"
+            return f"{header}\n{body}\n{footer}"
+
+        who = escape_for_content(self._who(capitalize=True))
+        header = "[bold #818cf8]⏳ OPEN COMMITMENT[/bold #818cf8]"
+        body = f"[bold white]{who} promised {description}[/bold white]\n[dim]Due: {due_str}[/dim]"
+        footer = "[dim]\\[H] Honor  \\[B] Broken[/dim]"
+        return f"{header}\n{body}\n{footer}"
+
+    # ── Input ──────────────────────────────────────────────────────
+
+    def on_key(self, event: Any) -> None:
+        if event.key == "h":
+            event.stop()
+            self.action_honor()
+        elif event.key == "b":
+            event.stop()
+            self.action_break()
+
+    # ── Actions ────────────────────────────────────────────────────
+
+    def action_honor(self) -> None:
+        if self._resolved:
+            return
+        self._resolved = True
+        self._store.resolve_commitment(self._commitment["id"], "honored")
+        self.remove()
+
+    def action_break(self) -> None:
+        if self._resolved:
+            return
+        self._resolved = True
+        self._store.resolve_commitment(self._commitment["id"], "broken")
+        self.remove()
 
 
 # ─────────────────────────────────────────────────────────────────

@@ -73,3 +73,67 @@ def test_read_loop_two_tagged_streams():
     st_far._read_loop()
     assert op == [("iris stop", "operator")]
     assert far == [("hello there", "far")]
+
+
+def test_read_loop_sets_confidence_side_channel_before_on_text():
+    # CaptureSession's on_text callback reads last_no_speech_prob/
+    # last_avg_logprob off this same instance *during* the call (see
+    # CaptureSession._utterance_callback) -- so on_text must observe the
+    # new utterance's values here, not the pre-call default.
+    captured: list = []
+    st = StreamingTranscriber(
+        lambda t, lbl: captured.append(
+            (t, lbl, st.last_no_speech_prob, st.last_avg_logprob)
+        ),
+        label="operator",
+    )
+    st._worker = _FakeProc([
+        b'{"text": "hello there", "no_speech_prob": 0.12, "avg_logprob": -0.34}\n',
+    ])
+    st._read_loop()
+    assert captured == [("hello there", "operator", 0.12, -0.34)]
+    assert st.last_no_speech_prob == 0.12
+    assert st.last_avg_logprob == -0.34
+
+
+def test_read_loop_updates_confidence_per_utterance():
+    captured: list = []
+    st = StreamingTranscriber(
+        lambda t, lbl: captured.append((st.last_no_speech_prob, st.last_avg_logprob)),
+        label="operator",
+    )
+    st._worker = _FakeProc([
+        b'{"text": "first", "no_speech_prob": 0.1, "avg_logprob": -0.2}\n',
+        b'{"text": "second", "no_speech_prob": 0.9, "avg_logprob": -3.5}\n',
+    ])
+    st._read_loop()
+    assert captured == [(0.1, -0.2), (0.9, -3.5)]
+
+
+def test_read_loop_confidence_defaults_to_none_when_absent():
+    captured: list = []
+    st = StreamingTranscriber(
+        lambda t, lbl: captured.append((st.last_no_speech_prob, st.last_avg_logprob)),
+        label="operator",
+    )
+    st._worker = _FakeProc([b'{"text": "hello there"}\n'])
+    st._read_loop()
+    assert captured == [(None, None)]
+    assert st.last_no_speech_prob is None
+    assert st.last_avg_logprob is None
+
+
+def test_read_loop_confidence_resets_to_none_after_utterance_without_fields():
+    # Guards against a "sticky" bug: msg.get(key, self.last_x) would carry
+    # utterance 1's confidence into utterance 2's on_text call.
+    captured: list = []
+    st = StreamingTranscriber(
+        lambda t, lbl: captured.append((st.last_no_speech_prob, st.last_avg_logprob)),
+        label="operator",
+    )
+    st._worker = _FakeProc([
+        b'{"text": "first", "no_speech_prob": 0.1, "avg_logprob": -0.2}\n',
+        b'{"text": "second"}\n',
+    ])
+    st._read_loop()
+    assert captured == [(0.1, -0.2), (None, None)]

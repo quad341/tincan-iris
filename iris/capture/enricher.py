@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from iris.capture.schemas import CapturedFact, FactType
+from iris.capture.schemas import FactType
 from iris.capture.store import CallCardStore
 from iris.capture.transcript import TranscriptStore
 
@@ -28,6 +28,8 @@ _TIMEOUT_S = 30
 _SYSTEM = (
     "You are a precise call-note extractor. "
     "Do not re-extract facts in confirmed_entities. "
+    "For date facts, raw_text must say why the date matters (e.g. 'follow-up "
+    "call scheduled for', 'payment due'), not just the bare date phrase. "
     "Transcript turns and already-flagged action items are labeled with "
     "their turn ID in brackets, e.g. '[12]'. "
     "If the same commitment or task is mentioned more than once, including "
@@ -44,7 +46,13 @@ _SYSTEM = (
 
 class FactExtract(BaseModel):
     fact_type: str          # phone|case_id|amount|date|name|address|email
-    raw_text: str
+    raw_text: str = Field(
+        description=(
+            "The spoken phrase for this fact. For date facts, include the "
+            "surrounding cue (e.g. 'follow-up call scheduled for July 12') so "
+            "the date is meaningful standalone, not just the bare date words."
+        )
+    )
     normalized_value: str   # E.164 for phone, ISO date for date, etc.
     transcript_turn_id: int
     confidence: float       # 0.0–1.0
@@ -205,19 +213,14 @@ class PostCallEnricher(threading.Thread):
             except ValueError:
                 fact_type = FactType.NAME
 
-            fact = CapturedFact(
+            self._store.upsert_enriched_fact(
                 session_id=session_id,
-                fact_type=fact_type,
+                fact_type=fact_type.value,
                 raw_text=fe.raw_text,
                 normalized_value=fe.normalized_value,
                 transcript_turn_id=fe.transcript_turn_id,
-                transcript_offset_s=0.0,
-                speaker="",
                 confidence=fe.confidence,
-                critical=False,
-                source_layer=3,
             )
-            self._store.add_fact(fact)
 
         for ai in result.enriched_items:
             if not ai.transcript_turn_ids:

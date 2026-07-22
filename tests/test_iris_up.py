@@ -115,13 +115,95 @@ def test_bring_up_all_healthy_returns_0(capsys):
 
 
 # ---------------------------------------------------------------------------
-# install.py: iris-brain retired + removed from UNITS
+# bring_up: iris-brain daemon-ensure step (warn-but-don't-block; ti-vvc9o/ti-kiv1b)
+#
+# _unit_known is keyed off the exact unit string, so returning False for
+# everything except "iris-brain.service" also keeps tincand's own
+# _bring_up_tincand() short-circuited at its unit-absent check — its output
+# always contains "not installed" too, so brain-specific assertions below
+# pin to the full "checking iris-brain…" line (or the brain-only warning
+# text) rather than a bare substring that tincand's row could also satisfy.
 # ---------------------------------------------------------------------------
 
-def test_iris_brain_not_in_install_units():
+def test_bring_up_brain_not_installed(capsys):
+    def _unit_known(unit):
+        return False  # iris-brain.service and tincand.service both absent
+
+    with patch("iris.up._unit_known", side_effect=_unit_known), \
+         patch("iris.up._is_active", return_value=True), \
+         patch("iris.up._health_ok", return_value=False), \
+         patch("iris.up._start_service") as mock_start:
+        rc = bring_up(launch_console=False)
+    assert rc == 0
+    mock_start.assert_not_called()
+    out = capsys.readouterr().out
+    assert "checking iris-brain… not installed" in out
+    assert "iris-brain is not installed" in out
+    assert "iris install-services" in out
+
+
+def test_bring_up_brain_already_active(capsys):
+    def _unit_known(unit):
+        return unit == "iris-brain.service"
+
+    with patch("iris.up._unit_known", side_effect=_unit_known), \
+         patch("iris.up._is_active", return_value=True), \
+         patch("iris.up._health_ok", return_value=False), \
+         patch("iris.up._start_service") as mock_start:
+        rc = bring_up(launch_console=False)
+    assert rc == 0
+    mock_start.assert_not_called()
+    out = capsys.readouterr().out
+    assert "checking iris-brain… already active ✓" in out
+
+
+def test_bring_up_brain_starts_when_inactive(capsys):
+    def _unit_known(unit):
+        return unit == "iris-brain.service"
+
+    def _is_active(svc):
+        return svc != "iris-brain"  # whisper/kokoro active; brain inactive
+
+    with patch("iris.up._unit_known", side_effect=_unit_known), \
+         patch("iris.up._is_active", side_effect=_is_active), \
+         patch("iris.up._health_ok", return_value=False), \
+         patch("iris.up._start_service", return_value=True) as mock_start:
+        rc = bring_up(launch_console=False)
+    assert rc == 0
+    mock_start.assert_called_once_with("iris-brain")
+    out = capsys.readouterr().out
+    assert "iris-brain is optional" not in out
+
+
+def test_bring_up_brain_start_fails_does_not_block(capsys):
+    # FR-05 regression guard: unlike whisper/kokoro, a failed iris-brain
+    # start must not land in the blocking `failed` list — bring_up() still
+    # returns 0.
+    def _unit_known(unit):
+        return unit == "iris-brain.service"
+
+    def _is_active(svc):
+        return svc != "iris-brain"
+
+    with patch("iris.up._unit_known", side_effect=_unit_known), \
+         patch("iris.up._is_active", side_effect=_is_active), \
+         patch("iris.up._health_ok", return_value=False), \
+         patch("iris.up._start_service", return_value=False) as mock_start:
+        rc = bring_up(launch_console=False)
+    assert rc == 0
+    mock_start.assert_called_once_with("iris-brain")
+    out = capsys.readouterr().out
+    assert "iris-brain is optional" in out
+
+
+# ---------------------------------------------------------------------------
+# install.py: iris-brain reinstated in UNITS, always-on daemon (ti-omwom/ti-kzkfv)
+# ---------------------------------------------------------------------------
+
+def test_iris_brain_in_install_units():
     from iris.services.install import UNITS
     names = {spec.name for spec in UNITS}
-    assert "iris-brain" not in names
+    assert "iris-brain" in names
 
 
 def test_iris_brain_not_in_doctor_services():
@@ -130,7 +212,7 @@ def test_iris_brain_not_in_doctor_services():
     assert "iris-brain" not in names
 
 
-def test_install_retires_stale_brain_unit(tmp_path, capsys):
+def test_install_does_not_retire_iris_brain_unit(tmp_path, capsys):
     from iris.services.install import install
     brain_unit = tmp_path / "iris-brain.service"
     brain_unit.write_text("[Unit]\nDescription=old brain\n")
@@ -149,7 +231,7 @@ def test_install_retires_stale_brain_unit(tmp_path, capsys):
         install(dry_run=False)
 
     stop_cmds = [c for c in systemctl_calls if "stop" in c]
-    assert any("iris-brain" in " ".join(c) for c in stop_cmds)
+    assert not any("iris-brain" in " ".join(c) for c in stop_cmds)
 
 
 # ---------------------------------------------------------------------------
