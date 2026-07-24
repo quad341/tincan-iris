@@ -77,7 +77,7 @@ def test_main_passes_loaded_config_to_call_card_host(tmp_path, monkeypatch):
     _write_config(tmp_path, '[call_card]\ndisclosure_script = "wired end-to-end"\n', monkeypatch)
     monkeypatch.setenv("IRIS_DB", str(tmp_path / "test.db"))
 
-    def _raise_with_cfg(*, store, processor, api, cfg):
+    def _raise_with_cfg(*, store, processor, api, cfg, tts=None):
         raise _Captured(cfg)
 
     from iris.daemon import __main__ as daemon_main
