@@ -161,6 +161,7 @@ def _load_call_card_config() -> Config:
     """
     return Config(
         call_card_disclosure_script=settings.get("IRIS_CALL_CARD_DISCLOSURE_SCRIPT", ""),
+        eval_log_public_key=settings.get("IRIS_EVAL_LOG_PUBLIC_KEY", ""),
     )
 
 
