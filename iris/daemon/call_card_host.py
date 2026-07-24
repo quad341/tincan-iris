@@ -13,6 +13,7 @@ from iris.capture.session import CaptureSession
 from iris.capture.store import CallCardStore
 from iris.capture.transcript import TranscriptStore
 from iris.notes import NotesStore
+from iris.roster import SENTINEL_CONTACT_ID
 
 _log = logging.getLogger(__name__)
 
@@ -253,10 +254,9 @@ class CallCardHost:
         """Copy this call's confirmed facts/action-items into AfterStore.
 
         written_back only flips to 1 once every insert below has succeeded —
-        if any step raises (e.g. no resolved contact_id, so the FK/NOT NULL
-        constraint fails), the call_cards row is left at written_back=0 so a
-        retry can safely pick up from scratch (see iris/capture/store.py
-        module docstring).
+        if any step raises (e.g. AfterStore is unreachable), the call_cards
+        row is left at written_back=0 so a retry can safely pick up from
+        scratch (see iris/capture/store.py module docstring).
         """
         card = self._store.get_call_card(session_id)
         if not card:
@@ -264,16 +264,12 @@ class CallCardHost:
             return
         contact_id = card["contact_id"]
         if contact_id is None:
-            # Caller never resolved to a roster contact (e.g. unregistered number).
-            # AfterStore's tables all have contact_id as a NOT NULL FK, so there is
-            # nowhere to write this call's facts/commitments yet — leave
-            # written_back=0 rather than raising, same as the "no call card" guard
-            # above. See ti-hb2dx follow-up bead for the open design question.
-            _log.warning(
-                "CallCardHost.finalize_writeback: no resolved contact for %s; skipping writeback",
-                session_id,
-            )
-            return
+            # Pre-fix historical call_cards row (contact_id was written as NULL
+            # before on_call_connected started substituting SENTINEL_CONTACT_ID
+            # for unresolved callers). Attribute to the same sentinel a fresh
+            # unresolved call would get, so this self-heals the backlog instead
+            # of leaving written_back=0 stuck forever.
+            contact_id = SENTINEL_CONTACT_ID
 
         after_store = AfterStore()
         call_log_id = after_store.insert_call_log(
@@ -284,6 +280,7 @@ class CallCardHost:
             agent_name="iris",
             disclosed_at=card["disclosure_ack_ts"],
             outcome_summary=card["outcome_summary"],
+            caller_number=card["caller_number"],
         )
 
         for item in card["action_items"]:
