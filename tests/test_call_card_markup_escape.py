@@ -190,7 +190,7 @@ def test_disclosure_card_script_remains_unescaped(monkeypatch, tmp_path):
 
     # Exact (not substring-loose) containment: if _script were ever escaped,
     # this line would instead read "...like \[$50] verbatim..." and fail here.
-    assert f"[yellow]{script}[/yellow]" in card.render()
+    assert f"[#cbd5e1]{script}[/#cbd5e1]" in card.render()
 
 
 # ---------------------------------------------------------------------------
