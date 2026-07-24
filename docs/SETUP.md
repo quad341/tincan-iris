@@ -87,6 +87,14 @@ var still overrides.
 password = "your-gmail-app-password"   # -> IRIS_EMAIL_PASSWORD
 ```
 
+### Privacy — Call Card cloud enrichment
+
+Call Card's post-call enrichment pass (a second LLM scan of the transcript for
+facts/action items the on-device capture missed) is **off by default**.
+Configuring an Anthropic API key is not enough to turn it on — it also
+requires `call_card_cloud_enrichment_enabled = True` on `iris.config.Config`.
+This is independent of `haiku_enabled` (the live in-call raw-text tier).
+
 ---
 
 ## Connectors (what Iris can do, out of call)
