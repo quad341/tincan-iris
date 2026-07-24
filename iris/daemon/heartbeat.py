@@ -3,9 +3,9 @@
 Runs the checks named in FR-1.1 every 90s on a daemon thread (mirrors
 PostureWatcher's threading.Thread + threading.Event.wait() shape) and caches
 the aggregated result in-process. DaemonAPI's `status` command exposes it
-read-only. ti-pugo3.2 (not yet built) hooks the `on_transition` callback to
-decide when a change is worth notifying about — this module only computes and
-caches; it has no opinion on notification policy.
+read-only. degradation_notify.py (ti-pugo3.2) hooks the `on_transition`
+callback to decide when a change is worth notifying about — this module only
+computes and caches; it has no opinion on notification policy.
 """
 from __future__ import annotations
 
