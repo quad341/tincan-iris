@@ -12,7 +12,7 @@ Documented contract (PostCallEnricher):
     .run()
       - skips silently if cfg.anthropic_api_key is falsy (and no IRIS_ANTHROPIC_API_KEY env var)
       - skips silently if transcript_store.is_empty()
-      - on success: store.add_fact (source_layer=3), store.upsert_enriched_action_item,
+      - on success: store.upsert_enriched_fact, store.upsert_enriched_action_item,
         store.mark_enrichment_done(session_id, status=1),
         api.broadcast({'event': 'call_card_enriched', 'session_id': ...})
       - on concurrent.futures.TimeoutError or any Exception:
@@ -95,7 +95,7 @@ def _success_schema() -> EnrichmentSchema:
                 description="Call them back Tuesday",
                 owner="operator",
                 due_date="2026-07-01",
-                transcript_turn_id=2,
+                transcript_turn_ids=[2],
                 confidence=0.9,
             )
         ],
@@ -159,9 +159,14 @@ def test_success_path():
     with patch.object(PostCallEnricher, "_call_llm", return_value=_success_schema()):
         enricher.run()
 
-    store.add_fact.assert_called_once()
-    added_fact = store.add_fact.call_args[0][0]
-    assert added_fact.source_layer == 3
+    store.upsert_enriched_fact.assert_called_once_with(
+        session_id=SESSION,
+        fact_type="phone",
+        raw_text="call 415-555-9999",
+        normalized_value="+14155559999",
+        transcript_turn_id=1,
+        confidence=0.85,
+    )
 
     store.upsert_enriched_action_item.assert_called_once()
     store.mark_enrichment_done.assert_called_once_with(SESSION, status=1)
