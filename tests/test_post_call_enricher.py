@@ -27,10 +27,8 @@ Documented contract (TranscriptStore — in-memory, iris.capture.transcript):
 from __future__ import annotations
 
 import concurrent.futures
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from iris.capture.enricher import (
     ActionItemExtract,
@@ -118,7 +116,7 @@ def test_no_api_key_skips_enrichment(monkeypatch):
 
     enricher.run()
 
-    store.add_fact.assert_not_called()
+    store.upsert_enriched_fact.assert_not_called()
     store.upsert_enriched_action_item.assert_not_called()
     store.mark_enrichment_done.assert_not_called()
     api.broadcast.assert_not_called()
@@ -139,7 +137,7 @@ def test_empty_transcript_skips_enrichment():
         enricher.run()
         mock_llm.assert_not_called()
 
-    store.add_fact.assert_not_called()
+    store.upsert_enriched_fact.assert_not_called()
     store.upsert_enriched_action_item.assert_not_called()
     store.mark_enrichment_done.assert_not_called()
     api.broadcast.assert_not_called()

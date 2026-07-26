@@ -21,7 +21,7 @@ import datetime
 import pytest
 
 from iris.capture.processor import L1CaptureProcessor
-from iris.capture.schemas import ActionItem, CapturedFact, FactType
+from iris.capture.schemas import FactType
 
 # Pin reference date so date-relative tests are deterministic.
 _NOW = datetime.date(2026, 6, 30)
@@ -276,7 +276,7 @@ def test_phone_not_in_roster_is_critical():
 
 def test_phone_in_roster_not_critical():
     f = _run(
-        f"call me at (555) 867-5309",
+        "call me at (555) 867-5309",
         FactType.PHONE,
         roster=frozenset({_ROSTER_PHONE}),
     )

@@ -22,7 +22,6 @@ from __future__ import annotations
 import sqlite3
 import threading
 
-import pytest
 
 from iris.capture.schemas import ActionItem, CapturedFact, FactType
 from iris.capture.store import CallCardStore
