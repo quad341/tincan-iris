@@ -199,7 +199,7 @@ def test_confirmed_drift_files_bead_and_alerts_both_channels(dw, monkeypatch):
             json.dumps({"status": "completed", "conclusion": "failure"}),
         ),
         (
-            ["gc", "bd", "--rig", "tincan-iris", "--city", str(dw.CITY), "create"],
+            ["gc", "bd", "--rig", "tincan-iris", "create"],
             "Created issue: ti-99abc\n",
         ),
     ]
