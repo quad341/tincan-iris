@@ -14,15 +14,15 @@ from iris.capture.schemas import ActionItem, CapturedFact, ContactRoster, FactTy
 # ── CueId ─────────────────────────────────────────────────────────────────────
 
 _CUE_WORD_RE = re.compile(
-    r"\b(reference|confirmation|claim|ticket|case|order|policy|member|account)\b", re.I
+    r"\b(reference|confirmation|claim|ticket|case|order|policy|member|account)\b", re.IGNORECASE
 )
 _SECONDARY_CUE_TOKENS = frozenset({"number", "no", "code", "id", "identifier", "num"})
-_CUE_ID_RE = re.compile(r"\b([A-Z0-9][A-Z0-9\-]{4,19})\b", re.I)
+_CUE_ID_RE = re.compile(r"\b([A-Z0-9][A-Z0-9\-]{4,19})\b", re.IGNORECASE)
 
 # Normalize spoken IDs: "R as in Romeo" → "R", "8 8 2 1 1" → "88211"
-_NATO_RE = re.compile(r"\b(\w) as in \w+\b", re.I)
+_NATO_RE = re.compile(r"\b(\w) as in \w+\b", re.IGNORECASE)
 # Negative lookbehind for apostrophes prevents "that's R" from collapsing to "sR..."
-_SPACED_SINGLE_RE = re.compile(r"(?<!['\w])([A-Z0-9])((?:\s+[A-Z0-9]){2,})(?!\w)", re.I)
+_SPACED_SINGLE_RE = re.compile(r"(?<!['\w])([A-Z0-9])((?:\s+[A-Z0-9]){2,})(?!\w)", re.IGNORECASE)
 
 # ── Phone ─────────────────────────────────────────────────────────────────────
 
@@ -33,7 +33,7 @@ _PHONE_SCAN_RE = re.compile(r"\d[\d\s\-\.]{6,14}\d")
 _AMOUNT_DIGIT_RE = re.compile(
     r"\$\s*([\d,]+(?:\.\d{1,2})?)"
     r"|([\d,]+(?:\.\d{1,2})?)\s+dollars?\b",
-    re.I,
+    re.IGNORECASE,
 )
 
 _NUM_WORD = (
@@ -43,7 +43,7 @@ _NUM_WORD = (
 )
 _SPOKEN_AMOUNT_RE = re.compile(
     rf"\b(?:a\s+)?(?:{_NUM_WORD})(?:[\s\-]+(?:{_NUM_WORD}))*(?:\s+dollars?)?\b",
-    re.I,
+    re.IGNORECASE,
 )
 
 _ONES: dict[str, int] = {
@@ -60,8 +60,8 @@ _TENS = frozenset({"twenty", "thirty", "forty", "fifty", "sixty", "seventy", "ei
 
 # ── Date ──────────────────────────────────────────────────────────────────────
 
-_AT_TIME_RE = re.compile(r"(.+?)\s+at\s+(\d{1,2}(?::\d{2})?(?:\s*[ap]m)?)\b", re.I)
-_DOM_RE = re.compile(r"\bthe\s+(\d{1,2})(?:st|nd|rd|th)?\b", re.I)
+_AT_TIME_RE = re.compile(r"(.+?)\s+at\s+(\d{1,2}(?::\d{2})?(?:\s*[ap]m)?)\b", re.IGNORECASE)
+_DOM_RE = re.compile(r"\bthe\s+(\d{1,2})(?:st|nd|rd|th)?\b", re.IGNORECASE)
 
 # Dateparser is very aggressive — only keep results whose span contains a genuine
 # date indicator (month name, weekday, relative word, or numeric date-like form).
@@ -73,14 +73,14 @@ _DATE_KEYWORD_RE = re.compile(
     r"|today|tomorrow|yesterday|next|last|tonight|noon|midnight"
     r"|\d{1,4}[-/]\d{1,2}[-/]\d{1,4}|\d{1,2}(?:st|nd|rd|th)"
     r"|\d{1,2}\s*(?:am|pm))\b",
-    re.I,
+    re.IGNORECASE,
 )
 
 # ── Action ────────────────────────────────────────────────────────────────────
 
 _ACTION_RE = re.compile(
     r"\b(I(?:'ll| will)|Let\s+me|We(?:'ll| will))\b(.+?)(?=[.!?]|$)",
-    re.I | re.M,
+    re.IGNORECASE | re.MULTILINE,
 )
 
 # ── Name ──────────────────────────────────────────────────────────────────────
@@ -120,7 +120,7 @@ def _words_to_number(words: list[str]) -> float | None:
 
 def _spoken_to_amount(raw: str) -> float | None:
     """Convert a spoken dollar amount to float. 'forty-seven fifty' → 47.50."""
-    text = re.sub(r"\bdollars?\b", "", raw, flags=re.I).strip()
+    text = re.sub(r"\bdollars?\b", "", raw, flags=re.IGNORECASE).strip()
     text = text.lower().replace("-", " ")
     words = [w for w in text.split() if w]
     if not words:
@@ -169,7 +169,7 @@ def _search_dates_with_fallback(
     date_results = dateparser.search.search_dates(date_text, settings=settings) or []
     if not date_results:
         return []
-    hour_m = re.match(r"^(\d{1,2})(?::(\d{2}))?(?:\s*([ap]m))?$", time_str, re.I)
+    hour_m = re.match(r"^(\d{1,2})(?::(\d{2}))?(?:\s*([ap]m))?$", time_str, re.IGNORECASE)
     if not hour_m:
         return date_results
     hour = int(hour_m.group(1))
@@ -319,9 +319,9 @@ class L1CaptureProcessor:
         for m in _SPOKEN_AMOUNT_RE.finditer(text):
             raw = m.group(0).strip()
             # Require ≥2 number words, or explicit "dollars", to reduce noise
-            num_words = re.split(r"[\s\-]+", re.sub(r"\bdollars?\b", "", raw, flags=re.I).strip())
+            num_words = re.split(r"[\s\-]+", re.sub(r"\bdollars?\b", "", raw, flags=re.IGNORECASE).strip())
             num_words = [w for w in num_words if w and w.lower() not in ("a", "an")]
-            has_dollars = bool(re.search(r"\bdollars?\b", raw, re.I))
+            has_dollars = bool(re.search(r"\bdollars?\b", raw, re.IGNORECASE))
             if len(num_words) < 2 and not has_dollars:
                 continue
             value = _spoken_to_amount(raw)

@@ -119,7 +119,7 @@ def test_handle_no_skill_falls_through_to_chat():
 # ---------------------------------------------------------------------------
 
 
-def _time_tier() -> "Tier1Qwen":
+def _time_tier() -> Tier1Qwen:
     return Tier1Qwen(Config(), skills=SkillRegistry([TimeSkill()]))
 
 

@@ -12,8 +12,8 @@ from __future__ import annotations
 import datetime
 import re
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from .list_store import CallList, CallListStore, ListItem
 from .skills import SkillParam
@@ -99,12 +99,12 @@ class ListSkill:
     # Intent routing
 
     _INTENT_PATTERNS: list[tuple[re.Pattern, str]] = [
-        (re.compile(r"^(start|create)\s+a\b", re.I), "start"),
-        (re.compile(r"^(add|put)\b", re.I), "add"),
-        (re.compile(r"^show\b", re.I), "show"),
-        (re.compile(r"^(remove|delete)\b", re.I), "remove"),
-        (re.compile(r"^check\s+off\b", re.I), "check"),
-        (re.compile(r"^look\s+up\b", re.I), "lookup"),
+        (re.compile(r"^(start|create)\s+a\b", re.IGNORECASE), "start"),
+        (re.compile(r"^(add|put)\b", re.IGNORECASE), "add"),
+        (re.compile(r"^show\b", re.IGNORECASE), "show"),
+        (re.compile(r"^(remove|delete)\b", re.IGNORECASE), "remove"),
+        (re.compile(r"^check\s+off\b", re.IGNORECASE), "check"),
+        (re.compile(r"^look\s+up\b", re.IGNORECASE), "lookup"),
     ]
 
     def parse_intent(self, phrase: str) -> str:

@@ -40,7 +40,7 @@ class LaneResult:
     lane: str
     skill: str | None = None
     speaker: str = ""  # "operator" | "far" | "" — who spoke; propagated from the call site
-    proposal: "SkillProposal | None" = None  # set when the lane proposed a skill to run
+    proposal: SkillProposal | None = None  # set when the lane proposed a skill to run
 
 
 def _reply_text(result: object) -> str:
@@ -80,23 +80,23 @@ class Tier0Rules:
         self._commands: list[tuple[str, re.Pattern[str], Callable[[], str], str]] = [
             ("stop", re.compile(
                 r"^\s*(?:iris[,\s]+)?(?:stop|stand[ -]?down|cancel|never ?mind|abort|"
-                r"that'?s enough|quiet|shush)\b", re.I),
+                r"that'?s enough|quiet|shush)\b", re.IGNORECASE),
              lambda: "Okay — standing down.", "iris, stop"),
-            ("time", re.compile(r"\bwhat(?:'s| is)? the time\b|\bwhat time is it\b", re.I),
+            ("time", re.compile(r"\bwhat(?:'s| is)? the time\b|\bwhat time is it\b", re.IGNORECASE),
              self._time, "what time is it"),
-            ("date", re.compile(r"\bwhat(?:'s| is)?(?: the| today'?s)? date\b|\bwhat day is it\b", re.I),
+            ("date", re.compile(r"\bwhat(?:'s| is)?(?: the| today'?s)? date\b|\bwhat day is it\b", re.IGNORECASE),
              self._date, "what's the date"),
             ("introduce", re.compile(
-                r"\bintroduce yourself\b|\bwho are you\b|\bwhat are you\b|\btell me about yourself\b", re.I),
+                r"\bintroduce yourself\b|\bwho are you\b|\bwhat are you\b|\btell me about yourself\b", re.IGNORECASE),
              lambda: _INTRO, "introduce yourself"),
-            ("greet", re.compile(r"^\s*(?:hi|hello|hey|good morning|good afternoon|good evening)\b", re.I),
+            ("greet", re.compile(r"^\s*(?:hi|hello|hey|good morning|good afternoon|good evening)\b", re.IGNORECASE),
              lambda: "Hi — I'm Iris, and I'm an AI. What can I do for you?", "hi / hello"),
-            ("thanks", re.compile(r"^\s*(?:thanks|thank you|cheers|appreciate it)\b", re.I),
+            ("thanks", re.compile(r"^\s*(?:thanks|thank you|cheers|appreciate it)\b", re.IGNORECASE),
              lambda: "Anytime!", "thank you"),
-            ("bye", re.compile(r"^\s*(?:bye|goodbye|see you|good ?night|talk later)\b", re.I),
+            ("bye", re.compile(r"^\s*(?:bye|goodbye|see you|good ?night|talk later)\b", re.IGNORECASE),
              lambda: "Talk soon — bye!", "goodbye"),
             ("help", re.compile(
-                r"\bwhat can (?:you do|i (?:ask|say))\b|\b(?:your )?commands\b|\bhelp\b|\bwhat do you do\b", re.I),
+                r"\bwhat can (?:you do|i (?:ask|say))\b|\b(?:your )?commands\b|\bhelp\b|\bwhat do you do\b", re.IGNORECASE),
              self._help, "what can you do"),
         ]
 
@@ -271,7 +271,7 @@ class Tier1Qwen:
             f"<|im_start|>user\n{text}<|im_end|>\n<|im_start|>assistant\n"
         )
 
-    def dispatch(self, text: str, *, speaker: str = "") -> "SkillProposal | None":
+    def dispatch(self, text: str, *, speaker: str = "") -> SkillProposal | None:
         """Grammar-constrained routing pass: return an *unexecuted* ``SkillProposal``,
         or ``None`` to fall through to chat.
 

@@ -148,7 +148,7 @@ class IMAPEmailProvider:
             )
             conn.login(self._user, self._password)
             return conn
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("IMAP connect failed (%s)", self._imap_host)
             return None
 
@@ -172,7 +172,7 @@ class IMAPEmailProvider:
                 body_text="",  # populated separately when get_message() is called
                 unread=True,
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("Failed to parse envelope for uid=%s", uid)
             return None
 
@@ -237,7 +237,7 @@ class IMAPEmailProvider:
                 if parsed:
                     messages.append(parsed)
             return messages
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("list_unread failed")
             return []
         finally:
@@ -277,7 +277,7 @@ class IMAPEmailProvider:
                 body_text=body_text,
                 unread=True,
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("get_message(%s) failed", message_id)
             return None
         finally:
@@ -300,7 +300,7 @@ class IMAPEmailProvider:
                 smtp.login(self._user, self._password)
                 smtp.send_message(msg)
             return True
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("send to %s failed", to)
             return False
 
@@ -313,7 +313,7 @@ class IMAPEmailProvider:
             conn.select("INBOX")
             typ, _ = conn.uid("STORE", message_id, "+FLAGS", r"\Seen")
             return typ == "OK"
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("mark_read(%s) failed", message_id)
             return False
         finally:
@@ -335,7 +335,7 @@ class IMAPEmailProvider:
             conn.uid("STORE", message_id, "+FLAGS", r"\Deleted")
             conn.expunge()
             return True
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("archive(%s) failed", message_id)
             return False
         finally:

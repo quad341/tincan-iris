@@ -4,7 +4,6 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import FrozenSet
 from uuid import uuid4
 
 
@@ -67,4 +66,4 @@ class ActionItem:
     created_at: float = field(default_factory=time.time)
 
 
-ContactRoster = FrozenSet[str]
+ContactRoster = frozenset[str]

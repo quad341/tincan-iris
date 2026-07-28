@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 import asyncio
-import threading
-from typing import Callable
-
 import logging as _logging
+import threading
+from collections.abc import Callable
 
 try:
     from pipecat.frames.frames import (

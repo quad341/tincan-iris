@@ -13,7 +13,6 @@ pytest.importorskip("textual")
 
 from unittest.mock import MagicMock
 
-
 # ---------------------------------------------------------------------------
 # MessagesPanel — unread badge count
 # ---------------------------------------------------------------------------

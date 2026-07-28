@@ -30,7 +30,6 @@ from iris.capture.schemas import ActionItem, CapturedFact, FactType
 from iris.console._confidence_bar import render_confidence_bar as _render_confidence_bar
 from iris.console._markup import escape_for_content
 
-
 # ─────────────────────────────────────────────────────────────────
 # Disclosure state
 # ─────────────────────────────────────────────────────────────────
@@ -796,7 +795,7 @@ class PriorCommitmentCard(Widget):
             return 0
         today = self._now or date.today()
         diff = (today - due).days
-        return diff if diff > 0 else 0
+        return max(0, diff)
 
     @property
     def is_broken(self) -> bool:

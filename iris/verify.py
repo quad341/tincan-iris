@@ -55,7 +55,7 @@ def _build_calendar_client():
 
 
 def _run_tier_a(notes_path=None, prefs_path=None) -> list[CheckResult]:
-    from .skills import TimeSkill, EchoSkill, default_registry
+    from .skills import EchoSkill, TimeSkill, default_registry
 
     checks: list[CheckResult] = []
 
@@ -254,7 +254,7 @@ def _run_tier_d() -> list[CheckResult]:
         )
     else:
         try:
-            now = datetime.datetime.now(datetime.timezone.utc)
+            now = datetime.datetime.now(datetime.UTC)
             end = now + datetime.timedelta(hours=1)
             result = client.free_busy(start=now.isoformat(), end=end.isoformat())
             ms = (time.perf_counter() - t0) * 1000

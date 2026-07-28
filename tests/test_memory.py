@@ -34,7 +34,6 @@ from iris.memory import (
     _try_load_vec,
 )
 
-
 # ---------------------------------------------------------------------------
 # _try_load_vec
 # ---------------------------------------------------------------------------
@@ -225,7 +224,7 @@ def test_vec_ddl_uses_float_column_not_blob():
     DDL regression is caught at import time, and we verify the plain-table
     fallback uses BLOB (so the two paths are clearly distinct).
     """
-    from iris.memory import _EMBEDDINGS_DDL_VEC, _EMBEDDINGS_DDL_PLAIN
+    from iris.memory import _EMBEDDINGS_DDL_PLAIN, _EMBEDDINGS_DDL_VEC
     vec_ddl = _EMBEDDINGS_DDL_VEC.format(dim=768)
     assert "float[768]" in vec_ddl, "vec0 DDL must use float[N] not BLOB"
     assert "BLOB" not in vec_ddl.upper(), "vec0 DDL must not use BLOB column type"
@@ -389,7 +388,7 @@ def test_memory_store_get_gist_reflects_gist_store():
 
 
 def _fake_urlopen(url_obj, timeout):
-    import json  # noqa: E401
+    import json
 
     class FakeResp:
         def __enter__(self):
@@ -924,9 +923,8 @@ def test_embedding_engine_raises_on_http_error():
         side_effect=urllib.error.HTTPError(
             url=None, code=503, msg="Service Unavailable", hdrs=None, fp=None
         ),
-    ):
-        with pytest.raises(urllib.error.HTTPError):
-            engine.embed("test")
+    ), pytest.raises(urllib.error.HTTPError):
+        engine.embed("test")
 
 
 # ---------------------------------------------------------------------------

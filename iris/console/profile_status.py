@@ -157,7 +157,7 @@ try:
 
         def __init__(
             self,
-            profile: "PresentationProfile",
+            profile: PresentationProfile,
             utterance: str,
             **kwargs,
         ) -> None:

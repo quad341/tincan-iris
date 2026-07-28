@@ -7,15 +7,27 @@ import urllib.request
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
-from .config import DEFAULT, Config
 from .authz import Authorizer, AuthzContext
-from .lanes import LaneResult, SkillProposal, Tier0Rules, Tier1Qwen, Tier2RawHaiku, _reply_text
+from .config import DEFAULT, Config
+from .lanes import (
+    LaneResult,
+    SkillProposal,
+    Tier0Rules,
+    Tier1Qwen,
+    Tier2RawHaiku,
+    _reply_text,
+)
 from .latency import Timeline
 from .masking import run_with_masking
 from .notes import NotesStore
 from .prefs import PreferencesStore
 from .re_ask_phrasebook import is_re_ask
-from .skills import SkillRegistry, default_registry, is_operator_only, supports_streaming
+from .skills import (
+    SkillRegistry,
+    default_registry,
+    is_operator_only,
+    supports_streaming,
+)
 from .trust import TrustMode
 
 

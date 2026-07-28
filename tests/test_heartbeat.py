@@ -153,7 +153,7 @@ def test_collect_checks_filters_expected_services_to_heartbeat_set(monkeypatch):
 
     _patch_pooled(
         monkeypatch,
-        caps=lambda: [],
+        caps=list,
         svcs=_fake_check_services,
         enrich=lambda *, timeout_s: _check("call-card-enrichment", DoctorStatus.OK, False),
     )
@@ -256,7 +256,7 @@ def no_op_checks(monkeypatch):
     monkeypatch.setattr(hb, "_HEARTBEAT_INTERVAL_S", 0.05)
     _patch_pooled(
         monkeypatch,
-        caps=lambda: [],
+        caps=list,
         svcs=lambda services, *, timeout_s, deep: [],
         enrich=lambda *, timeout_s: _check("call-card-enrichment", DoctorStatus.OK, False),
     )

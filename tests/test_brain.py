@@ -15,7 +15,6 @@ from iris.config import Config
 from iris.lanes import LaneResult
 from iris.trust import TrustMode
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

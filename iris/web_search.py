@@ -17,9 +17,10 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Callable
+from collections.abc import Callable
 
-from .config import DEFAULT as _DEFAULT_CFG, Config
+from .config import DEFAULT as _DEFAULT_CFG
+from .config import Config
 from .skills import SkillParam
 
 _CONTENT_CAP_BYTES = 65536   # 64 KB
@@ -29,7 +30,7 @@ _STILL_FETCHING_DELAY_S = 2.0
 
 _INJECTION_RE = re.compile(
     r"ignore\s.{0,40}(previous|prior|above|earlier|system).{0,40}(instruct|prompt|rule)",
-    re.I,
+    re.IGNORECASE,
 )
 
 

@@ -17,10 +17,9 @@ from iris.context import (
     NO_MATCH_REPLY,
     PRIVACY_NOTICE,
     WINDOW_PREFIX,
-    ConversationContext,
     ContextTurn,
+    ConversationContext,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -324,7 +323,7 @@ def test_gist_updated_event_emitted():
                    strict=False)
 def test_transcript_checking_prefix_when_store_available():
     """When transcript store is available, reply must include 'Checking the transcript'."""
-    from iris.context import TranscriptContext  # noqa: F401 — not yet implemented
+    from iris.context import TranscriptContext
 
     store = MagicMock()
     store.query.return_value = [MagicMock(text="Reference RL-4492", at_s=120.0)]
@@ -336,7 +335,7 @@ def test_transcript_checking_prefix_when_store_available():
 @pytest.mark.xfail(reason="ti-ccc.11.1.2: on-demand transcript tier not yet implemented",
                    strict=False)
 def test_transcript_unavailable_returns_fallback():
-    from iris.context import TranscriptContext  # noqa: F401
+    from iris.context import TranscriptContext
 
     ctx = TranscriptContext(base=ConversationContext(), transcript_store=None)
     result = ctx.lookup("reference number")
@@ -347,7 +346,7 @@ def test_transcript_unavailable_returns_fallback():
                    strict=False)
 def test_transcript_unavailable_annotation_distinct():
     """PM decision: [context: transcript store not yet available — clarification sent]."""
-    from iris.context import TranscriptContext  # noqa: F401
+    from iris.context import TranscriptContext
 
     ctx = TranscriptContext(base=ConversationContext(), transcript_store=None)
     result = ctx.lookup("anything")

@@ -12,12 +12,11 @@ instance across multiple tools; starting a competing one would break things.
 """
 from __future__ import annotations
 
+import subprocess
 import time
 import urllib.request
-import subprocess
 
 from .tincand_status import get_tincand_status
-
 
 _MANAGED_SERVICES = ["iris-whisper", "iris-kokoro"]
 _LLAMA_URL = "http://127.0.0.1:8080/health"

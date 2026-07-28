@@ -11,14 +11,17 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.widgets import Button  # noqa: E402
+from textual.widgets import Button
 
-import iris.console.app as app_module  # noqa: E402
-from iris.console.app import ActiveCallCard, IrisConsole, _GRANT  # noqa: E402
-from iris.console.call_card import DisclosureAcknowledged, DisclosureSkipped  # noqa: E402
-from iris.console.conductor import State  # noqa: E402
-from iris.daemon.proxy import DaemonNotRunning  # noqa: E402
-from iris.trust import TrustMode  # noqa: E402
+import iris.console.app as app_module
+from iris.console.app import _GRANT, ActiveCallCard, IrisConsole
+from iris.console.call_card import (
+    DisclosureAcknowledged,
+    DisclosureSkipped,
+)
+from iris.console.conductor import State
+from iris.daemon.proxy import DaemonNotRunning
+from iris.trust import TrustMode
 
 
 def test_ride_along_attaches_and_restores_endpoint():
@@ -931,12 +934,11 @@ def test_handle_exception_persists_crash_before_super_handling():
             with patch(
                 "iris.console.app.diagnostics.persist_crash",
                 side_effect=lambda *a, **kw: order.append("persist"),
+            ), patch.object(
+                App, "_handle_exception",
+                side_effect=lambda *a, **kw: order.append("super"),
             ):
-                with patch.object(
-                    App, "_handle_exception",
-                    side_effect=lambda *a, **kw: order.append("super"),
-                ):
-                    app._handle_exception(ValueError("boom"))
+                app._handle_exception(ValueError("boom"))
             assert order == ["persist", "super"]
             await pilot.press("q")
 

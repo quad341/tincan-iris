@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from iris.capture.asr_gate import is_hallucinated_segment
 
-
 # ---------------------------------------------------------------------------
 # no_speech_prob axis (matches the existing _whisper_stream.py precedent: a
 # whole-utterance average > 0.6 is already dropped there; this pins the same

@@ -233,7 +233,7 @@ def _gcal(args: argparse.Namespace) -> int:
     holder: dict[str, str | None] = {}
 
     class _Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):  # noqa: N802 — http.server API
+        def do_GET(self):
             params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             holder["code"] = (params.get("code") or [None])[0]
             holder["state"] = (params.get("state") or [None])[0]

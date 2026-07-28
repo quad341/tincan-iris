@@ -5,7 +5,7 @@ import asyncio
 import os
 import tempfile
 import wave
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 try:
     from pipecat.frames.frames import TranscriptionFrame

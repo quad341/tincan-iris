@@ -5,11 +5,9 @@ one fixture, one concern per test.
 """
 from __future__ import annotations
 
-
 import pytest
 
 from iris.proactive_store import ProactiveItem, ProactiveStore
-
 
 # ---------------------------------------------------------------------------
 # Fixture

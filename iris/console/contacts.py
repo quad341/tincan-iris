@@ -18,7 +18,16 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, DataTable, Footer, Header, Input, Select, Static, TextArea
+from textual.widgets import (
+    Button,
+    DataTable,
+    Footer,
+    Header,
+    Input,
+    Select,
+    Static,
+    TextArea,
+)
 
 from ..roster import Contact, RosterProvider
 from .contacts_logic import (

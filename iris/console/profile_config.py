@@ -8,7 +8,6 @@ Textual widget classes defined only when Textual is available.
 """
 from __future__ import annotations
 
-
 # ---------------------------------------------------------------------------
 # Pure-logic helpers — no Textual dependency
 # ---------------------------------------------------------------------------

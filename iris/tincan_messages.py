@@ -161,9 +161,9 @@ class TincanMessages:
         ``("bus_unavailable", reason)`` instead of raising.
         """
         try:
-            import dbus  # noqa: PLC0415
-            import dbus.mainloop.glib  # noqa: PLC0415
-            from gi.repository import GLib  # noqa: PLC0415
+            import dbus
+            import dbus.mainloop.glib
+            from gi.repository import GLib
         except ImportError:
             self.emit(("bus_unavailable", "dbus-python or GLib not installed"))
             return

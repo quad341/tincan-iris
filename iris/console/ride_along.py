@@ -38,7 +38,6 @@ from iris.console.call_card import (
     FactCard,
 )
 
-
 # ─────────────────────────────────────────────────────────────────
 # Enums
 # ─────────────────────────────────────────────────────────────────
@@ -68,7 +67,7 @@ class ReadBackTarget(Enum):
     CALLER = "caller"
 
     @classmethod
-    def default(cls) -> "ReadBackTarget":
+    def default(cls) -> ReadBackTarget:
         return cls.OPERATOR_PRIVATE
 
     def available_at(self, level: ParticipationLevel) -> bool:

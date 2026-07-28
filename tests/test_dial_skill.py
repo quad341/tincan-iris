@@ -9,7 +9,6 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 
-
 from iris.dial_skill import (
     CancelDialSkill,
     ConfirmDialSkill,
@@ -18,7 +17,6 @@ from iris.dial_skill import (
     _DialState,
 )
 from iris.roster import Contact
-
 
 # ---------------------------------------------------------------------------
 # Minimal roster stub

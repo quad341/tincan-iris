@@ -64,6 +64,7 @@ def test_email_present_when_configured(stores, monkeypatch):
 
 def test_calendar_gate_absent_without_token():
     from unittest.mock import MagicMock
+
     from iris.calendar import configured_calendar_skills
     c = MagicMock()
     c.has_token.return_value = False
@@ -72,6 +73,7 @@ def test_calendar_gate_absent_without_token():
 
 def test_calendar_gate_present_with_token():
     from unittest.mock import MagicMock
+
     from iris.calendar import configured_calendar_skills
     c = MagicMock()
     c.has_token.return_value = True

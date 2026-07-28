@@ -12,7 +12,7 @@ Guardrails (see SPEAK_DURING_CALL in config.py):
 from __future__ import annotations
 
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from .mode import IrisMode
 from .notify_sink import DesktopNotifySink

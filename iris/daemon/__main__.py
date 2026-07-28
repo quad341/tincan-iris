@@ -22,14 +22,6 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ._socket_path import daemon_pid_path
-from .api import DaemonAPI
-from .brain_host import BrainHost
-from .engine import HandlingEngine
-from .heartbeat import BaselineHeartbeat
-from .message_event_source import MessageEventSource
-from .policy import PolicyResolver
-from .posture import PostureManager, PostureWatcher
 from .. import settings
 from ..brain import Brain
 from ..call_control import TincanCallControl
@@ -39,6 +31,14 @@ from ..notify_sink import DesktopNotifySink
 from ..prefs import PreferencesStore
 from ..proactive_store import ProactiveStore
 from ..roster import RosterStore
+from ._socket_path import daemon_pid_path
+from .api import DaemonAPI
+from .brain_host import BrainHost
+from .engine import HandlingEngine
+from .heartbeat import BaselineHeartbeat
+from .message_event_source import MessageEventSource
+from .policy import PolicyResolver
+from .posture import PostureManager, PostureWatcher
 
 if TYPE_CHECKING:
     # Runtime import is deferred into the IRIS_CALL_CARD block below so the base
@@ -166,7 +166,7 @@ def _load_call_card_config() -> Config:
 
 def main() -> int:
     try:
-        _lock_file = _acquire_exclusive_lock(_PID_PATH)  # noqa: F841 — held for our lifetime, see docstring
+        _lock_file = _acquire_exclusive_lock(_PID_PATH)
     except _DaemonAlreadyRunning as exc:
         _log.error("iris daemon: %s — exiting", exc)
         return 1
@@ -204,9 +204,10 @@ def main() -> int:
     call_card_host: CallCardHost | None = None
     if os.environ.get("IRIS_CALL_CARD", "1").strip().lower() not in ("0", "false", "no", "off"):
         try:
-            from .call_card_host import CallCardHost  # noqa: PLC0415
-            from iris.capture.processor import L1CaptureProcessor  # noqa: PLC0415
-            from iris.capture.store import CallCardStore  # noqa: PLC0415
+            from iris.capture.processor import L1CaptureProcessor
+            from iris.capture.store import CallCardStore
+
+            from .call_card_host import CallCardHost
         except ImportError as exc:
             _log.warning(
                 "Call Card capture DISABLED — required deps missing (%s). This "

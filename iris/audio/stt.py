@@ -11,7 +11,6 @@ text-in / voice-out.
 from __future__ import annotations
 
 import json
-import socket
 import subprocess
 import urllib.error
 import urllib.request
@@ -129,7 +128,7 @@ class FasterWhisperServerSTT:
             with urllib.request.urlopen(req, timeout=1.0) as resp:
                 data = json.loads(resp.read())
                 return bool(data.get("ready"))
-        except (urllib.error.URLError, socket.timeout, json.JSONDecodeError, OSError):
+        except (TimeoutError, urllib.error.URLError, json.JSONDecodeError, OSError):
             return False
 
     def transcribe(self, wav_path: str) -> str:

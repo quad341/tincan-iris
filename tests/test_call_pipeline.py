@@ -26,7 +26,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Pipecat stubs — comprehensive set for the pipeline infrastructure
 # ---------------------------------------------------------------------------
@@ -101,11 +100,11 @@ def _install_pipecat_stubs() -> None:
 
     class STTService(AIService):
         async def run_stt(self, audio: bytes):
-            return; yield  # noqa
+            return; yield
 
     class TTSService(AIService):
         async def run_tts(self, text: str, context_id: str = ""):
-            return; yield  # noqa
+            return; yield
 
     class LLMService(AIService):
         async def process_frame(self, frame, direction):
@@ -198,7 +197,7 @@ def _install_pipecat_stubs() -> None:
 
 _install_pipecat_stubs()
 
-from iris.voice.call_pipeline import CallPipeline  # noqa: E402
+from iris.voice.call_pipeline import CallPipeline
 
 # Grab stub frame classes for use in tests
 _frames_mod = sys.modules["pipecat.frames.frames"]

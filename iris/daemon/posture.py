@@ -16,9 +16,9 @@ import logging
 import sqlite3
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 _log = logging.getLogger(__name__)
 

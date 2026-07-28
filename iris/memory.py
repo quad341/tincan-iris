@@ -13,6 +13,7 @@ import collections
 import json
 import logging
 import queue
+import sqlite3
 import struct
 import threading
 import time
@@ -20,8 +21,6 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
-
-import sqlite3
 
 if TYPE_CHECKING:
     from iris.far_end import FarEndIdentity
@@ -546,7 +545,7 @@ class MemoryManager:
         gist_store: GistStore | None = None,
         window: RollingWindow | None = None,
         *,
-        far_end: "FarEndIdentity | None" = None,
+        far_end: FarEndIdentity | None = None,
     ) -> str:
         """Embed a contact query, ANN-search, rerank by recency, return ≤100 token hint.
 
@@ -668,7 +667,7 @@ class MemoryManager:
                         source_type="note",
                         source_id=str(note.id),
                     )
-        except Exception:  # noqa: BLE001 — never re-raise; log and discard
+        except Exception:
             log.exception("call_end archive failed for session %s", session_id)
 
     def _qwen_summarise(self, gist: str, last_10: str) -> str:

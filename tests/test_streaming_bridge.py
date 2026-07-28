@@ -14,13 +14,11 @@ None of these need a live Qwen — dispatch/chat are injected.
 """
 from __future__ import annotations
 
-
 from iris.agenda_skill import AgendaSkill
 from iris.brain import Brain
 from iris.lanes import LaneResult, SkillProposal, Tier1Qwen
 from iris.skills import SkillRegistry, TimeSkill, supports_streaming
 from iris.trust import TrustMode
-
 
 # --------------------------------------------------------------------------
 # Spies — record ordering of (authorize, skill-runs) without a real model.

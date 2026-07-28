@@ -17,7 +17,6 @@ from pathlib import Path
 
 from .skills import Skill, SkillParam
 
-
 _DEFAULT_PATH = Path.home() / ".local" / "share" / "iris" / "notes.json"
 
 

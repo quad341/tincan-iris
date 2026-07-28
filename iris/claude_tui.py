@@ -102,7 +102,7 @@ class ClaudeTuiSession:
         self._tmux("kill-session", "-t", self.session)
         self._started = False
 
-    def __enter__(self) -> "ClaudeTuiSession":
+    def __enter__(self) -> ClaudeTuiSession:
         self.start()
         return self
 

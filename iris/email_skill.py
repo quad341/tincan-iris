@@ -213,7 +213,7 @@ class ReadEmailSkill:
 
 
 def _resolve_email_via_roster(
-    to: str, roster: "RosterProvider | None"
+    to: str, roster: RosterProvider | None
 ) -> tuple[str, str]:
     """Try to resolve a name to an email address via the roster.
 
@@ -266,7 +266,7 @@ class SendEmailSkill:
         self,
         provider: EmailProvider,
         pending: _EmailPendingState,
-        roster: "RosterProvider | None" = None,
+        roster: RosterProvider | None = None,
     ) -> None:
         self._provider = provider
         self._pending = pending
@@ -378,7 +378,7 @@ class TriageEmailSkill:
 
 def email_skills(
     provider: EmailProvider,
-    roster: "RosterProvider | None" = None,
+    roster: RosterProvider | None = None,
 ) -> list[object]:
     """Return all email skill instances sharing state.  Register in brain.skills.
 
@@ -396,7 +396,7 @@ def email_skills(
     ]
 
 
-def configured_email_skills(roster: "RosterProvider | None" = None) -> list[object]:
+def configured_email_skills(roster: RosterProvider | None = None) -> list[object]:
     """Build email skills from config, or return ``[]`` if the lane isn't set up.
 
     Reads IMAP/SMTP host + user from config (:func:`iris.settings.get`) and the

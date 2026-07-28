@@ -12,10 +12,10 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.widgets import Static  # noqa: E402
+from textual.widgets import Static
 
-from iris.console.app import IrisConsole  # noqa: E402
-from iris.trust import TrustMode  # noqa: E402
+from iris.console.app import IrisConsole
+from iris.trust import TrustMode
 
 
 def _status_text(app: IrisConsole) -> str:

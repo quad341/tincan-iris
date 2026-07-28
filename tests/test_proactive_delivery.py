@@ -11,7 +11,6 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock
 
-
 from iris.config import Config
 from iris.proactive_delivery import (
     ContextInferenceTrigger,
@@ -19,7 +18,6 @@ from iris.proactive_delivery import (
     SilenceTracker,
 )
 from iris.proactive_store import ProactiveItem
-
 
 # ---------------------------------------------------------------------------
 # Helpers

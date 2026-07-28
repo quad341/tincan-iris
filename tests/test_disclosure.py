@@ -4,14 +4,12 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-
 from iris.disclosure import (
-    _disclosure_script,
     _cached_name,
+    _disclosure_script,
     _write_sidecar,
     ensure_disclosure_wav,
 )
-
 
 # --- script template ---
 

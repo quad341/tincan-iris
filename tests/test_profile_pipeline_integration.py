@@ -28,7 +28,6 @@ from iris.profile_resolver import PresentationProfile, ProfileResolver
 from iris.screen_call import ScreenCallFlow
 from iris.take_message import TakeMessageFlow
 
-
 # ---------------------------------------------------------------------------
 # Stubs and helpers
 # ---------------------------------------------------------------------------
@@ -382,10 +381,11 @@ def test_detection_does_not_add_latency_after_stt():
         return {"es": 0.9}
 
     # Build a real ProfileResolver with our spy detector
+    import pathlib
+    import tempfile
+
     from iris.config import Config
     from iris.prefs import PreferencesStore
-    import tempfile
-    import pathlib
 
     with tempfile.TemporaryDirectory() as tmp:
         prefs = PreferencesStore(pathlib.Path(tmp) / "prefs.json")

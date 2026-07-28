@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import threading
 import uuid
-from typing import Callable
+from collections.abc import Callable
 
 from ..notify_sink import DesktopNotifySink
 from .policy import PolicyResolver
@@ -233,12 +233,12 @@ class HandlingEngine:
 
     def _ctrl_answer(self, call_id: str) -> None:
         try:
-            self._ctrl._answer(call_id)  # noqa: SLF001
+            self._ctrl._answer(call_id)
         except Exception:
             _log.exception("ctrl._answer(%s) failed", call_id)
 
     def _ctrl_hangup(self, call_id: str) -> None:
         try:
-            self._ctrl._hangup(call_id)  # noqa: SLF001
+            self._ctrl._hangup(call_id)
         except Exception:
             _log.exception("ctrl._hangup(%s) failed", call_id)

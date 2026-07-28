@@ -10,12 +10,10 @@ ti-ccc.16.2 is implemented.
 """
 from __future__ import annotations
 
-
 import pytest
 
-from iris.list_store import CallListStore
 from iris.list_skill import ListSkill, list_skills
-
+from iris.list_store import CallListStore
 
 # ---------------------------------------------------------------------------
 # Fixtures

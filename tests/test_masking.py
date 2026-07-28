@@ -5,7 +5,6 @@ import time
 
 from iris.masking import run_with_filler, run_with_masking
 
-
 # --- run_with_filler (one-shot) ------------------------------------------------
 
 def test_fast_work_does_not_fire_filler() -> None:

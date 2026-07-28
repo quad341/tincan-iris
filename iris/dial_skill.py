@@ -163,7 +163,7 @@ class DialVoiceSkills:
 
         _orig_emit = ctrl.emit
 
-        def _intercept(ev: tuple) -> None:  # noqa: ANN001
+        def _intercept(ev: tuple) -> None:
             _orig_emit(ev)
             if ev and ev[0] == "call_connected":
                 self._connected.set()

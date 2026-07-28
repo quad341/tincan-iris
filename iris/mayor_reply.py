@@ -19,7 +19,8 @@ parsing, no city dispatch.
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .delegate_skill import _DelegateState
@@ -38,7 +39,7 @@ class MayorReplyListener:
 
     def __init__(
         self,
-        state: "_DelegateState",
+        state: _DelegateState,
         emit: Callable[[tuple], None],
     ) -> None:
         self._state = state

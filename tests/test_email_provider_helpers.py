@@ -78,7 +78,7 @@ def test_decode_header_plain_ascii():
 
 
 def test_decode_header_rfc2047_utf8_base64():
-    encoded = base64.b64encode("テスト".encode("utf-8")).decode("ascii")
+    encoded = base64.b64encode("テスト".encode()).decode("ascii")
     raw = f"=?utf-8?b?{encoded}?="
     assert "テスト" in _decode_header(raw)
 

@@ -42,15 +42,23 @@ from textual.widgets import Button, Footer, Header, RichLog, Static
 
 from .. import settings
 from ..addressing import address
+from ..audio.endpoint import default_endpoint
+from ..audio.streaming import StreamingTranscriber
+from ..audio.stt import default_stt
+from ..audio.tts import default_tts
+from ..brain import Brain
+from ..call_control import TincanCallControl
+from ..capture.store import CallCardStore
 from ..daemon.posture import PostureManager
 from ..daemon.proxy import DaemonNotRunning, DaemonProxy
+from ..fillers import filler_picker
 from ..message_store import MessageStore
 from ..prefs import PreferencesStore
+from ..proactive_delivery import ProactiveDelivery, SilenceTracker
+from ..proactive_store import ProactiveStore
+from ..roster import RosterStore
+from ..trust import TrustMode
 from . import diagnostics
-from .contacts import ContactsScreen
-from .contacts_logic import VERB_DESCRIPTION
-from .help_screen import HelpScreen
-from .list_view import PostCallListView
 from .call_card import (
     ActionItemConfirmed,
     ActionItemEdited,
@@ -61,19 +69,11 @@ from .call_card import (
     FactDismissed,
     FactValueOverride,
 )
-from ..audio.endpoint import default_endpoint
-from ..audio.streaming import StreamingTranscriber
-from ..audio.stt import default_stt
-from ..audio.tts import default_tts
-from ..brain import Brain
-from ..call_control import TincanCallControl
-from ..capture.store import CallCardStore
-from ..fillers import filler_picker
-from ..proactive_delivery import ProactiveDelivery, SilenceTracker
-from ..proactive_store import ProactiveStore
-from ..roster import RosterStore
-from ..trust import TrustMode
 from .conductor import Conductor, State
+from .contacts import ContactsScreen
+from .contacts_logic import VERB_DESCRIPTION
+from .help_screen import HelpScreen
+from .list_view import PostCallListView
 
 # ti-veyx: WebRTC AEC bring-up / SCO bridge for the seamless phone-call ride-along.
 _AEC_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "aec_audio.sh"
@@ -889,7 +889,7 @@ class IrisConsole(App):
             try:
                 self.conductor.say("Sure — talk soon. Goodbye!")
             finally:
-                self.ctrl._hangup("")  # noqa: SLF001 — D-Bus Hangup; CallEnded cleans up
+                self.ctrl._hangup("")
 
         self.run_worker(_bye_then_hangup, thread=True, exclusive=True)
 
@@ -984,7 +984,7 @@ class IrisConsole(App):
             self._w("[dim](busy — one sec)[/]")
 
     def _refresh_status(self) -> None:
-        import os as _os  # noqa: PLC0415
+        import os as _os
         c = self.conductor
         mode_pill = "🟢 daemon" if self._mode == "proxy" else "🟡 direct"
         parts = [mode_pill, c.state.value.upper()]

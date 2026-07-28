@@ -37,12 +37,12 @@ import pytest
 
 pytest.importorskip("textual")
 
-from iris.console.ride_along import (  # noqa: E402
+from iris.console.ride_along import (
+    ActionItemCard,
+    CaptureCard,
     CardFeed,
     CardType,
-    CaptureCard,
     CommitmentCard,
-    ActionItemCard,
     ContextCard,
     FlagCard,
     OnCallProposalCard,
@@ -50,12 +50,11 @@ from iris.console.ride_along import (  # noqa: E402
     ReadBackTarget,
     RideAlongConsole,
     Stance,
+    detect_action_item,
     detect_capture,
     detect_commitment,
-    detect_action_item,
     detect_flag,
 )
-
 
 # ---------------------------------------------------------------------------
 # Minimal stubs — no real I/O, no real calendar

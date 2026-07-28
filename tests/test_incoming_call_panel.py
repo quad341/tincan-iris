@@ -14,8 +14,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
-
 # ---------------------------------------------------------------------------
 # Pure-logic: verb description map (no textual required)
 # ---------------------------------------------------------------------------
@@ -49,7 +47,8 @@ def test_daemon_not_running_exception_raised():
     """DaemonProxy raises DaemonNotRunning when socket absent."""
     import tempfile
     from pathlib import Path
-    from iris.daemon.proxy import DaemonProxy, DaemonNotRunning
+
+    from iris.daemon.proxy import DaemonNotRunning, DaemonProxy
     with tempfile.TemporaryDirectory() as tmp:
         absent = Path(tmp) / "no.sock"
         proxy = DaemonProxy(socket_path=absent)

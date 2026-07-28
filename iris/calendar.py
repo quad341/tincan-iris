@@ -23,7 +23,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .skills import SkillParam
@@ -52,7 +52,7 @@ def _utc_z(value: str) -> str:
     For Calendar ``freeBusy`` ``timeMin``/``timeMax``, which must be unambiguous
     instants. Naive inputs are taken as local time (see :func:`_aware`).
     """
-    return _aware(value).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return _aware(value).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def save_token(token: dict, path: Path | None = None) -> Path:
@@ -139,7 +139,7 @@ class CalendarClient:
         """
         if not self._token:
             return False, "no calendar token saved — run: iris auth gcal"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         body = {
             "timeMin": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "timeMax": (now + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),

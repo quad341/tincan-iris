@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from iris.far_end import SENTINEL_ID, FarEndIdentity, FarEndState
 
-
 # ---------------------------------------------------------------------------
 # Constant
 # ---------------------------------------------------------------------------

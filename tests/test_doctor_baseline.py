@@ -19,7 +19,6 @@ from iris import doctor as doc
 from iris.audio.endpoint import AEC_SINK, AEC_SRC
 from iris.doctor import AssetCheckResult, DoctorStatus
 
-
 # ---------------------------------------------------------------------------
 # _tincand_unit_active (item 8)
 # ---------------------------------------------------------------------------

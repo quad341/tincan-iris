@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import subprocess
 import threading
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import iris.settings as _settings
 
@@ -136,7 +136,7 @@ class ConfirmDelegateSkill:
         self,
         state: _DelegateState,
         gc_bin: str = "gc",
-        on_sent: Optional[Callable[[str], None]] = None,
+        on_sent: Callable[[str], None] | None = None,
     ) -> None:
         self._state = state
         self._gc_bin = gc_bin
@@ -178,7 +178,7 @@ class CancelDelegateSkill:
 
 def delegation_skills(
     gc_bin: str = "gc",
-    on_sent: Optional[Callable[[str], None]] = None,
+    on_sent: Callable[[str], None] | None = None,
 ) -> list:
     """Operator-only iris→mayor delegation lane — the two-phase skill set.
 

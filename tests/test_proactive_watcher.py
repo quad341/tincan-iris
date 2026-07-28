@@ -8,8 +8,6 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock, patch
 
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -114,6 +112,7 @@ def test_old_nudge_cache_rows_pruned(tmp_path):
 def test_prune_removes_stale_rows_before_fresh_event(tmp_path):
     """After a stale dedup entry is pruned, the event can be re-enqueued."""
     import sqlite3
+
     from iris.config import Config
 
     store = MagicMock()

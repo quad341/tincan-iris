@@ -77,7 +77,7 @@ class AssetCheckResult:
     fix: str = ""       # full remediation; shown in the Setup block, not the table
 
 
-def _tincand_deep_check(svc_name: str, unit: str) -> list[str]:  # noqa: ARG001
+def _tincand_deep_check(svc_name: str, unit: str) -> list[str]:
     lines: list[str] = []
 
     try:
@@ -370,7 +370,7 @@ def _check_ambient_aec() -> AssetCheckResult:
     tincand/a phone call is involved at all, and a wrong default silently
     routes desktop audio around the canceller.
     """
-    from .audio.endpoint import AEC_SINK, AEC_SRC  # noqa: PLC0415
+    from .audio.endpoint import AEC_SINK, AEC_SRC
     try:
         sink = subprocess.run(
             ["pactl", "get-default-sink"], capture_output=True, text=True, timeout=2,
