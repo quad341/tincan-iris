@@ -1,0 +1,21 @@
+# OnFailure= target for ci-driftwatch.service (ti-4tq52).
+#
+# ci_driftwatch.py already alerts (gc mail + notify-fanout) when it detects
+# CONFIRMED CI drift on tincan-iris main -- that is its normal, expected
+# operation. This unit exists only for the separate meta-failure case: the
+# watchdog process itself dying before that internal alerting can run (an
+# uncaught crash, OOM, a bad deploy, TimeoutStartSec exceeded, etc). Without
+# this, that failure mode is silent -- systemd would just stop running the
+# timer's next tick with no one told.
+#
+# Installed alongside ci-driftwatch.service/.timer; see ci-driftwatch.service
+# for install instructions.
+
+[Unit]
+Description=Alert that ci-driftwatch.service itself failed
+
+[Service]
+Type=oneshot
+Environment=PATH=/home/jaword/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=GC_CITY_ROOT=%h/projects/gc-management
+ExecStart=/usr/bin/env bash -c 'notify-fanout critical "ci-driftwatch failed" "The ci-driftwatch.service unit itself failed (not what it watches) -- check: journalctl --user -u ci-driftwatch.service"; gc mail send mayor -s "ci-driftwatch failed" -m "The ci-driftwatch.service unit itself failed (not what it watches) -- check: journalctl --user -u ci-driftwatch.service"'
