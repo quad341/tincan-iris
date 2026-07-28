@@ -70,7 +70,7 @@ def _decode_header(raw: str) -> str:
         if isinstance(chunk, bytes):
             try:
                 decoded.append(chunk.decode(charset or "utf-8", errors="replace"))
-            except Exception:  # noqa: BLE001
+            except Exception:
                 decoded.append(chunk.decode("utf-8", errors="replace"))
         else:
             decoded.append(chunk)
@@ -243,7 +243,7 @@ class IMAPEmailProvider:
         finally:
             try:
                 conn.logout()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
     def get_message(self, message_id: str) -> EmailMessage | None:
@@ -283,7 +283,7 @@ class IMAPEmailProvider:
         finally:
             try:
                 conn.logout()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
     def send(self, to: str, subject: str, body: str) -> bool:
@@ -319,7 +319,7 @@ class IMAPEmailProvider:
         finally:
             try:
                 conn.logout()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
     def archive(self, message_id: str) -> bool:
@@ -341,5 +341,5 @@ class IMAPEmailProvider:
         finally:
             try:
                 conn.logout()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass

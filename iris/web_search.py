@@ -18,6 +18,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from typing import ClassVar
 
 from .config import DEFAULT as _DEFAULT_CFG
 from .config import Config
@@ -75,7 +76,7 @@ class WebSearchSkill:
         "Fetch a public URL and answer the operator's question from the page content. "
         "Far party is blocked. Private addresses are rejected."
     )
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(
             name="url",
             type="string",
@@ -135,7 +136,7 @@ class WebSearchSkill:
         def _do_fetch() -> None:
             try:
                 result[0] = self._fetch(url)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 exc[0] = e
             finally:
                 done.set()
@@ -215,7 +216,7 @@ class WebSearchSkill:
         )
         try:
             raw = self._complete(prompt, n_predict=128)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None, False
 
         injected = raw.startswith("[SUSPICIOUS]")

@@ -85,7 +85,7 @@ class FasterWhisperSTT:
         ]
         if self.isolate:
             cmd = ["unshare", "-rn", *cmd]  # fresh net namespace -> no egress
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if proc.returncode != 0:
             raise RuntimeError(
                 f"whisper transcribe failed (rc={proc.returncode}): "

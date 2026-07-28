@@ -20,6 +20,7 @@ Trust-tier commands are NOT implemented here — voice must never set trust/priv
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import ClassVar
 
 from .roster import Contact, RosterProvider
 from .skills import Skill, SkillParam
@@ -96,7 +97,7 @@ class AddContactSkill:
         "Add a new contact to the roster with a display name, phone number, "
         "and optional handling rule."
     )
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(
             name="display_name",
             type="string",
@@ -154,7 +155,7 @@ class EditHandlingRuleSkill:
 
     name = "roster_edit_rule"
     description = "Change how Iris handles calls from a contact (normal, vip, screen, take_message, block)."
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(
             name="contact_name",
             type="string",
@@ -204,7 +205,7 @@ class AddNoteSkill:
 
     name = "roster_add_note"
     description = "Append a note to a contact's relationship notes."
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(
             name="contact_name",
             type="string",
@@ -259,7 +260,7 @@ class UpdateNoteSkill:
 
     name = "roster_update_note"
     description = "Replace a contact's relationship notes entirely."
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(
             name="contact_name",
             type="string",
@@ -320,7 +321,7 @@ class RemoveContactSkill:
 
     name = "roster_remove_contact"
     description = "Permanently remove a contact from the roster."
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(
             name="contact_name",
             type="string",
@@ -358,7 +359,7 @@ class ConfirmRosterSkill:
 
     name = "roster_confirm"
     description = "Confirm and execute the last staged roster change."
-    params: list[SkillParam] = []
+    params: ClassVar[list[SkillParam]] = []
 
     def __init__(self, pending: _PendingState) -> None:
         self._pending = pending
@@ -372,7 +373,7 @@ class CancelRosterSkill:
 
     name = "roster_cancel"
     description = "Cancel the last staged roster change."
-    params: list[SkillParam] = []
+    params: ClassVar[list[SkillParam]] = []
 
     def __init__(self, pending: _PendingState) -> None:
         self._pending = pending

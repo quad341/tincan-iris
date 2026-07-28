@@ -14,6 +14,7 @@ import re
 import threading
 from collections.abc import Callable
 from pathlib import Path
+from typing import ClassVar
 
 from .list_store import CallList, CallListStore, ListItem
 from .skills import SkillParam
@@ -25,7 +26,7 @@ class ListSkill:
         "Manage a shopping or task list during a call: "
         "start/add/remove/check/show/export."
     )
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(
             name="action",
             type="string",
@@ -98,7 +99,7 @@ class ListSkill:
     # ------------------------------------------------------------------
     # Intent routing
 
-    _INTENT_PATTERNS: list[tuple[re.Pattern, str]] = [
+    _INTENT_PATTERNS: ClassVar[list[tuple[re.Pattern, str]]] = [
         (re.compile(r"^(start|create)\s+a\b", re.IGNORECASE), "start"),
         (re.compile(r"^(add|put)\b", re.IGNORECASE), "add"),
         (re.compile(r"^show\b", re.IGNORECASE), "show"),
@@ -157,7 +158,7 @@ class ListSkill:
             else:
                 self._store.set_lookup_status(item_id, "failed")
                 self._emit(("list", "lookup_failed", item_id, "no result"))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             self._store.set_lookup_status(item_id, "failed")
             self._emit(("list", "lookup_failed", item_id, str(e)))
 

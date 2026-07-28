@@ -90,7 +90,7 @@ def persist_crash(source: str, exc: BaseException) -> None:
             f"crash:{source}",
             crash_record={"timestamp_iso": timestamp_iso, "source": source, "traceback": tb_text},
         )
-    except Exception:  # noqa: BLE001 — must never mask the original crash
+    except Exception:  # must never mask the original crash
         print(f"iris diagnostics: persist_crash failed for source={source!r}", file=sys.stderr)
 
 
@@ -117,7 +117,7 @@ def write_bug_report(trigger: str, *, crash_record: dict[str, Any] | None = None
         path.write_text(json.dumps(report, indent=2), encoding="utf-8")
         os.chmod(path, 0o600)
         return path
-    except Exception:  # noqa: BLE001 — a failed bug report must not raise, esp. mid-crash-handling
+    except Exception:  # a failed bug report must not raise, esp. mid-crash-handling
         print("iris diagnostics: write_bug_report failed", file=sys.stderr)
         return None
 

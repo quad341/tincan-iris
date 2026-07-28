@@ -19,6 +19,8 @@ Usage (inject via brain's skill registry):
 """
 from __future__ import annotations
 
+from typing import ClassVar
+
 from .skills import SkillParam
 from .tincan_messages import TincanMessages
 
@@ -29,7 +31,7 @@ class ReadMessagesSkill:
         "List SMS conversations and their unread counts, or read the messages "
         "in a specific conversation."
     )
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(
             name="action",
             type="string",
@@ -87,7 +89,7 @@ class SendMessageSkill:
         "Send an SMS to a contact by name or E.164 number. "
         "Only call this with a body the operator has explicitly confirmed."
     )
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(
             name="to",
             type="string",

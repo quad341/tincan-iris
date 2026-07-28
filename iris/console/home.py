@@ -5,6 +5,8 @@ Bindings: n=cycle notifications, c=scope modal, K=dismiss notification,
 """
 from __future__ import annotations
 
+from typing import ClassVar
+
 from textual.app import App, ComposeResult, Screen
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -110,7 +112,7 @@ class ResponsePanel(RichLog):
 class ScopeManifestModal(Screen):
     """Full-screen modal showing ScopeManifest.what_i_do()."""
 
-    BINDINGS = [Binding("escape,c", "dismiss", "Close")]
+    BINDINGS: ClassVar = [Binding("escape,c", "dismiss", "Close")]
 
     def compose(self) -> ComposeResult:
         domains = ScopeManifest.what_i_do()
@@ -143,7 +145,7 @@ class HomeApp(App):
     }
     """
 
-    BINDINGS = [
+    BINDINGS: ClassVar = [
         Binding("n", "cycle_notifications", "Next notification"),
         Binding("c", "scope_modal", "Capabilities"),
         Binding("K", "dismiss_notification", "Dismiss notification"),

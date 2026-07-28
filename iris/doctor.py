@@ -102,7 +102,7 @@ def _tincand_deep_check(svc_name: str, unit: str) -> list[str]:
             lines.append("✓ adapter correct")
         connected = bool(st.get("connected"))
         lines.append(f"⟳ iPhone {'connected' if connected else 'not connected'} (informational)")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         lines.append(f"? D-Bus GetStatus() unavailable: {exc}")
 
     return lines
@@ -144,7 +144,7 @@ def check_services(
             proc = subprocess.run(
                 ["systemctl", "--user", "is-active", svc.unit],
                 capture_output=True,
-                text=True,
+                text=True, check=False,
             )
             unit = {0: "active", 4: "absent"}.get(proc.returncode, "down")
         except OSError:
@@ -187,7 +187,7 @@ def check_services(
         if deep and callable(svc.deep_check):
             try:
                 result.deep_lines = svc.deep_check(svc.name, svc.unit)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 result.deep_lines = [f"? deep check error: {exc}"]
         results.append(result)
 
@@ -220,12 +220,12 @@ def _daemon_python() -> str:
     try:
         r = subprocess.run(
             ["systemctl", "--user", "show", "-p", "ExecStart", "--value", "iris-daemon"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, check=False,
         )
         m = re.search(r"path=(\S+)", r.stdout)
         if m and Path(m.group(1)).exists():
             return m.group(1)
-    except Exception:  # noqa: BLE001 — fall through to this interpreter
+    except Exception:  # fall through to this interpreter
         pass
     return sys.executable
 
@@ -255,7 +255,7 @@ def check_assets() -> list[AssetCheckResult]:
                 fix="scripts/setup_whisper.sh  (add --shared to serve every clone)  "
                     "OR set IRIS_WHISPER_DIR=<…/models/whisper/SIZE> "
                     "IRIS_WHISPER_PYTHON=<…/.venv-whisper/bin/python>"))
-    except Exception as e:  # noqa: BLE001 — doctor must survive a broken provider
+    except Exception as e:  # doctor must survive a broken provider
         results.append(AssetCheckResult("whisper-stt", DoctorStatus.UNKNOWN, True, detail=str(e)))
 
     # --- Kokoro TTS — the natural voice. Not required: espeak-ng is the
@@ -273,7 +273,7 @@ def check_assets() -> list[AssetCheckResult]:
                 fix="scripts/setup_kokoro.sh  (add --shared to serve every clone)  "
                     "OR set IRIS_KOKORO_DIR=<…/models/kokoro> "
                     "IRIS_KOKORO_PYTHON=<…/.venv-kokoro/bin/python>"))
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         results.append(AssetCheckResult("kokoro-tts", DoctorStatus.UNKNOWN, False, detail=str(e)))
 
     # --- call-card L3 enrichment deps — see check_call_card_enrichment().
@@ -303,7 +303,7 @@ def check_call_card_enrichment(*, timeout_s: float = 20.0) -> AssetCheckResult:
     try:
         probe = subprocess.run(
             [daemon_python, "-c", "import instructor, pydantic, anthropic"],
-            capture_output=True, text=True, timeout=timeout_s,
+            capture_output=True, text=True, timeout=timeout_s, check=False,
         )
         if probe.returncode == 0:
             return AssetCheckResult(
@@ -314,7 +314,7 @@ def check_call_card_enrichment(*, timeout_s: float = 20.0) -> AssetCheckResult:
             detail=f"L3 enrichment deps missing for {daemon_python} — "
                    "every call ends with 'enrichment skipped'",
             fix=f"{daemon_python} -m pip install --user 'instructor[anthropic]>=1.0'")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return AssetCheckResult("call-card-enrichment", DoctorStatus.UNKNOWN, False, detail=str(e))
 
 
@@ -345,7 +345,7 @@ def _retrying(fn):
     for attempt in range(_BASELINE_DBUS_RETRIES + 1):
         try:
             return fn()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             last_exc = exc
             if attempt < _BASELINE_DBUS_RETRIES:
                 time.sleep(_BASELINE_DBUS_RETRY_DELAY_S)
@@ -356,7 +356,7 @@ def _tincand_unit_active() -> bool:
     try:
         proc = subprocess.run(
             ["systemctl", "--user", "is-active", "tincand.service"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, check=False,
         )
         return proc.returncode == 0
     except OSError:
@@ -373,10 +373,10 @@ def _check_ambient_aec() -> AssetCheckResult:
     from .audio.endpoint import AEC_SINK, AEC_SRC
     try:
         sink = subprocess.run(
-            ["pactl", "get-default-sink"], capture_output=True, text=True, timeout=2,
+            ["pactl", "get-default-sink"], capture_output=True, text=True, timeout=2, check=False,
         ).stdout.strip()
         source = subprocess.run(
-            ["pactl", "get-default-source"], capture_output=True, text=True, timeout=2,
+            ["pactl", "get-default-source"], capture_output=True, text=True, timeout=2, check=False,
         ).stdout.strip()
     except (OSError, subprocess.TimeoutExpired) as e:
         return AssetCheckResult("ambient-aec-default", DoctorStatus.UNKNOWN, True, detail=str(e))
@@ -443,7 +443,7 @@ def _sco_advisory() -> str | None:
     try:
         from .audio.endpoint import discover_sco_nodes
         sink, _source = discover_sco_nodes()
-    except Exception:  # noqa: BLE001 — advisory only
+    except Exception:  # advisory only
         sink = None
     if sink:
         return None
@@ -482,7 +482,7 @@ def doctor_main(args: list[str] | None = None) -> int:
                     "connected": bool(st.get("connected")),
                     "device_discovered": bool(st.get("device_discovered")),
                 }
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
         def _svc_entry(r: ServiceCheckResult) -> dict:
@@ -572,7 +572,7 @@ def doctor_main(args: list[str] | None = None) -> int:
                 subprocess.run(
                     ["systemctl", "--user", "start", r.unit],
                     capture_output=True,
-                    text=True,
+                    text=True, check=False,
                 )
 
     # Asset remediation is intentionally manual — provisioning downloads models

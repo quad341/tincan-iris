@@ -14,6 +14,7 @@ from __future__ import annotations
 import threading
 import time
 from enum import Enum
+from typing import ClassVar
 
 from ..trust import TrustMode
 
@@ -94,7 +95,7 @@ class Conductor:
         t0 = time.monotonic()
         try:
             text = self.stt.transcribe(wav)
-        except Exception as exc:  # noqa: BLE001 — surface, return to idle
+        except Exception as exc:  # surface, return to idle
             self.emit(("error", f"stt: {exc}"))
             self._set_state(State.IDLE)
             return
@@ -123,7 +124,7 @@ class Conductor:
         self.emit(("armed", False))
         self.emit(("far_trust", self.far_trust))
 
-    _GRANT_CYCLE = {
+    _GRANT_CYCLE: ClassVar = {
         TrustMode.NONE: TrustMode.LOCAL,
         TrustMode.LOCAL: TrustMode.BOTH,
         TrustMode.BOTH: TrustMode.NONE,
@@ -162,7 +163,7 @@ class Conductor:
                 op_trust=self.op_trust,
                 on_filler=lambda i: self.emit(("filler", self.pick())),
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self.emit(("error", f"brain: {exc}"))
             self._set_state(State.IDLE)
             return
@@ -177,7 +178,7 @@ class Conductor:
             try:
                 self._play = self.mic.start_playback(self.tts.synth(reply.text, speed=speed))
                 self._play.wait()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 self.emit(("error", f"tts: {exc}"))
             finally:
                 self._play = None
@@ -191,7 +192,7 @@ class Conductor:
         try:
             self._play = self.mic.start_playback(self.tts.synth(text))
             self._play.wait()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self.emit(("error", f"tts: {exc}"))
         finally:
             self._play = None

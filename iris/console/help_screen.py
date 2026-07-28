@@ -6,6 +6,8 @@ then the existing TALK/CALL/OTHER groups.
 """
 from __future__ import annotations
 
+from typing import ClassVar
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
@@ -65,7 +67,7 @@ class HelpScreen(Screen):
     # priority bindings App-first — without IrisConsole.check_action's
     # "quit" gate (see app.py), pressing "q" here would quit the whole app
     # instead of closing this screen.
-    BINDINGS = [
+    BINDINGS: ClassVar = [
         Binding("q", "app.pop_screen", "close", priority=True),
         Binding("escape", "app.pop_screen", "close", priority=True),
     ]

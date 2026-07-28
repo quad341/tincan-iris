@@ -16,6 +16,7 @@ without a live calendar; real wiring would query the calendar backend.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from typing import ClassVar
 
 from .skills import SkillParam
 
@@ -39,7 +40,7 @@ def _demo_events(day: str) -> list[dict[str, str]]:
 class AgendaSkill:
     name = "agenda"
     description = "Read the day's calendar agenda, event by event."
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(
             name="day", type="string",
             description="Which day to read, e.g. 'today' or 'tomorrow'.",

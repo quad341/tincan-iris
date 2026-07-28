@@ -75,7 +75,7 @@ def _run_aec_async(action: str) -> None:
             try:
                 result = subprocess.run(
                     ["bash", str(_AEC_SCRIPT), action],
-                    capture_output=True, text=True, timeout=15,
+                    capture_output=True, text=True, timeout=15, check=False,
                 )
             except (OSError, subprocess.TimeoutExpired) as exc:
                 _log.warning("iris daemon: aec %s failed: %s", action, exc)
@@ -101,14 +101,14 @@ def _start_dbus_components(ctrl: object, mes: object) -> None:
     """
     try:
         ctrl.start()  # type: ignore[union-attr]
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _log.warning("D-Bus unavailable — dbus_absent: %s", exc, extra={"dbus_absent": True})
     bus = getattr(ctrl, "_bus", None)
     if bus is not None:
         mes._bus = bus  # type: ignore[union-attr]
     try:
         mes.start()  # type: ignore[union-attr]
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _log.warning("D-Bus unavailable — dbus_absent: %s", exc, extra={"dbus_absent": True})
 
 

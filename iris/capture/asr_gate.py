@@ -22,6 +22,4 @@ def is_hallucinated_segment(
         return True
     if no_speech_prob > NO_SPEECH_THRESHOLD:
         return True
-    if avg_logprob is not None and avg_logprob < LOGPROB_THRESHOLD:
-        return True
-    return False
+    return bool(avg_logprob is not None and avg_logprob < LOGPROB_THRESHOLD)

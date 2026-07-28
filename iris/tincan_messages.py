@@ -81,7 +81,7 @@ class TincanMessages:
             return None
         try:
             return self._bus.get_object(_BUS_NAME, _OBJECT_PATH)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
 
     def _call(self, method_name: str, *args: Any) -> Any:
@@ -91,7 +91,7 @@ class TincanMessages:
             return None
         try:
             return proxy.get_dbus_method(method_name, _INTERFACE)(*args)
-        except Exception:  # noqa: BLE001
+        except Exception:
             self.emit(("messages_error", method_name))
             return None
 
@@ -149,7 +149,7 @@ class TincanMessages:
             daemon = self._bus.get_object(_BUS_NAME, _DAEMON_PATH)
             status = daemon.get_dbus_method("GetStatus", _DAEMON_IFACE)()
             return bool(status.get("capabilities", {}).get("messages", False))
-        except Exception:  # noqa: BLE001
+        except Exception:
             return False
 
     # --- lifecycle ---
@@ -172,7 +172,7 @@ class TincanMessages:
             dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
             if self._bus is None:
                 self._bus = dbus.SessionBus()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self.emit(("bus_unavailable", str(exc)))
             return
 

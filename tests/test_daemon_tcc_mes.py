@@ -287,7 +287,7 @@ def test_dbus_absent_does_not_raise(caplog):
     try:
         with caplog.at_level(logging.WARNING):
             _start_dbus_components(ctrl, mes)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         pytest.fail(f"_start_dbus_components raised unexpectedly: {exc}")
 
 

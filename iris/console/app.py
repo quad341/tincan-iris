@@ -32,6 +32,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 
 from rich.markup import escape
 from textual.app import App, ComposeResult
@@ -399,7 +400,7 @@ class IrisConsole(App):
     #status { height: 1; background: $boost; color: $text; padding: 0 1; }
     """
 
-    BINDINGS = [
+    BINDINGS: ClassVar = [
         Binding("question_mark", "help", "help"),
         Binding("space", "talk", "talk/stop", priority=True),
         Binding("l", "listen", "hear"),
@@ -809,7 +810,7 @@ class IrisConsole(App):
         try:
             proc = subprocess.run(
                 ["bash", str(_AEC_SCRIPT), action],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, text=True, timeout=15, check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             self._w(f"[dim]aec {action} failed: {escape(str(exc))}[/]")
@@ -915,7 +916,7 @@ class IrisConsole(App):
             active = store.active_list(session_id)
             if active is not None and store.get_items(active.id):
                 self.push_screen(PostCallListView(store, active))
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     def _dispatch(self, cmd: str, speaker: str = "") -> bool:
@@ -1111,7 +1112,7 @@ class IrisConsole(App):
             try:
                 self.mic.start_playback(self.tts.synth(phrase)).wait()
                 ok = True
-            except Exception:  # noqa: BLE001 — any failure => fail closed (do not listen)
+            except Exception:  # any failure => fail closed (do not listen)
                 ok = False
             self.events.put(("far_announced", ok, phrase))
 
@@ -1323,13 +1324,13 @@ class IrisConsole(App):
         """
         try:
             self.copy_to_clipboard(text)
-        except Exception:  # noqa: BLE001 — OSC52 is best-effort; the subprocess path still runs
+        except Exception:  # OSC52 is best-effort; the subprocess path still runs
             pass
         for cmd in (["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--input", "--clipboard"]):
-            if subprocess.run(["which", cmd[0]], capture_output=True).returncode == 0:
+            if subprocess.run(["which", cmd[0]], capture_output=True, check=False).returncode == 0:
                 try:
                     subprocess.run(cmd, input=text.encode(), check=True)
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     self.notify(f"Clipboard error: {escape(str(e))}", severity="error")
                     return
                 break

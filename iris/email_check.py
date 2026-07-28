@@ -36,7 +36,7 @@ def _check_imap(host: str, port: int, user: str, password: str) -> tuple[bool, s
     print(f"→ Connecting to {host}:{port}…  ", end="", flush=True)
     try:
         conn = imaplib.IMAP4_SSL(host, port, timeout=_CONNECT_TIMEOUT)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print("FAILED")
         return False, f"   IMAP connection error: {exc}"
     print("OK")
@@ -63,12 +63,12 @@ def _check_imap(host: str, port: int, user: str, password: str) -> tuple[bool, s
                 print(f"→ INBOX: {count} unread {'message' if count == 1 else 'messages'}")
             else:
                 print("→ INBOX: accessible")
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     finally:
         try:
             conn.logout()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     return True, ""
@@ -87,7 +87,7 @@ def _check_smtp(host: str, port: int) -> tuple[bool, str]:
             else:
                 print("OK (warning: STARTTLS not advertised)")
         return True, ""
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print("FAILED")
         return False, f"   SMTP error: {exc}"
 
@@ -130,7 +130,7 @@ def main() -> int:
             conn.login(user, password)
             conn.logout()
             return 0
-        except Exception:  # noqa: BLE001
+        except Exception:
             return 1
 
     errors: list[str] = []

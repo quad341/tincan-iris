@@ -120,7 +120,7 @@ class TincanCallControl:
         try:
             proxy = self._bus.get_object(_BUS_NAME, _OBJECT_PATH)
             proxy.get_dbus_method("Answer", _INTERFACE)(call_id)
-        except Exception:  # noqa: BLE001 — D-Bus hiccup: log and move on
+        except Exception:  # D-Bus hiccup: log and move on
             self.emit(("answer_error", call_id))
 
     def _hangup(self, call_id: str = "") -> None:
@@ -132,7 +132,7 @@ class TincanCallControl:
         try:
             proxy = self._bus.get_object(_BUS_NAME, _OBJECT_PATH)
             proxy.get_dbus_method("Hangup", _INTERFACE)(call_id)
-        except Exception:  # noqa: BLE001 — D-Bus hiccup: log and move on
+        except Exception:  # D-Bus hiccup: log and move on
             self.emit(("hangup_error", call_id))
 
     def _dial(self, number: str) -> str | None:
@@ -144,7 +144,7 @@ class TincanCallControl:
             proxy = self._bus.get_object(_BUS_NAME, _OBJECT_PATH)
             proxy.get_dbus_method("Dial", _INTERFACE)(number)
             return None
-        except Exception as exc:  # noqa: BLE001 — D-Bus hiccup: log and surface to caller
+        except Exception as exc:  # D-Bus hiccup: log and surface to caller
             self.emit(("dial_error", number, str(exc)))
             return str(exc)
 
@@ -174,7 +174,7 @@ class TincanCallControl:
             dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
             if self._bus is None:
                 self._bus = dbus.SessionBus()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self.emit(("bus_unavailable", str(exc)))
             return
 

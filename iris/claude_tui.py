@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import subprocess
 import time
+from typing import Self
 
 _CHROME = "❯✻✶─╭╰│"  # pane glyphs that mark UI chrome, not answer text
 
@@ -53,7 +54,7 @@ class ClaudeTuiSession:
         self._started = False
 
     def _tmux(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(["tmux", *args], capture_output=True, text=True)
+        return subprocess.run(["tmux", *args], capture_output=True, text=True, check=False)
 
     def _pane(self) -> str:
         return self._tmux("capture-pane", "-p", "-t", self.session).stdout
@@ -102,7 +103,7 @@ class ClaudeTuiSession:
         self._tmux("kill-session", "-t", self.session)
         self._started = False
 
-    def __enter__(self) -> ClaudeTuiSession:
+    def __enter__(self) -> Self:
         self.start()
         return self
 

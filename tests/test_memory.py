@@ -256,7 +256,7 @@ def test_gist_store_thread_safe_concurrent_appends():
     def writer(i):
         try:
             gs.append(f"segment {i}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(exc)
 
     threads = [threading.Thread(target=writer, args=(i,)) for i in range(20)]

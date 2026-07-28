@@ -43,7 +43,7 @@ def _try_load_vec(conn: sqlite3.Connection) -> bool:
             return True
         finally:
             conn.enable_load_extension(False)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
 
 
@@ -352,7 +352,7 @@ class GistWorker(threading.Thread):
                     summary = json.loads(resp.read()).get("content", "").strip()
                 if summary:
                     self._store.append(summary)
-            except Exception:  # noqa: BLE001 — silent degradation per spec
+            except Exception:  # silent degradation per spec
                 pass
 
 
@@ -588,7 +588,7 @@ class MemoryManager:
             if not top:
                 return ""
             return _format_hint(top)
-        except Exception:  # noqa: BLE001 — never block a call
+        except Exception:  # never block a call
             return ""
 
     def call_end(self, session_id: str) -> None:
@@ -639,7 +639,7 @@ class MemoryManager:
             if self._engine and final_gist:
                 try:
                     gist_vec = self._engine.embed(final_gist[:200])
-                except Exception:  # noqa: BLE001
+                except Exception:
                     gist_vec = None
                 self._store.insert_embedding(
                     session_id,
@@ -657,7 +657,7 @@ class MemoryManager:
                         continue
                     try:
                         note_vec = self._engine.embed(note.text)
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         note_vec = None
                     self._store.insert_embedding(
                         session_id,
@@ -688,5 +688,5 @@ class MemoryManager:
             )
             with urllib.request.urlopen(req, timeout=30.0) as resp:
                 return json.loads(resp.read()).get("content", "").strip()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return ""

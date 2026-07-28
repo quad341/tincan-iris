@@ -66,7 +66,7 @@ def main() -> int:
                 continue
             try:
                 reply = v.say_reply(text)
-            except Exception as exc:  # noqa: BLE001 — surface, keep the loop alive
+            except Exception as exc:  # surface, keep the loop alive
                 print(f"iris ✗ {type(exc).__name__}: {exc}\n")
                 continue
             tag = reply.lane + (f"/{reply.skill}" if reply.skill else "")

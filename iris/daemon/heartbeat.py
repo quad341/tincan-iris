@@ -59,7 +59,7 @@ def _service_to_asset(r: ServiceCheckResult) -> AssetCheckResult:
 def _daemon_socket_check(is_healthy: Callable[[], bool]) -> AssetCheckResult:
     try:
         healthy = is_healthy()
-    except Exception as exc:  # noqa: BLE001 — NFR-3: one check's exception never crashes the heartbeat
+    except Exception as exc:  # NFR-3: one check's exception never crashes the heartbeat
         return AssetCheckResult("daemon-socket", DoctorStatus.UNKNOWN, True, detail=str(exc))
     return AssetCheckResult(
         "daemon-socket",
@@ -80,17 +80,17 @@ def _collect_checks(is_daemon_socket_healthy: Callable[[], bool]) -> list[AssetC
 
         try:
             checks.extend(f_caps.result())
-        except Exception as exc:  # noqa: BLE001 — NFR-3
+        except Exception as exc:  # NFR-3
             checks.append(AssetCheckResult("baseline-capabilities", DoctorStatus.UNKNOWN, True, detail=str(exc)))
 
         try:
             checks.extend(_service_to_asset(r) for r in f_svcs.result())
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             checks.append(AssetCheckResult("services", DoctorStatus.UNKNOWN, True, detail=str(exc)))
 
         try:
             checks.append(f_enrich.result())
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             checks.append(AssetCheckResult("call-card-enrichment", DoctorStatus.UNKNOWN, False, detail=str(exc)))
 
     checks.append(_daemon_socket_check(is_daemon_socket_healthy))

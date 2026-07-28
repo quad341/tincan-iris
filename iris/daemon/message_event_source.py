@@ -63,7 +63,7 @@ class MessageEventSource:
                 signal_name="AppNotificationReceived",
                 dbus_interface=_IFACE,
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     def _on_notification(
@@ -86,7 +86,7 @@ class MessageEventSource:
                 message=f"{sender}: {body}",
                 source_skill="tincand",
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             _log.exception("MessageEventSource: ProactiveStore.enqueue failed")
 
         self._broadcast({

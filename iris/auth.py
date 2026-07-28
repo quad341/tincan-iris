@@ -257,7 +257,7 @@ def _gcal(args: argparse.Namespace) -> int:
     print("       it forces a clean Google account picker (a wrong signed-in account is the usual culprit).")
     try:
         webbrowser.open(url)
-    except Exception:  # noqa: BLE001 — headless box; the printed URL is the fallback
+    except Exception:  # headless box; the printed URL is the fallback
         pass
     httpd.handle_request()   # blocks until the redirect arrives
     httpd.server_close()
@@ -272,7 +272,7 @@ def _gcal(args: argparse.Namespace) -> int:
     print("Exchanging the authorization code…", flush=True)
     try:
         tok = _exchange_gcal_code(holder["code"], client_id, client_secret, redirect_uri)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"✗ Token exchange failed: {exc}", file=sys.stderr)
         return 1
     if "access_token" not in tok:

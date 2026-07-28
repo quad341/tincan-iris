@@ -14,6 +14,8 @@ None of these need a live Qwen — dispatch/chat are injected.
 """
 from __future__ import annotations
 
+from typing import ClassVar
+
 from iris.agenda_skill import AgendaSkill
 from iris.brain import Brain
 from iris.lanes import LaneResult, SkillProposal, Tier1Qwen
@@ -152,7 +154,7 @@ def test_missing_required_arg_asks_instead_of_crashing():
     class _NeedsArg:
         name = "needsarg"
         description = "x"
-        params = []
+        params: ClassVar = []
         operator_only = False
         def run(self, *, required: str, **_k: object) -> str:
             return required

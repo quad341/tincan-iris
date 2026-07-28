@@ -120,7 +120,7 @@ class KokoroTTS:
                 cmd += ["--lang", lang]
             if self.isolate:
                 cmd = ["unshare", "-rn", *cmd]  # fresh net namespace -> no egress
-            proc = subprocess.run(cmd, capture_output=True, text=True)
+            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
             if proc.returncode != 0:
                 raise RuntimeError(
                     f"kokoro synth failed (rc={proc.returncode}): "

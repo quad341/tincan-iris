@@ -46,7 +46,7 @@ def test_base_daemon_imports_without_call_card_deps() -> None:
     result = subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True,
-        text=True,
+        text=True, check=False,
     )
     assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
     assert "NFR03_OK" in result.stdout
@@ -83,7 +83,7 @@ def test_l1_capture_imports_without_the_l3_extra() -> None:
     result = subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True,
-        text=True,
+        text=True, check=False,
     )
     assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
     assert "L1_OK" in result.stdout
