@@ -14,7 +14,14 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install package + test deps
-        run: pip install -e '.[console,call-card]' pytest ruff
+        # ruff pinned to 0.15.22: ruff 0.16.0 (released 2026-07-23) turned on
+        # new default lint rules that flag ~615 pre-existing sites across the
+        # codebase, breaking CI repo-wide with no code change of ours (see
+        # ti-7z1kj). This is an emergency stopgap, NOT a permanent decision --
+        # triage (fix-and-unpin vs. adopt 0.16.0 deliberately vs. pin
+        # long-term) is tracked in ti-mi5wk. Do not casually bump/remove this
+        # pin without resolving that bead first.
+        run: pip install -e '.[console,call-card]' pytest 'ruff==0.15.22'
       - name: Lint
         run: ruff check .
       - name: Run tests
