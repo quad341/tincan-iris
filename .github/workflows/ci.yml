@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Off the hour so this repo's tick doesn't land on GitHub's scheduler at
+    # the same instant as every other repo running "every 6 hours." Forces
+    # re-evaluation of main's already-merged tip so drift (e.g. a new ruff
+    # release breaking `ruff check .` with zero commits of ours) can't stay
+    # silently green for days — see ti-pcqj4 / ti-4tq52.
+    - cron: "17 */6 * * *"
 
 jobs:
   test:

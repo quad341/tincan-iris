@@ -1,0 +1,37 @@
+# CI drift watchdog for tincan-iris main (ti-4tq52) — detects the case where
+# GitHub Actions never re-evaluates an already-merged tip (e.g. a new ruff
+# release broke `ruff check .` with zero commits of ours), so main can stay
+# "green" for days with nothing to signal it. Pairs with the `schedule:`
+# cron trigger added to .github/workflows/ci.yml. See ti-pcqj4 for the full
+# design (state machine, trade-offs) and scripts/ci_driftwatch.py for the
+# logic this unit runs.
+#
+# Install (manual — NOT enabled automatically as part of this change):
+#
+#   cp scripts/ci-driftwatch.service scripts/ci-driftwatch.timer scripts/ci-driftwatch-failure-notify.service ~/.config/systemd/user/
+#   # Edit WorkingDirectory= and GC_CITY_ROOT= below to your actual
+#   # tincan-iris checkout and gc city root (see `gc cities`), then:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now ci-driftwatch.timer
+#   systemctl --user list-timers ci-driftwatch.timer   # confirm scheduled
+#   systemctl --user start ci-driftwatch.service        # optional: run once now
+#
+# Disable:
+#   systemctl --user disable --now ci-driftwatch.timer
+#
+# NOTE: `After=default.target` is deliberately NOT set here — it previously
+# produced a boot-ordering cycle with gascity-supervisor.service on this host.
+
+[Unit]
+Description=CI drift watchdog for tincan-iris main (invoked by ci-driftwatch.timer)
+OnFailure=ci-driftwatch-failure-notify.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/tincan-iris
+Environment=PATH=/home/jaword/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=GC_CITY_ROOT=%h/projects/gc-management
+ExecStart=/usr/bin/env python3 %h/projects/tincan-iris/scripts/ci_driftwatch.py
+TimeoutStartSec=15min
+
+# Do not set Restart= here; this is a one-shot driven by the timer.

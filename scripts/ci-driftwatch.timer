@@ -1,0 +1,16 @@
+# Timer for ci-driftwatch.service (ti-4tq52) -- runs the CI drift watchdog on
+# a ~20 minute cadence. See ci-driftwatch.service for what it does and for
+# full install instructions.
+
+[Unit]
+Description=Run ci-driftwatch on a ~20 minute cadence
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=20min
+AccuracySec=30s
+Unit=ci-driftwatch.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target
