@@ -81,8 +81,8 @@ def test_gmail_uses_configured_user_when_no_arg(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def _mock_resp(data):
-    from unittest.mock import MagicMock
     import json as _json
+    from unittest.mock import MagicMock
     r = MagicMock()
     r.__enter__ = lambda s: s
     r.__exit__ = MagicMock(return_value=False)

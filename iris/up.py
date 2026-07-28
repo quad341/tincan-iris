@@ -12,12 +12,11 @@ instance across multiple tools; starting a competing one would break things.
 """
 from __future__ import annotations
 
+import subprocess
 import time
 import urllib.request
-import subprocess
 
 from .tincand_status import get_tincand_status
-
 
 _MANAGED_SERVICES = ["iris-whisper", "iris-kokoro"]
 _LLAMA_URL = "http://127.0.0.1:8080/health"
@@ -34,7 +33,7 @@ def _is_active(unit: str) -> bool:
     try:
         proc = subprocess.run(
             ["systemctl", "--user", "is-active", f"{unit}.service"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, check=False,
         )
         return proc.returncode == 0
     except OSError:
@@ -46,7 +45,7 @@ def _unit_known(unit: str) -> bool:
     try:
         proc = subprocess.run(
             ["systemctl", "--user", "is-active", unit],
-            capture_output=True, text=True,
+            capture_output=True, text=True, check=False,
         )
         return proc.returncode != 4
     except OSError:
@@ -58,7 +57,7 @@ def _start_service(unit: str) -> bool:
     try:
         proc = subprocess.run(
             ["systemctl", "--user", "start", f"{unit}.service"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, check=False,
         )
         if proc.returncode == 0:
             print(" ✓")
@@ -77,7 +76,7 @@ def _health_ok(url: str, timeout: float = _HEALTH_TIMEOUT) -> bool:
             urllib.request.Request(url), timeout=timeout
         ) as resp:
             return resp.status < 400
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
 
 
@@ -113,7 +112,7 @@ def _bring_up_tincand() -> dict:
     if not _is_active("tincand"):
         proc = subprocess.run(
             ["systemctl", "--user", "start", _TINCAND_UNIT],
-            capture_output=True, text=True,
+            capture_output=True, text=True, check=False,
         )
         if proc.returncode != 0:
             base["reason"] = "unit-absent"
@@ -137,7 +136,7 @@ def _bring_up_tincand() -> dict:
             base["device_discovered"] = bool(st.get("device_discovered"))
             base["reason"] = "ok"
             return base
-        except Exception:  # noqa: BLE001
+        except Exception:
             time.sleep(_DBUS_RETRY_DELAY)
 
     base["reason"] = "dbus-error"

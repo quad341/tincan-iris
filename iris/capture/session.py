@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from iris.audio.streaming import StreamingTranscriber
 from iris.capture.asr_gate import is_hallucinated_segment
@@ -124,7 +124,7 @@ class CaptureSession:
         # default source is the operator's mic, so a bare default capture would
         # double-record the operator instead of the far party. The SCO nodes only
         # exist while a call is connected, so discover them here at start time.
-        from iris.audio.endpoint import discover_sco_nodes  # noqa: PLC0415
+        from iris.audio.endpoint import discover_sco_nodes
 
         _sink, downlink = discover_sco_nodes()
         if downlink:

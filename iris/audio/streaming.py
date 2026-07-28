@@ -35,7 +35,7 @@ def resolve_node_serial(node_name: str) -> str | None:
     serial-based targeting links deterministically.
     """
     try:
-        r = subprocess.run(["pw-dump"], capture_output=True, text=True, timeout=5)
+        r = subprocess.run(["pw-dump"], capture_output=True, text=True, timeout=5, check=False)
         if r.returncode != 0:
             return None
         for obj in json.loads(r.stdout):
@@ -51,7 +51,7 @@ def resolve_node_serial(node_name: str) -> str | None:
 def _run_pw_link_l() -> str:
     """Return ``pw-link -l`` output ('' on failure). Seam for tests."""
     try:
-        r = subprocess.run(["pw-link", "-l"], capture_output=True, text=True, timeout=5)
+        r = subprocess.run(["pw-link", "-l"], capture_output=True, text=True, timeout=5, check=False)
         return r.stdout if r.returncode == 0 else ""
     except Exception:
         return ""

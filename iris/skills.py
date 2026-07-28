@@ -14,7 +14,7 @@ from __future__ import annotations
 import datetime as _dt
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Literal, Protocol, runtime_checkable
+from typing import ClassVar, Literal, Protocol, runtime_checkable
 
 
 @dataclass
@@ -83,7 +83,7 @@ def supports_streaming(skill: object) -> bool:
 class TimeSkill:
     name = "time"
     description = "Tell the current local time."
-    params: list[SkillParam] = []
+    params: ClassVar[list[SkillParam]] = []
 
     def run(self, **kwargs: object) -> str:
         return _dt.datetime.now().strftime("It's %-I:%M %p.")
@@ -92,7 +92,7 @@ class TimeSkill:
 class EchoSkill:
     name = "echo"
     description = "Repeat the given text (a trivial demo skill)."
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(name="text", type="string", description="Text to echo back."),
     ]
 

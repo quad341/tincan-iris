@@ -30,7 +30,7 @@ import pathlib
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 REPO = "quad341/tincan-iris"
 RIG = "tincan-iris"
@@ -181,7 +181,7 @@ def file_bead(sha: str, conclusion: str, run_url: str) -> str | None:
     # assignee so the worker hook query finds the bead via gc.routed_to.
     subprocess.run(
         ["gc", "bd", "--rig", RIG, "update", new_id, "--assignee="],
-        capture_output=True, text=True, cwd=str(CITY),
+        capture_output=True, text=True, check=False, cwd=str(CITY),
     )
     return new_id
 
@@ -266,7 +266,7 @@ def _fire_stale_alert(now: datetime) -> bool:
 
 
 def run(now: datetime | None = None) -> int:
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     had_failure = False
 
     state = load_state()

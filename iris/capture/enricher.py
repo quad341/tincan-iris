@@ -10,16 +10,12 @@ import concurrent.futures
 import logging
 import os
 import threading
-from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
 from iris.capture.schemas import FactType
 from iris.capture.store import CallCardStore
 from iris.capture.transcript import TranscriptStore
-
-if TYPE_CHECKING:
-    pass
 
 _log = logging.getLogger(__name__)
 

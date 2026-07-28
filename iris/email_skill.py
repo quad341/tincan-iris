@@ -26,7 +26,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from .email_provider import EmailMessage, EmailProvider
 from .skills import SkillParam
@@ -100,7 +100,7 @@ def _humanize_date(date_str: str) -> str:
             part = "night"
         day = dt.strftime("%A")
         return f"{day} {part}"
-    except Exception:  # noqa: BLE001
+    except Exception:
         return date_str
 
 
@@ -164,7 +164,7 @@ class ReadEmailSkill:
         "aloud (action='read_message', message_id required). "
         "NEVER use for sending — use send_email for that."
     )
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(
             name="action",
             type="string",
@@ -213,7 +213,7 @@ class ReadEmailSkill:
 
 
 def _resolve_email_via_roster(
-    to: str, roster: "RosterProvider | None"
+    to: str, roster: RosterProvider | None
 ) -> tuple[str, str]:
     """Try to resolve a name to an email address via the roster.
 
@@ -227,7 +227,7 @@ def _resolve_email_via_roster(
         return "", to
     try:
         results = roster.search(to)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return "", to
     if not results:
         return "", to
@@ -248,7 +248,7 @@ class SendEmailSkill:
         "Requires ConfirmEmailSkill to actually send. "
         "The 'to' field may be a contact name (resolved via roster) or an email address."
     )
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(
             name="to",
             type="string",
@@ -266,7 +266,7 @@ class SendEmailSkill:
         self,
         provider: EmailProvider,
         pending: _EmailPendingState,
-        roster: "RosterProvider | None" = None,
+        roster: RosterProvider | None = None,
     ) -> None:
         self._provider = provider
         self._pending = pending
@@ -307,7 +307,7 @@ class SendEmailSkill:
 class ConfirmEmailSkill:
     name = "confirm_email"
     description = "Confirm and execute the staged outbound email."
-    params: list[SkillParam] = []
+    params: ClassVar[list[SkillParam]] = []
 
     def __init__(self, pending: _EmailPendingState) -> None:
         self._pending = pending
@@ -319,7 +319,7 @@ class ConfirmEmailSkill:
 class CancelEmailSkill:
     name = "cancel_email"
     description = "Cancel the staged outbound email without sending."
-    params: list[SkillParam] = []
+    params: ClassVar[list[SkillParam]] = []
 
     def __init__(self, pending: _EmailPendingState) -> None:
         self._pending = pending
@@ -334,7 +334,7 @@ class TriageEmailSkill:
         "Mark an email as read, archive it, or flag it for follow-up. "
         "Uses current_id from the last read_message if message_id is omitted."
     )
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(
             name="action",
             type="string",
@@ -378,7 +378,7 @@ class TriageEmailSkill:
 
 def email_skills(
     provider: EmailProvider,
-    roster: "RosterProvider | None" = None,
+    roster: RosterProvider | None = None,
 ) -> list[object]:
     """Return all email skill instances sharing state.  Register in brain.skills.
 
@@ -396,7 +396,7 @@ def email_skills(
     ]
 
 
-def configured_email_skills(roster: "RosterProvider | None" = None) -> list[object]:
+def configured_email_skills(roster: RosterProvider | None = None) -> list[object]:
     """Build email skills from config, or return ``[]`` if the lane isn't set up.
 
     Reads IMAP/SMTP host + user from config (:func:`iris.settings.get`) and the

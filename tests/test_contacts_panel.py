@@ -12,12 +12,11 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.app import App  # noqa: E402
-from textual.widgets import Button, DataTable  # noqa: E402
+from textual.app import App
+from textual.widgets import Button, DataTable
 
-from iris.console.contacts import ContactEditor, ContactsScreen  # noqa: E402
-from iris.roster import Contact, ImportResult  # noqa: E402
-
+from iris.console.contacts import ContactEditor, ContactsScreen
+from iris.roster import Contact, ImportResult
 
 # ---------------------------------------------------------------------------
 # Roster stub

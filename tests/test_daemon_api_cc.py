@@ -24,7 +24,6 @@ import pytest
 from iris.daemon.api import DaemonAPI
 from iris.daemon.posture import PostureManager
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

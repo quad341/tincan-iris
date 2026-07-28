@@ -14,7 +14,7 @@ import time
 from datetime import date
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 from uuid import uuid4
 
 from textual.app import App, ComposeResult
@@ -29,7 +29,6 @@ from iris.capture.after_store import AfterStore
 from iris.capture.schemas import ActionItem, CapturedFact, FactType
 from iris.console._confidence_bar import render_confidence_bar as _render_confidence_bar
 from iris.console._markup import escape_for_content
-
 
 # ─────────────────────────────────────────────────────────────────
 # Disclosure state
@@ -83,7 +82,7 @@ class DisclosureCard(Widget):
     On re-init with matching session_id, loads saved state — skips expansion.
     """
 
-    COMPONENT_CLASSES: set[str] = set()
+    COMPONENT_CLASSES: ClassVar[set[str]] = set()
     can_focus = True
     aria_role = "alertdialog"
 
@@ -796,7 +795,7 @@ class PriorCommitmentCard(Widget):
             return 0
         today = self._now or date.today()
         diff = (today - due).days
-        return diff if diff > 0 else 0
+        return max(0, diff)
 
     @property
     def is_broken(self) -> bool:
@@ -957,7 +956,7 @@ class CallCardView(App):
     }
     """
 
-    BINDINGS = [
+    BINDINGS: ClassVar = [
         Binding("q", "quit", "Quit"),
         Binding("]", "participation_up", "Level↑"),
         Binding("[", "participation_down", "Level↓"),
@@ -1102,7 +1101,7 @@ class CallCardPanel(ScrollableContainer):
     def _hide_placeholder(self) -> None:
         try:
             self.query_one("#cc-empty").display = False
-        except Exception:  # noqa: BLE001 — placeholder already gone
+        except Exception:  # placeholder already gone
             pass
 
     def _prepend(self, card: Widget) -> None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import os
 import wave
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 try:
     from pipecat.frames.frames import AudioRawFrame, TTSStartedFrame, TTSStoppedFrame

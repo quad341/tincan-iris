@@ -13,6 +13,7 @@ import collections
 import json
 import logging
 import queue
+import sqlite3
 import struct
 import threading
 import time
@@ -20,8 +21,6 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
-
-import sqlite3
 
 if TYPE_CHECKING:
     from iris.far_end import FarEndIdentity
@@ -44,7 +43,7 @@ def _try_load_vec(conn: sqlite3.Connection) -> bool:
             return True
         finally:
             conn.enable_load_extension(False)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
 
 
@@ -353,7 +352,7 @@ class GistWorker(threading.Thread):
                     summary = json.loads(resp.read()).get("content", "").strip()
                 if summary:
                     self._store.append(summary)
-            except Exception:  # noqa: BLE001 — silent degradation per spec
+            except Exception:  # silent degradation per spec
                 pass
 
 
@@ -546,7 +545,7 @@ class MemoryManager:
         gist_store: GistStore | None = None,
         window: RollingWindow | None = None,
         *,
-        far_end: "FarEndIdentity | None" = None,
+        far_end: FarEndIdentity | None = None,
     ) -> str:
         """Embed a contact query, ANN-search, rerank by recency, return ≤100 token hint.
 
@@ -589,7 +588,7 @@ class MemoryManager:
             if not top:
                 return ""
             return _format_hint(top)
-        except Exception:  # noqa: BLE001 — never block a call
+        except Exception:  # never block a call
             return ""
 
     def call_end(self, session_id: str) -> None:
@@ -640,7 +639,7 @@ class MemoryManager:
             if self._engine and final_gist:
                 try:
                     gist_vec = self._engine.embed(final_gist[:200])
-                except Exception:  # noqa: BLE001
+                except Exception:
                     gist_vec = None
                 self._store.insert_embedding(
                     session_id,
@@ -658,7 +657,7 @@ class MemoryManager:
                         continue
                     try:
                         note_vec = self._engine.embed(note.text)
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         note_vec = None
                     self._store.insert_embedding(
                         session_id,
@@ -668,7 +667,7 @@ class MemoryManager:
                         source_type="note",
                         source_id=str(note.id),
                     )
-        except Exception:  # noqa: BLE001 — never re-raise; log and discard
+        except Exception:
             log.exception("call_end archive failed for session %s", session_id)
 
     def _qwen_summarise(self, gist: str, last_10: str) -> str:
@@ -689,5 +688,5 @@ class MemoryManager:
             )
             with urllib.request.urlopen(req, timeout=30.0) as resp:
                 return json.loads(resp.read()).get("content", "").strip()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return ""

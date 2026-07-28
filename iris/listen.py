@@ -54,7 +54,7 @@ def main() -> int:
             wav = rec.stop()
             try:
                 text = stt.transcribe(wav)
-            except Exception as exc:  # noqa: BLE001 — surface, keep the loop alive
+            except Exception as exc:  # surface, keep the loop alive
                 print(f"  stt ✗ {type(exc).__name__}: {exc}\n")
                 continue
             t_stt = (time.monotonic() - t0) * 1000
@@ -64,7 +64,7 @@ def main() -> int:
             print(f"  you said: {text!r}  ⟮stt {t_stt:.0f}ms⟯")
             try:
                 reply = brain.respond(text, on_filler=lambda i: speak(pick()))
-            except Exception as exc:  # noqa: BLE001 — surface, keep the loop alive
+            except Exception as exc:  # surface, keep the loop alive
                 print(f"  iris ✗ {type(exc).__name__}: {exc}\n")
                 continue
             speak(reply.text)

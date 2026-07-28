@@ -25,7 +25,6 @@ import pytest
 
 from iris.roster import SENTINEL_CONTACT_ID, RosterStore
 
-
 _V0_DDL = """
 CREATE TABLE contacts (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,

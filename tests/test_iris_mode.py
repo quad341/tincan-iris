@@ -7,10 +7,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-
 from iris.mode import IrisMode, ModeManager
 from iris.scope import ScopeManifest
-
 
 # ---------------------------------------------------------------------------
 # IrisMode transitions + ModeManager callbacks

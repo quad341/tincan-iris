@@ -1,8 +1,6 @@
 """Tests for CallListStore — CallList, ListItem, LookupResult CRUD + retention."""
 from __future__ import annotations
 
-
-
 import pytest
 
 from iris.list_store import CallList, CallListStore, ListItem, LookupResult

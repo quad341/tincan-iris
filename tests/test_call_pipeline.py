@@ -26,7 +26,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Pipecat stubs — comprehensive set for the pipeline infrastructure
 # ---------------------------------------------------------------------------
@@ -101,11 +100,11 @@ def _install_pipecat_stubs() -> None:
 
     class STTService(AIService):
         async def run_stt(self, audio: bytes):
-            return; yield  # noqa
+            return; yield
 
     class TTSService(AIService):
         async def run_tts(self, text: str, context_id: str = ""):
-            return; yield  # noqa
+            return; yield
 
     class LLMService(AIService):
         async def process_frame(self, frame, direction):
@@ -198,7 +197,7 @@ def _install_pipecat_stubs() -> None:
 
 _install_pipecat_stubs()
 
-from iris.voice.call_pipeline import CallPipeline  # noqa: E402
+from iris.voice.call_pipeline import CallPipeline
 
 # Grab stub frame classes for use in tests
 _frames_mod = sys.modules["pipecat.frames.frames"]
@@ -306,7 +305,7 @@ def test_start_with_loopback_completes_without_error():
 
 def test_stop_cancels_pipeline_task_cleanly():
     """stop() cancels the pipecat task and returns; no daemon threads linger."""
-    threads_before = set(t.ident for t in threading.enumerate())
+    threads_before = {t.ident for t in threading.enumerate()}
 
     runner_cls = sys.modules["pipecat.pipeline.runner"].PipelineRunner
     started = threading.Event()
@@ -331,10 +330,10 @@ def test_stop_cancels_pipeline_task_cleanly():
     assert not t.is_alive(), "start() thread did not exit after stop()"
 
     # No new non-daemon threads should remain
-    threads_after = set(t.ident for t in threading.enumerate() if not t.daemon)
-    threads_before_non_daemon = set(
+    threads_after = {t.ident for t in threading.enumerate() if not t.daemon}
+    threads_before_non_daemon = {
         t.ident for t in threading.enumerate() if not t.daemon and t.ident in threads_before
-    )
+    }
     assert not (threads_after - threads_before_non_daemon - {threading.main_thread().ident}), \
         "Orphan non-daemon threads left after stop()"
 

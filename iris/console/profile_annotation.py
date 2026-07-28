@@ -8,7 +8,6 @@ Textual widget classes defined only when Textual is available.
 """
 from __future__ import annotations
 
-
 try:
     from textual.app import ComposeResult
     from textual.widget import Widget

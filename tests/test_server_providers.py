@@ -13,7 +13,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # urllib mock helpers
 # ---------------------------------------------------------------------------
@@ -40,8 +39,9 @@ def test_available_returns_true_when_health_200_ready():
 
 
 def test_available_returns_false_when_health_503():
-    from iris.audio.stt import FasterWhisperServerSTT
     import urllib.error
+
+    from iris.audio.stt import FasterWhisperServerSTT
     with patch("iris.audio.stt.urllib.request.urlopen",
                side_effect=urllib.error.HTTPError(
                    url="", code=503, msg="Service Unavailable", hdrs=None, fp=None)):
@@ -49,18 +49,19 @@ def test_available_returns_false_when_health_503():
 
 
 def test_available_returns_false_on_connection_refused():
-    from iris.audio.stt import FasterWhisperServerSTT
     import urllib.error
+
+    from iris.audio.stt import FasterWhisperServerSTT
     with patch("iris.audio.stt.urllib.request.urlopen",
                side_effect=urllib.error.URLError("Connection refused")):
         assert FasterWhisperServerSTT().available() is False
 
 
 def test_available_returns_false_on_timeout():
+
     from iris.audio.stt import FasterWhisperServerSTT
-    import socket
     with patch("iris.audio.stt.urllib.request.urlopen",
-               side_effect=socket.timeout("timed out")):
+               side_effect=TimeoutError("timed out")):
         assert FasterWhisperServerSTT().available() is False
 
 
@@ -87,8 +88,9 @@ def test_transcribe_returns_text_on_success(tmp_path):
 
 
 def test_transcribe_raises_stt_error_on_server_500(tmp_path):
-    from iris.audio.stt import FasterWhisperServerSTT, STTError
     import urllib.error
+
+    from iris.audio.stt import FasterWhisperServerSTT, STTError
     wav = tmp_path / "test.wav"
     wav.write_bytes(b"RIFF" + b"\x00" * 40)
     with patch("iris.audio.stt.urllib.request.urlopen",
@@ -111,18 +113,19 @@ def test_tts_available_returns_true_when_ready():
 
 
 def test_tts_available_returns_false_on_connection_refused():
-    from iris.audio.tts import KokoroServerTTS
     import urllib.error
+
+    from iris.audio.tts import KokoroServerTTS
     with patch("iris.audio.tts.urllib.request.urlopen",
                side_effect=urllib.error.URLError("Connection refused")):
         assert KokoroServerTTS().available() is False
 
 
 def test_tts_available_returns_false_on_timeout():
+
     from iris.audio.tts import KokoroServerTTS
-    import socket
     with patch("iris.audio.tts.urllib.request.urlopen",
-               side_effect=socket.timeout("timed out")):
+               side_effect=TimeoutError("timed out")):
         assert KokoroServerTTS().available() is False
 
 
@@ -144,8 +147,9 @@ def test_synth_returns_temp_file_path_with_wav_bytes():
 
 
 def test_synth_raises_tts_error_on_server_error():
-    from iris.audio.tts import KokoroServerTTS, TTSError
     import urllib.error
+
+    from iris.audio.tts import KokoroServerTTS, TTSError
     with patch("iris.audio.tts.urllib.request.urlopen",
                side_effect=urllib.error.HTTPError(
                    url="", code=500, msg="Internal Server Error", hdrs=None, fp=None)):
@@ -158,8 +162,9 @@ def test_synth_raises_tts_error_on_server_error():
 # ---------------------------------------------------------------------------
 
 def test_default_stt_falls_back_to_subprocess_when_server_unavailable():
-    from iris.audio.stt import FasterWhisperSTT, default_stt
     import urllib.error
+
+    from iris.audio.stt import FasterWhisperSTT, default_stt
     with patch("iris.audio.stt.urllib.request.urlopen",
                side_effect=urllib.error.URLError("refused")):
         stt = default_stt()
@@ -167,8 +172,9 @@ def test_default_stt_falls_back_to_subprocess_when_server_unavailable():
 
 
 def test_default_tts_falls_back_to_subprocess_when_server_unavailable():
-    from iris.audio.tts import KokoroTTS, default_tts
     import urllib.error
+
+    from iris.audio.tts import KokoroTTS, default_tts
     with patch("iris.audio.tts.urllib.request.urlopen",
                side_effect=urllib.error.URLError("refused")):
         tts = default_tts()

@@ -6,6 +6,7 @@ from __future__ import annotations
 import wave
 
 import pytest
+
 from iris.audio.endpoint import LoopbackAudioEndpoint, default_endpoint
 
 

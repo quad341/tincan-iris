@@ -9,9 +9,7 @@ import subprocess
 import time
 from unittest.mock import MagicMock, patch
 
-
 from iris.notify_sink import DesktopNotifySink
-
 
 # ---------------------------------------------------------------------------
 # DesktopNotifySink — subprocess invocation
@@ -88,7 +86,7 @@ def test_default_urgency_is_normal():
 # ProactiveDelivery out_of_call routing
 # ---------------------------------------------------------------------------
 
-def _item(priority: int) -> "ProactiveItem":  # noqa: F821
+def _item(priority: int) -> ProactiveItem:  # noqa: F821
     from iris.proactive_store import ProactiveItem
     return ProactiveItem(
         id=1, trigger_class="test", priority=priority,

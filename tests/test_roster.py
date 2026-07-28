@@ -1,6 +1,8 @@
 """Tests for iris.roster — Contact, RosterStore, RosterProvider, ImportResult."""
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from iris.roster import (
@@ -53,7 +55,7 @@ def test_get_by_phone_missing_returns_none(store):
 
 def test_add_duplicate_phone_raises(store):
     store.add("Mom", "+12025550100")
-    with pytest.raises(Exception):  # UNIQUE constraint
+    with pytest.raises(sqlite3.IntegrityError):  # UNIQUE constraint
         store.add("Mom Clone", "+12025550100")
 
 
@@ -341,7 +343,7 @@ def test_add_address_duplicate_raises(store):
     c1 = store.add("Alice", "+12025550001")
     c2 = store.add("Bob", "+12025550002")
     store.add_address(c1.id, "email", "shared@example.com")
-    with pytest.raises(Exception):  # UNIQUE(channel, value)
+    with pytest.raises(sqlite3.IntegrityError):  # UNIQUE(channel, value)
         store.add_address(c2.id, "email", "shared@example.com")
 
 

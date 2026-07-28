@@ -27,7 +27,6 @@ from iris.daemon.api import DaemonAPI
 from iris.daemon.brain_host import BrainHost
 from iris.daemon.posture import PostureManager
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

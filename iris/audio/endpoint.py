@@ -226,7 +226,7 @@ def _pw_link_nodes(direction: str) -> list[str]:
     flag = "-o" if direction == "out" else "-i"
     try:
         out = subprocess.run(
-            ["pw-link", flag], capture_output=True, text=True, timeout=5,
+            ["pw-link", flag], capture_output=True, text=True, timeout=5, check=False,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return []
@@ -483,7 +483,7 @@ def list_audio_devices() -> dict[str, list[str]]:
         try:
             out = subprocess.run(
                 ["pactl", "list", "short", subcmd],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, timeout=5, check=False,
             )
             for line in out.stdout.splitlines():
                 parts = line.split("\t")

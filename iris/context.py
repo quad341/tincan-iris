@@ -258,7 +258,7 @@ class ConversationContext:
         )
         try:
             new_gist = self._compress(prompt)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return
         with self._gist_lock:
             self._gist = new_gist

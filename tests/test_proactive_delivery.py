@@ -11,7 +11,6 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock
 
-
 from iris.config import Config
 from iris.proactive_delivery import (
     ContextInferenceTrigger,
@@ -20,24 +19,23 @@ from iris.proactive_delivery import (
 )
 from iris.proactive_store import ProactiveItem
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def _item(**kwargs) -> ProactiveItem:
-    defaults = dict(
-        id=1,
-        trigger_class="context_inference",
-        priority=2,
-        message="Price found: milk is $3.49",
-        source_skill="list_lookup",
-        source_id="lr-1",
-        created_at=time.time(),
-        expires_at=time.time() + 86400.0,
-        delivered_at=None,
-        dismissed=False,
-    )
+    defaults = {
+        "id": 1,
+        "trigger_class": "context_inference",
+        "priority": 2,
+        "message": "Price found: milk is $3.49",
+        "source_skill": "list_lookup",
+        "source_id": "lr-1",
+        "created_at": time.time(),
+        "expires_at": time.time() + 86400.0,
+        "delivered_at": None,
+        "dismissed": False,
+    }
     defaults.update(kwargs)
     return ProactiveItem(**defaults)
 

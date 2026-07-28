@@ -6,12 +6,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-
 from iris.up import (
-    bring_up,
-    _is_active,
     _bring_up_tincand,
+    _is_active,
     _print_tincand_readiness,
+    bring_up,
 )
 
 

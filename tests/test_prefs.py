@@ -1,7 +1,6 @@
 """Tests for PreferencesStore and the Brain prefs hook."""
 from __future__ import annotations
 
-
 import pytest
 
 from iris.prefs import PreferencesStore
@@ -95,9 +94,9 @@ def test_persists_across_instances(tmp_path):
 
 # --- Brain prefs hook ---
 
-from iris.brain import Brain  # noqa: E402
-from iris.config import Config  # noqa: E402
-from iris.skills import SkillRegistry  # noqa: E402
+from iris.brain import Brain
+from iris.config import Config
+from iris.skills import SkillRegistry
 
 
 def _brain_no_net(tmp_path):

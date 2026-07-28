@@ -20,7 +20,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Pipecat stubs
 # ---------------------------------------------------------------------------
@@ -87,7 +86,7 @@ def _install_pipecat_stubs() -> None:
 
 _install_pipecat_stubs()
 
-from iris.voice.pipecat_tts import IrisTTSService  # noqa: E402
+from iris.voice.pipecat_tts import IrisTTSService
 
 # Grab the stub AudioRawFrame so tests can do isinstance checks
 _AudioRawFrame = sys.modules["pipecat.frames.frames"].AudioRawFrame

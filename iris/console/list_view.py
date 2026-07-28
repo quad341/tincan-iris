@@ -21,6 +21,7 @@ from __future__ import annotations
 import datetime
 import subprocess
 from pathlib import Path
+from typing import ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -62,7 +63,7 @@ class PostCallListView(Screen):
     #list-footer { height: 1; background: #2a3a5e; color: #9ab5e0; padding: 0 1; }
     """
 
-    BINDINGS = [
+    BINDINGS: ClassVar = [
         Binding("enter", "toggle_check", "check/uncheck"),
         Binding("d", "delete_item", "delete"),
         Binding("L", "lookup_now", "lookup"),
@@ -190,7 +191,7 @@ class PostCallListView(Screen):
                 self._store.add_lookup(item_id, "web", reply)
             else:
                 self._store.set_lookup_status(item_id, "failed")
-        except Exception:  # noqa: BLE001
+        except Exception:
             self._store.set_lookup_status(item_id, "failed")
         self.call_from_thread(self._reload)
 
@@ -207,7 +208,7 @@ class PostCallListView(Screen):
             from ..notes import NotesStore
             NotesStore().capture(item.text)
             self.notify(f"Saved to notes: {item.text[:40]}", severity="information")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             self.notify(f"Note save failed: {e}", severity="error")
 
     def action_copy_file(self) -> None:
@@ -236,10 +237,10 @@ class PostCallListView(Screen):
         try:
             # xclip / xsel / wl-copy
             for cmd in (["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--input", "--clipboard"]):
-                if subprocess.run(["which", cmd[0]], capture_output=True).returncode == 0:
+                if subprocess.run(["which", cmd[0]], capture_output=True, check=False).returncode == 0:
                     subprocess.run(cmd, input=text.encode(), check=True)
                     self.notify("Copied to clipboard.", severity="information")
                     return
             self.notify("No clipboard tool found (install wl-copy or xclip).", severity="warning")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             self.notify(f"Clipboard error: {e}", severity="error")

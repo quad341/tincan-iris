@@ -145,7 +145,7 @@ def test_utc_z_naive_is_treated_as_local():
     import datetime as _dt
     naive = "2026-06-19T15:00:00"
     expected = (
-        _dt.datetime.fromisoformat(naive).astimezone(_dt.timezone.utc)
+        _dt.datetime.fromisoformat(naive).astimezone(_dt.UTC)
         .strftime("%Y-%m-%dT%H:%M:%SZ")
     )
     assert _utc_z(naive) == expected

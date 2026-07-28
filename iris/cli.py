@@ -36,7 +36,7 @@ def main() -> int:
             reply = brain.respond(
                 text, on_filler=lambda i: print(f"iris … ({pick()})", flush=True)
             )
-        except Exception as exc:  # noqa: BLE001 — REPL: surface errors, don't crash
+        except Exception as exc:  # REPL: surface errors, don't crash
             print(f"iris ✗ {type(exc).__name__}: {exc}\n")
             continue
         tag = reply.lane + (f"/{reply.skill}" if reply.skill else "")

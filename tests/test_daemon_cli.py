@@ -10,7 +10,6 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock, patch
 
-
 from iris.daemon._cli import (
     _daemon_start,
     _dnd_off,
@@ -21,7 +20,6 @@ from iris.daemon._cli import (
     dnd_main,
 )
 from iris.daemon.proxy import DaemonNotRunning
-
 
 # ---------------------------------------------------------------------------
 # _parse_until — time parsing (no daemon required)

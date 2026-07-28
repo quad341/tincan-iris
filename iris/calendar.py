@@ -23,8 +23,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import ClassVar
 
 from .skills import SkillParam
 
@@ -42,7 +43,11 @@ def _aware(value: str) -> datetime:
     operator is, not 3pm UTC. This is the fix for free/busy and event times
     silently being treated as UTC.
     """
-    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    # Explicit Z normalization kept on purpose: this function's whole reason
+    # for existing is a prior silent-UTC bug in tz parsing, and there's no
+    # test pinning fromisoformat's native-Z behavior, so a "redundant on
+    # 3.11+" cleanup here isn't worth the risk of quietly regressing it.
+    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))  # noqa: FURB162
     return dt if dt.tzinfo is not None else dt.astimezone()
 
 
@@ -52,7 +57,7 @@ def _utc_z(value: str) -> str:
     For Calendar ``freeBusy`` ``timeMin``/``timeMax``, which must be unambiguous
     instants. Naive inputs are taken as local time (see :func:`_aware`).
     """
-    return _aware(value).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return _aware(value).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def save_token(token: dict, path: Path | None = None) -> Path:
@@ -79,7 +84,7 @@ def _gcal_http_hint(exc: urllib.error.HTTPError) -> str:
     """
     try:
         data = json.loads(exc.read().decode())
-    except Exception:  # noqa: BLE001 — non-JSON / unreadable body
+    except Exception:  # non-JSON / unreadable body
         return f"Google Calendar API error (HTTP {getattr(exc, 'code', '?')})."
     err = data.get("error", {}) if isinstance(data, dict) else {}
     for detail in err.get("details", []):
@@ -139,7 +144,7 @@ class CalendarClient:
         """
         if not self._token:
             return False, "no calendar token saved — run: iris auth gcal"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         body = {
             "timeMin": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "timeMax": (now + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -154,7 +159,7 @@ class CalendarClient:
                 return True, ""
         except urllib.error.HTTPError as exc:
             return False, _gcal_http_hint(exc)
-        except Exception as exc:  # noqa: BLE001 — best-effort probe, never crash setup
+        except Exception as exc:  # best-effort probe, never crash setup
             return False, f"couldn't reach Google Calendar ({exc})"
 
     def _headers(self) -> dict[str, str]:
@@ -350,7 +355,7 @@ class CalendarFreeBusySkill:
         "Check if the operator's calendar is free for a given time range. "
         "Never reveals event details in the spoken reply (act-without-disclose)."
     )
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(name="start", type="string",
                    description="ISO 8601 start datetime, e.g. 2026-06-19T14:00:00"),
         SkillParam(name="end", type="string",
@@ -371,8 +376,8 @@ class CalendarFreeBusySkill:
         if not busy:
             return "That time looks free.", ann
         return (
-            "That time looks a bit tight on the calendar — "
-            "there might be something already on there.",
+            ("That time looks a bit tight on the calendar — "
+            "there might be something already on there."),
             "[calendar: act-without-disclose — busy slot found, details hidden]",
         )
 
@@ -385,7 +390,7 @@ class CalendarCreateSkill:
         "Create a new event on the operator's calendar. "
         "Returns a brief spoken confirmation with natural-language time."
     )
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(name="title", type="string",
                    description="Event title."),
         SkillParam(name="start", type="string",
@@ -441,7 +446,7 @@ class CalendarMoveSkill:
         "Reschedule an existing event by title fragment. "
         "If multiple events match, asks for disambiguation."
     )
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(name="title_fragment", type="string",
                    description="Part of the event title to search for."),
         SkillParam(name="new_start", type="string",

@@ -33,7 +33,7 @@ def run_with_filler(
     def _run() -> None:
         try:
             box["value"] = work()
-        except BaseException as exc:  # noqa: BLE001 — re-raised on the caller thread
+        except BaseException as exc:  # re-raised on the caller thread
             box["error"] = exc
 
     thread = threading.Thread(target=_run, daemon=True)
@@ -75,7 +75,7 @@ def run_with_masking(
     def _run() -> None:
         try:
             box["value"] = work()
-        except BaseException as exc:  # noqa: BLE001 — re-raised on the caller thread
+        except BaseException as exc:  # re-raised on the caller thread
             box["error"] = exc
         finally:
             done.set()

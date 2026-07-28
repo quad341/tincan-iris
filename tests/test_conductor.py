@@ -151,7 +151,7 @@ def test_respond_to_threads_speaker_far():
 
 # --- trust model ---
 
-from iris.trust import TrustMode  # noqa: E402
+from iris.trust import TrustMode
 
 
 def test_far_trust_default_is_demo():
@@ -275,9 +275,9 @@ def test_cadence_normal_when_not_re_ask():
 
 # --- Voice.say_reply() cadence path (iris/voice/__init__.py:42) ---------------
 
-from unittest.mock import patch  # noqa: E402
+from unittest.mock import patch
 
-from iris.voice import Voice  # noqa: E402
+from iris.voice import Voice
 
 
 def _make_voice(*, re_ask=False):

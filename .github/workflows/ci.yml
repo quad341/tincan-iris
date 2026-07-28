@@ -20,15 +20,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # ruff-policy: adopt-deliberately -- 615 sites from 0.16.0's new default
+      # rules were triaged individually (not blanket-suppressed): genuine
+      # issues fixed, deliberate patterns kept via pyproject.toml
+      # [tool.ruff.lint] ignores / targeted noqa. Left unpinned so CI always
+      # lints against current ruff -- see ti-mi5wk for the full breakdown.
+      # Supersedes ti-7z1kj's emergency ruff==0.15.22 stopgap pin, which is
+      # deliberately resolved (not just re-triggered) by this triage.
       - name: Install package + test deps
-        # ruff pinned to 0.15.22: ruff 0.16.0 (released 2026-07-23) turned on
-        # new default lint rules that flag ~615 pre-existing sites across the
-        # codebase, breaking CI repo-wide with no code change of ours (see
-        # ti-7z1kj). This is an emergency stopgap, NOT a permanent decision --
-        # triage (fix-and-unpin vs. adopt 0.16.0 deliberately vs. pin
-        # long-term) is tracked in ti-mi5wk. Do not casually bump/remove this
-        # pin without resolving that bead first.
-        run: pip install -e '.[console,call-card]' pytest 'ruff==0.15.22'
+        run: pip install -e '.[console,call-card]' pytest ruff
       - name: Lint
         run: ruff check .
       - name: Run tests

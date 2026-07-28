@@ -3,6 +3,7 @@ propose -> authorize -> execute split. The model only proposes; the daemon runs.
 """
 from __future__ import annotations
 
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 from iris.authz import Authorizer, AuthzContext
@@ -18,7 +19,7 @@ class _DialSkill:
     name = "dial"
     description = "Place a call."
     operator_only = True
-    params = [SkillParam(name="number", type="string", description="number")]
+    params: ClassVar = [SkillParam(name="number", type="string", description="number")]
 
     def __init__(self) -> None:
         self.called_with = None
@@ -34,7 +35,7 @@ class _NoteSkill:
     name = "note"
     description = "Take a note."
     operator_only = False
-    params = [SkillParam(name="text", type="string", description="text")]
+    params: ClassVar = [SkillParam(name="text", type="string", description="text")]
 
     def __init__(self) -> None:
         self.called_with = None
@@ -135,7 +136,7 @@ def test_daemon_collapses_tuple_reply():
         name = "cal"
         description = "cal"
         operator_only = False
-        params = [SkillParam(name="when", type="string", description="when")]
+        params: ClassVar = [SkillParam(name="when", type="string", description="when")]
 
         def run(self, *, when, **_):
             return ("That time looks free.", f"[calendar: {when}]")

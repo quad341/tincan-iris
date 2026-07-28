@@ -7,8 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-
-from iris.services.install import install, _validate_exec_starts
+from iris.services.install import _validate_exec_starts, install
 
 
 def _ok_run(cmd, **kwargs):
@@ -210,46 +209,52 @@ class TestCliArgparse:
     """
 
     def test_help_returns_zero(self):
-        from iris.services._cli import main
         import sys
+
+        from iris.services._cli import main
         with patch.object(sys, "argv", ["iris-install-services", "--help"]):
             rc = main()
         assert rc == 0
 
     def test_help_does_not_call_install(self):
-        from iris.services._cli import main
         import sys
+
+        from iris.services._cli import main
         with patch("iris.services._cli.install") as mock_install, \
              patch.object(sys, "argv", ["iris-install-services", "--help"]):
             main()
         mock_install.assert_not_called()
 
     def test_unknown_arg_returns_nonzero(self):
-        from iris.services._cli import main
         import sys
+
+        from iris.services._cli import main
         with patch.object(sys, "argv", ["iris-install-services", "--bogus-flag"]):
             rc = main()
         assert rc != 0
 
     def test_unknown_arg_does_not_call_install(self):
-        from iris.services._cli import main
         import sys
+
+        from iris.services._cli import main
         with patch("iris.services._cli.install") as mock_install, \
              patch.object(sys, "argv", ["iris-install-services", "--bogus-flag"]):
             main()
         mock_install.assert_not_called()
 
     def test_dry_run_flag_passed_to_install(self):
-        from iris.services._cli import main
         import sys
+
+        from iris.services._cli import main
         with patch("iris.services._cli.install", return_value=0) as mock_install, \
              patch.object(sys, "argv", ["iris-install-services", "--dry-run"]):
             main()
         mock_install.assert_called_once_with(dry_run=True)
 
     def test_no_flags_calls_install_not_dry_run(self):
-        from iris.services._cli import main
         import sys
+
+        from iris.services._cli import main
         with patch("iris.services._cli.install", return_value=0) as mock_install, \
              patch.object(sys, "argv", ["iris-install-services"]):
             main()

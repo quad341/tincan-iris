@@ -23,6 +23,7 @@ class TrustMode(str, Enum):
     NONE  = "none"   # unarmed — no elevation; cloud and auth'd skills blocked for far party
     LOCAL = "local"  # armed — operator FULL, far party DEMO
     BOTH  = "both"   # armed + granted — operator FULL, far party FULL
-    # Backward-compat aliases — DEMO is NONE, FULL is BOTH
-    DEMO  = "none"
-    FULL  = "both"
+    # Backward-compat aliases — DEMO is NONE, FULL is BOTH. Deliberate enum
+    # aliasing, not a mistake; removal tracked under ti-qt1i.1.5.
+    DEMO  = "none"  # noqa: PIE796
+    FULL  = "both"  # noqa: PIE796

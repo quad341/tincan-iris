@@ -3,21 +3,19 @@ from __future__ import annotations
 
 import time
 
-
 from iris.roster import Contact, ImportResult
 from iris.roster_skill import (
     AddContactSkill,
+    AddNoteSkill,
     CancelRosterSkill,
     ConfirmRosterSkill,
     EditHandlingRuleSkill,
-    AddNoteSkill,
     RemoveContactSkill,
     RosterVoiceSkills,
     UpdateNoteSkill,
-    _PendingState,
     _find_by_name,
+    _PendingState,
 )
-
 
 # ---------------------------------------------------------------------------
 # Minimal in-memory roster stub

@@ -22,7 +22,7 @@ def _run_cli(entry: str, *args: str) -> subprocess.CompletedProcess:
         [sys.executable, "-c", code, *args],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=10, check=False,
     )
 
 

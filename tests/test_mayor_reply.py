@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from iris.delegate_skill import _DelegateState, ConfirmDelegateSkill
+from iris.delegate_skill import ConfirmDelegateSkill, _DelegateState
 from iris.mayor_reply import MayorReplyListener
 
 

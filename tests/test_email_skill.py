@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-
+from iris.email_provider import EmailMessage, EmailProvider
 from iris.email_skill import (
     CancelEmailSkill,
     ConfirmEmailSkill,
@@ -11,18 +11,16 @@ from iris.email_skill import (
     SendEmailSkill,
     TriageEmailSkill,
     _EmailPendingState,
-    _TriageState,
     _format_email_address,
     _format_sender,
     _format_subject,
+    _resolve_email_via_roster,
     _spoken_list,
     _strip_html_artifacts,
+    _TriageState,
     _truncate_body,
-    _resolve_email_via_roster,
 )
-from iris.email_provider import EmailMessage, EmailProvider
 from iris.roster import Contact, ContactAddress, ContactWithAddresses
-
 
 # ---------------------------------------------------------------------------
 # Helpers

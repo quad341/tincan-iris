@@ -22,7 +22,6 @@ from iris.daemon.api import DaemonAPI
 from iris.daemon.posture import PostureManager
 from iris.daemon.proxy import DaemonNotRunning, DaemonProxy
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

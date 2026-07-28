@@ -24,8 +24,8 @@ import queue
 import socket
 import threading
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from ._socket_path import daemon_socket_path
 

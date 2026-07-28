@@ -7,15 +7,27 @@ import urllib.request
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
-from .config import DEFAULT, Config
 from .authz import Authorizer, AuthzContext
-from .lanes import LaneResult, SkillProposal, Tier0Rules, Tier1Qwen, Tier2RawHaiku, _reply_text
+from .config import DEFAULT, Config
+from .lanes import (
+    LaneResult,
+    SkillProposal,
+    Tier0Rules,
+    Tier1Qwen,
+    Tier2RawHaiku,
+    _reply_text,
+)
 from .latency import Timeline
 from .masking import run_with_masking
 from .notes import NotesStore
 from .prefs import PreferencesStore
 from .re_ask_phrasebook import is_re_ask
-from .skills import SkillRegistry, default_registry, is_operator_only, supports_streaming
+from .skills import (
+    SkillRegistry,
+    default_registry,
+    is_operator_only,
+    supports_streaming,
+)
 from .trust import TrustMode
 
 
@@ -143,7 +155,7 @@ class Brain:
                 r2 = self._masked(lambda: self.tier2.handle(m.group(1).strip()), "tier2-haiku", on_filler)
                 tl.mark("tier2-haiku")
                 return Reply(r2.text, r2.lane, tl, speaker=speaker, re_ask=re_ask)
-            except Exception as exc:  # noqa: BLE001 — degrade gracefully, don't crash
+            except Exception as exc:  # degrade gracefully, don't crash
                 tl.mark("tier2-haiku(failed)")
                 return Reply(f"(couldn't reach Haiku: {exc})", "tier2-haiku", tl, speaker=speaker, re_ask=re_ask)
         if m and demo_mode:
@@ -168,7 +180,7 @@ class Brain:
             )
             tl.mark("tier1-qwen")
             return Reply(r1.text, r1.lane, tl, r1.skill, speaker=speaker, re_ask=re_ask)
-        except Exception as exc:  # noqa: BLE001 — local model hiccup: degrade, don't crash
+        except Exception as exc:  # local model hiccup: degrade, don't crash
             tl.mark("tier1-qwen(failed)")
             return Reply(f"(the local model didn't answer: {exc})", "tier1-qwen", tl, speaker=speaker, re_ask=re_ask)
 
@@ -204,7 +216,7 @@ class Brain:
             try:
                 for piece in self.tier1.chat_stream(text, hint):
                     yield StreamChunk(piece, self.tier1.name)
-            except Exception as exc:  # noqa: BLE001 — degrade, don't crash
+            except Exception as exc:  # degrade, don't crash
                 yield StreamChunk(f"(the local model didn't answer: {exc})", self.tier1.name, final=True)
                 return
             yield StreamChunk("", self.tier1.name, final=True)

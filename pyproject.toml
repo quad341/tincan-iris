@@ -43,3 +43,42 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["iris*"]
+
+[tool.ruff.lint]
+# Deliberate resolution to ruff 0.16.0's new default rules (615 violations
+# surfaced on upgrade -- see ti-mi5wk). Every entry here was individually
+# triaged, not blanket-suppressed; see the bead notes for the full breakdown.
+ignore = [
+    # Broad `except Exception` — deliberate "keep the daemon alive" resilience
+    # pattern for a live-call voice agent. All ~35 sites log, surface, or
+    # return an individually-justified benign fallback (reviewed in full).
+    "BLE001",
+    # try/except/pass — same resilience pattern as BLE001 above (distinct rule
+    # code, same sites for the most part); each pass is individually justified
+    # (rollback cleanup before re-raise, opportunistic parsing, best-effort
+    # UI, expected test-teardown races), reviewed in full, not sampled.
+    "S110",
+    # open()/tempfile without a context manager — sites are the standard
+    # NamedTemporaryFile(delete=False) cross-process-handoff idiom, or handles
+    # that intentionally outlive the opening scope (session log, crash-safe
+    # PID lock).
+    "SIM115",
+    # Naive datetime construction — single-machine local voice-agent
+    # daemon+CLI, no cross-timezone persistence anywhere. Local-wall-clock
+    # semantics are correct at every site (DND-until parsing, session
+    # timestamps, best-effort email-date humanization).
+    "DTZ001",
+    "DTZ005",
+    "DTZ006",
+    "DTZ011",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    # Unused tuple-unpack members are a deliberate convention — self-
+    # documenting field names at call sites, not dead code.
+    "RUF059",
+    # Nested `with` blocks read more clearly un-merged in test setup; purely
+    # cosmetic, no autofix implemented.
+    "SIM117",
+]

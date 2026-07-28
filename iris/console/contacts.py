@@ -14,11 +14,22 @@ Badge palette (ADR-0006 enum names):
 """
 from __future__ import annotations
 
+from typing import ClassVar
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, DataTable, Footer, Header, Input, Select, Static, TextArea
+from textual.widgets import (
+    Button,
+    DataTable,
+    Footer,
+    Header,
+    Input,
+    Select,
+    Static,
+    TextArea,
+)
 
 from ..roster import Contact, RosterProvider
 from .contacts_logic import (
@@ -221,7 +232,7 @@ class ContactsScreen(Screen):
     #contacts-wrap { height: 1fr; }
     """
 
-    BINDINGS = [
+    BINDINGS: ClassVar = [
         Binding("q", "app.pop_screen", "close", priority=True),
         Binding("escape", "cancel_edit", "cancel / close", priority=True),
         Binding("n", "add_contact", "new contact"),

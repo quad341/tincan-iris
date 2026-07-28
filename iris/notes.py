@@ -14,9 +14,9 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import ClassVar
 
 from .skills import Skill, SkillParam
-
 
 _DEFAULT_PATH = Path.home() / ".local" / "share" / "iris" / "notes.json"
 
@@ -68,7 +68,7 @@ class CaptureNoteSkill:
 
     name = "capture_note"
     description = "Save a note or follow-up item. Use when the user says 'note that', 'follow up on', or 'remind me to'."
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(name="text", type="string", description="The note content to save."),
     ]
 
@@ -87,7 +87,7 @@ class ListNotesSkill:
 
     name = "list_notes"
     description = "List open notes and follow-up items. Use when the user asks 'what are my notes' or 'list follow-ups'."
-    params: list[SkillParam] = []
+    params: ClassVar[list[SkillParam]] = []
 
     def __init__(self, store: NotesStore) -> None:
         self._store = store
@@ -107,7 +107,7 @@ class MarkDoneSkill:
 
     name = "mark_done"
     description = "Mark an open note as done. Use when the user says 'done with note 2' or 'mark 3 done'."
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(name="index", type="string",
                    description="The note ID (number from the list) to mark done."),
     ]

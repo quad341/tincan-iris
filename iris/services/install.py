@@ -59,13 +59,13 @@ def _validate_exec_starts() -> list[str]:
         try:
             result = subprocess.run(
                 [str(py_main), "-c", "import iris"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, text=True, timeout=10, check=False,
             )
             if result.returncode != 0:
                 errors.append(
                     f"  ✗ brain python cannot import iris: {result.stderr.strip()}"
                 )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(f"  ✗ brain python import check failed: {exc}")
 
     # Regression guard for the original crash-loop bug: iris-brain must launch
@@ -131,12 +131,12 @@ def install(dry_run: bool = False, with_daemon: bool = True) -> int:
             unit = f"{name}.service"
             proc = subprocess.run(
                 ["systemctl", "--user", "is-active", unit],
-                capture_output=True, text=True,
+                capture_output=True, text=True, check=False,
             )
             if proc.returncode == 0:
                 print(f"  Retiring stale unit {unit}…")
-                subprocess.run(["systemctl", "--user", "stop", unit], capture_output=True)
-                subprocess.run(["systemctl", "--user", "disable", unit], capture_output=True)
+                subprocess.run(["systemctl", "--user", "stop", unit], capture_output=True, check=False)
+                subprocess.run(["systemctl", "--user", "disable", unit], capture_output=True, check=False)
                 unit_path = _SYSTEMD_USER / unit
                 if unit_path.exists():
                     unit_path.unlink()

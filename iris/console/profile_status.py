@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 def confidence_bar_label(lang: str, confidence: float) -> str:
     """Return accessible text for a confidence bar (WCAG 1.4.1 — not colour alone)."""
-    pct = int(round(confidence * 100))
+    pct = round(confidence * 100)
     return f"{lang}: {pct}%"
 
 
@@ -34,7 +34,7 @@ def resolution_chain_step_label(
 ) -> str:
     """Return a text label for a resolution chain step (WCAG 1.3.1 / 1.4.1)."""
     if is_active:
-        pct = f" ({int(round(confidence * 100))}%)" if confidence is not None else ""
+        pct = f" ({round(confidence * 100)}%)" if confidence is not None else ""
         lang_str = f" {lang}" if lang else ""
         return f"✓{lang_str}{pct} ← ACTIVE"
     return f"— {source}: none"
@@ -53,7 +53,7 @@ class _ConfidenceBar:
     """Plain object returned by DetectionInProgressScreen.confidence_bars dict."""
 
     def __init__(self, lang: str, confidence: float) -> None:
-        pct = int(round(confidence * 100))
+        pct = round(confidence * 100)
         self.accessible_label = f"{lang}: {pct}%"
         self.aria_label = self.accessible_label
         self.lang = lang
@@ -78,7 +78,7 @@ class _ChainItem:
         self.aria_current = is_active
         self.is_aria_current = is_active
         if is_active:
-            pct = f" ({int(round(confidence * 100))}%)" if confidence is not None else ""
+            pct = f" ({round(confidence * 100)}%)" if confidence is not None else ""
             lang_str = f" {lang}" if lang else ""
             self.status_text = f"✓{lang_str}{pct} ← ACTIVE"
         else:
@@ -157,7 +157,7 @@ try:
 
         def __init__(
             self,
-            profile: "PresentationProfile",
+            profile: PresentationProfile,
             utterance: str,
             **kwargs,
         ) -> None:

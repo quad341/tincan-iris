@@ -25,7 +25,6 @@ from iris.daemon.engine import HandlingEngine
 from iris.daemon.policy import PolicyResolver, ResolveResult
 from iris.roster import Contact
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -160,7 +159,9 @@ def test_call_ended_without_prior_connect_still_clears():
 def test_mes_notification_enqueues_to_proactive_store():
     """_on_notification(sender, body, type_str) → ProactiveStore.enqueue called
     with priority=2 and the sender/body in the message."""
-    from iris.daemon.message_event_source import MessageEventSource  # builder creates this
+    from iris.daemon.message_event_source import (
+        MessageEventSource,  # builder creates this
+    )
 
     brain = MagicMock()  # security sentinel — must stay call_count==0
     proactive_store = MagicMock()
@@ -286,7 +287,7 @@ def test_dbus_absent_does_not_raise(caplog):
     try:
         with caplog.at_level(logging.WARNING):
             _start_dbus_components(ctrl, mes)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         pytest.fail(f"_start_dbus_components raised unexpectedly: {exc}")
 
 

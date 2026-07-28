@@ -39,7 +39,7 @@ def escape_for_content(text: str) -> str:
     tag-boundary correctness across content it never sees.
     """
 
-    def _add_one(match: "re.Match[str]") -> str:
+    def _add_one(match: re.Match[str]) -> str:
         return f"{match.group(1)}\\["
 
     escaped = _ESCAPE_RE.sub(_add_one, text)

@@ -8,7 +8,7 @@ from dataclasses import asdict
 
 from iris.capture.after_store import AfterStore
 from iris.capture.processor import L1CaptureProcessor
-from iris.capture.schemas import ActionItem, CapturedFact, DURABLE_FACT_TYPES, FactType
+from iris.capture.schemas import DURABLE_FACT_TYPES, ActionItem, CapturedFact, FactType
 from iris.capture.session import CaptureSession
 from iris.capture.store import CallCardStore
 from iris.capture.transcript import TranscriptStore
@@ -136,7 +136,7 @@ class CallCardHost:
         # instructor + pydantic + anthropic). L1 capture works without it — if the
         # extra is absent, log loudly and skip (never a silent no-op).
         try:
-            from iris.capture.enricher import PostCallEnricher  # noqa: PLC0415
+            from iris.capture.enricher import PostCallEnricher
         except ImportError as exc:
             _log.warning(
                 "Post-call enrichment skipped — call-card LLM extra not installed "

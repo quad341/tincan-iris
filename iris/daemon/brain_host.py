@@ -13,8 +13,8 @@ import logging
 import sqlite3
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 _log = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ class BrainHost:
                         "skill": final_chunk.skill if final_chunk else None,
                         "re_ask": False,
                     })
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     _log.exception("BrainHost: brain.respond_stream() failed")
                     self._broadcast({
                         "event": "error",

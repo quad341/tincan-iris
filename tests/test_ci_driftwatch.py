@@ -13,7 +13,7 @@ import importlib.util
 import json
 import subprocess
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -21,7 +21,7 @@ import pytest
 SCRIPT_PATH = Path(__file__).resolve().parent.parent / "scripts" / "ci_driftwatch.py"
 
 REPO = "quad341/tincan-iris"
-NOW = datetime(2026, 7, 28, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 28, 12, 0, 0, tzinfo=UTC)
 
 
 class FakeCompleted:

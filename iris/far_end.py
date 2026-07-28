@@ -35,13 +35,13 @@ class FarEndIdentity:
     contact_id: int | None = None
     display_name: str = ""
 
-    def bind(self, contact_id: int, display_name: str) -> "FarEndIdentity":
+    def bind(self, contact_id: int, display_name: str) -> FarEndIdentity:
         """Return Identified identity. No-op if already Private."""
         if self.state is FarEndState.PRIVATE:
             return self
         return FarEndIdentity(FarEndState.IDENTIFIED, contact_id, display_name)
 
-    def make_private(self) -> "FarEndIdentity":
+    def make_private(self) -> FarEndIdentity:
         """Return Private identity. Always succeeds; replaces any prior state."""
         return FarEndIdentity(FarEndState.PRIVATE, SENTINEL_ID, "(private)")
 

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
 # Safety invariant — NOT a config key, never moved to Config.proactive_*:
 # Iris must NOT speak while a call is in progress without an explicit
 # operator approval gesture. Changing this to True would let Iris interrupt

@@ -32,6 +32,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 
 from rich.markup import escape
 from textual.app import App, ComposeResult
@@ -42,15 +43,23 @@ from textual.widgets import Button, Footer, Header, RichLog, Static
 
 from .. import settings
 from ..addressing import address
+from ..audio.endpoint import default_endpoint
+from ..audio.streaming import StreamingTranscriber
+from ..audio.stt import default_stt
+from ..audio.tts import default_tts
+from ..brain import Brain
+from ..call_control import TincanCallControl
+from ..capture.store import CallCardStore
 from ..daemon.posture import PostureManager
 from ..daemon.proxy import DaemonNotRunning, DaemonProxy
+from ..fillers import filler_picker
 from ..message_store import MessageStore
 from ..prefs import PreferencesStore
+from ..proactive_delivery import ProactiveDelivery, SilenceTracker
+from ..proactive_store import ProactiveStore
+from ..roster import RosterStore
+from ..trust import TrustMode
 from . import diagnostics
-from .contacts import ContactsScreen
-from .contacts_logic import VERB_DESCRIPTION
-from .help_screen import HelpScreen
-from .list_view import PostCallListView
 from .call_card import (
     ActionItemConfirmed,
     ActionItemEdited,
@@ -61,19 +70,11 @@ from .call_card import (
     FactDismissed,
     FactValueOverride,
 )
-from ..audio.endpoint import default_endpoint
-from ..audio.streaming import StreamingTranscriber
-from ..audio.stt import default_stt
-from ..audio.tts import default_tts
-from ..brain import Brain
-from ..call_control import TincanCallControl
-from ..capture.store import CallCardStore
-from ..fillers import filler_picker
-from ..proactive_delivery import ProactiveDelivery, SilenceTracker
-from ..proactive_store import ProactiveStore
-from ..roster import RosterStore
-from ..trust import TrustMode
 from .conductor import Conductor, State
+from .contacts import ContactsScreen
+from .contacts_logic import VERB_DESCRIPTION
+from .help_screen import HelpScreen
+from .list_view import PostCallListView
 
 # ti-veyx: WebRTC AEC bring-up / SCO bridge for the seamless phone-call ride-along.
 _AEC_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "aec_audio.sh"
@@ -399,7 +400,7 @@ class IrisConsole(App):
     #status { height: 1; background: $boost; color: $text; padding: 0 1; }
     """
 
-    BINDINGS = [
+    BINDINGS: ClassVar = [
         Binding("question_mark", "help", "help"),
         Binding("space", "talk", "talk/stop", priority=True),
         Binding("l", "listen", "hear"),
@@ -809,7 +810,7 @@ class IrisConsole(App):
         try:
             proc = subprocess.run(
                 ["bash", str(_AEC_SCRIPT), action],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, text=True, timeout=15, check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             self._w(f"[dim]aec {action} failed: {escape(str(exc))}[/]")
@@ -889,7 +890,7 @@ class IrisConsole(App):
             try:
                 self.conductor.say("Sure — talk soon. Goodbye!")
             finally:
-                self.ctrl._hangup("")  # noqa: SLF001 — D-Bus Hangup; CallEnded cleans up
+                self.ctrl._hangup("")
 
         self.run_worker(_bye_then_hangup, thread=True, exclusive=True)
 
@@ -915,7 +916,7 @@ class IrisConsole(App):
             active = store.active_list(session_id)
             if active is not None and store.get_items(active.id):
                 self.push_screen(PostCallListView(store, active))
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     def _dispatch(self, cmd: str, speaker: str = "") -> bool:
@@ -984,7 +985,7 @@ class IrisConsole(App):
             self._w("[dim](busy — one sec)[/]")
 
     def _refresh_status(self) -> None:
-        import os as _os  # noqa: PLC0415
+        import os as _os
         c = self.conductor
         mode_pill = "🟢 daemon" if self._mode == "proxy" else "🟡 direct"
         parts = [mode_pill, c.state.value.upper()]
@@ -1111,7 +1112,7 @@ class IrisConsole(App):
             try:
                 self.mic.start_playback(self.tts.synth(phrase)).wait()
                 ok = True
-            except Exception:  # noqa: BLE001 — any failure => fail closed (do not listen)
+            except Exception:  # any failure => fail closed (do not listen)
                 ok = False
             self.events.put(("far_announced", ok, phrase))
 
@@ -1323,13 +1324,13 @@ class IrisConsole(App):
         """
         try:
             self.copy_to_clipboard(text)
-        except Exception:  # noqa: BLE001 — OSC52 is best-effort; the subprocess path still runs
+        except Exception:  # OSC52 is best-effort; the subprocess path still runs
             pass
         for cmd in (["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--input", "--clipboard"]):
-            if subprocess.run(["which", cmd[0]], capture_output=True).returncode == 0:
+            if subprocess.run(["which", cmd[0]], capture_output=True, check=False).returncode == 0:
                 try:
                     subprocess.run(cmd, input=text.encode(), check=True)
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     self.notify(f"Clipboard error: {escape(str(e))}", severity="error")
                     return
                 break

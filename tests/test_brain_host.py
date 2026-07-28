@@ -12,7 +12,6 @@ from unittest.mock import MagicMock
 
 from iris.daemon.brain_host import BrainHost
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
+from typing import ClassVar
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -37,7 +38,6 @@ from iris.console.call_card import (
     CriticalFactCard,
     FactCard,
 )
-
 
 # ─────────────────────────────────────────────────────────────────
 # Enums
@@ -68,7 +68,7 @@ class ReadBackTarget(Enum):
     CALLER = "caller"
 
     @classmethod
-    def default(cls) -> "ReadBackTarget":
+    def default(cls) -> ReadBackTarget:
         return cls.OPERATOR_PRIVATE
 
     def available_at(self, level: ParticipationLevel) -> bool:
@@ -211,7 +211,7 @@ class _VirtualBadge:
 class CardFeed(ScrollableContainer):
     """Vertically-scrollable card container; newest card mounts at top."""
 
-    COMPONENT_CLASSES: set[str] = set()
+    COMPONENT_CLASSES: ClassVar[set[str]] = set()
     aria_role = "feed"
     DEFAULT_CSS = """
     CardFeed {
@@ -456,7 +456,7 @@ class RideAlongConsole(App):
     }
     """
 
-    BINDINGS = [
+    BINDINGS: ClassVar = [
         Binding("q", "quit", "Quit"),
         Binding("]", "participation_up", "Level up"),
         Binding("[", "participation_down", "Level down"),
@@ -555,10 +555,9 @@ class RideAlongConsole(App):
                     if self._stance_keyboard_granted:
                         self.stance = Stance.COLLABORATION
                         return
-                elif "stand down" in lower:
-                    if self.stance is Stance.COLLABORATION:
-                        self.stance = Stance.BUSINESS
-                        return
+                elif "stand down" in lower and self.stance is Stance.COLLABORATION:
+                    self.stance = Stance.BUSINESS
+                    return
 
         for detect_fn in (
             detect_capture,

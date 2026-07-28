@@ -6,6 +6,7 @@ so CI (no model) passes; on a box with llama.cpp up it verifies the real path.
 from __future__ import annotations
 
 import json as _json
+from typing import ClassVar
 from unittest.mock import patch
 
 import pytest
@@ -49,7 +50,7 @@ class _BookSkill:
 
     name = "book"
     description = "Book a time slot."
-    params = [
+    params: ClassVar = [
         SkillParam(name="start", type="string", description="ISO 8601 start"),
         SkillParam(name="end", type="string", description="ISO 8601 end"),
     ]
@@ -119,7 +120,7 @@ def test_handle_no_skill_falls_through_to_chat():
 # ---------------------------------------------------------------------------
 
 
-def _time_tier() -> "Tier1Qwen":
+def _time_tier() -> Tier1Qwen:
     return Tier1Qwen(Config(), skills=SkillRegistry([TimeSkill()]))
 
 

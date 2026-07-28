@@ -13,7 +13,6 @@ from unittest.mock import MagicMock
 from iris.console.conductor import Conductor
 from iris.trust import TrustMode
 
-
 # ---------------------------------------------------------------------------
 # Fixture — mirrors _make() in test_conductor.py
 # ---------------------------------------------------------------------------

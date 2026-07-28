@@ -513,7 +513,7 @@ def test_cli_exits_zero_when_all_pass(tmp_path):
          "--notes-path", str(tmp_path / "notes.json"),
          "--prefs-path", str(tmp_path / "prefs.json")],
         capture_output=True,
-        text=True,
+        text=True, check=False,
     )
     assert result.returncode == 0, (
         f"Expected exit 0 when all Tier-A checks pass.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -526,7 +526,7 @@ def test_cli_output_contains_pass(tmp_path):
          "--notes-path", str(tmp_path / "notes.json"),
          "--prefs-path", str(tmp_path / "prefs.json")],
         capture_output=True,
-        text=True,
+        text=True, check=False,
     )
     assert "PASS" in result.stdout, f"Expected 'PASS' in output:\n{result.stdout}"
 
@@ -537,7 +537,7 @@ def test_cli_output_contains_latency(tmp_path):
          "--notes-path", str(tmp_path / "notes.json"),
          "--prefs-path", str(tmp_path / "prefs.json")],
         capture_output=True,
-        text=True,
+        text=True, check=False,
     )
     # latency should appear as "Xms" or "X ms"
     assert "ms" in result.stdout, f"Expected latency in ms in output:\n{result.stdout}"
@@ -549,7 +549,7 @@ def test_cli_tiers_flag_limits_checks(tmp_path):
          "--notes-path", str(tmp_path / "notes.json"),
          "--prefs-path", str(tmp_path / "prefs.json")],
         capture_output=True,
-        text=True,
+        text=True, check=False,
     )
     # No Tier-B or Tier-D output when only running Tier-A
     assert result.returncode == 0
@@ -564,10 +564,10 @@ def test_cli_exits_nonzero_when_check_fails(tmp_path):
         ])
         result = subprocess.run(
             [sys.executable, "-c",
-             "from iris.verify import run, VerifyReport, CheckResult; "
+             ("from iris.verify import run, VerifyReport, CheckResult; "
              "r = VerifyReport(checks=[CheckResult('x','A','FAIL',1.0,'err')]); "
-             "import sys; sys.exit(0 if r.failed == 0 else 1)"],
-            capture_output=True,
+             "import sys; sys.exit(0 if r.failed == 0 else 1)")],
+            capture_output=True, check=False,
         )
     assert result.returncode != 0
 
@@ -576,13 +576,13 @@ def test_cli_skip_does_not_cause_nonzero_exit(tmp_path):
     """A report with only PASS and SKIP checks should exit 0."""
     result = subprocess.run(
         [sys.executable, "-c",
-         "from iris.verify import VerifyReport, CheckResult; "
+         ("from iris.verify import VerifyReport, CheckResult; "
          "import sys; "
          "r = VerifyReport(checks=["
          "  CheckResult('a','A','PASS',1.0,'ok'),"
          "  CheckResult('b','B','SKIP',0.0,''),"
          "]); "
-         "sys.exit(0 if r.failed == 0 else 1)"],
-        capture_output=True,
+         "sys.exit(0 if r.failed == 0 else 1)")],
+        capture_output=True, check=False,
     )
     assert result.returncode == 0

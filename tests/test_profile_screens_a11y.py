@@ -24,7 +24,6 @@ import asyncio
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # ── Pure-logic A11y helpers — NO Textual required.
 # ── Fail with ImportError until builder writes iris/console/profile_status.py
@@ -96,6 +95,7 @@ def test_s1_language_list_keyboard_reorder():
     """Language drag-to-reorder is keyboard operable: Space to grab, arrows to move."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_config import LanguageSetPanel
 
     async def scenario():
@@ -120,6 +120,7 @@ def test_s1_language_list_escape_cancels_reorder():
     """Esc during keyboard drag cancels reorder without changing the list order."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_config import LanguageSetPanel
 
     async def scenario():
@@ -144,6 +145,7 @@ def test_s1_cadence_slider_exposes_accessible_value():
     """Cadence slider exposes an accessible value for screen readers (WCAG 4.1.2)."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_config import CadencePanel
 
     async def scenario():
@@ -167,6 +169,7 @@ def test_s1_cadence_slider_valuetext_updates_on_change():
     """Slider aria-valuetext updates when the cadence value changes."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_config import CadencePanel
 
     async def scenario():
@@ -191,6 +194,7 @@ def test_s1_tab_order_language_then_cadence_then_save():
     """Tab order: Language set → Cadence slider → Save button (WCAG 2.4.3)."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_config import ProfileConfigScreen
 
     async def scenario():
@@ -216,6 +220,7 @@ def test_s2_confidence_bars_have_aria_label():
     """Confidence bars must have accessible text — not bar width or colour alone."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_status import DetectionInProgressScreen
 
     async def scenario():
@@ -243,6 +248,7 @@ def test_s2_spinner_has_adjacent_text_label():
     """Detection spinner must have adjacent visible text (not animation-only)."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_status import DetectionInProgressScreen
 
     async def scenario():
@@ -264,6 +270,7 @@ def test_s2_resolution_chain_ordered_four_steps():
     """Resolution chain is ordered and covers all 4 steps (override > annotation > detector > default)."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_status import DetectionInProgressScreen
 
     async def scenario():
@@ -292,6 +299,7 @@ def test_s3_active_chain_item_has_aria_current():
     """Active resolution chain step must expose aria-current (WCAG 1.3.1)."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_status import ProfileLockedScreen
     from iris.profile_resolver import PresentationProfile
 
@@ -325,6 +333,7 @@ def test_s3_locked_badge_aria_label():
     """Locked badge must have an accessible label that says the profile is locked."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_status import ProfileLockedScreen
     from iris.profile_resolver import PresentationProfile
 
@@ -353,6 +362,7 @@ def test_s3_locked_badge_has_visible_locked_text():
     """Locked badge must contain visible 'LOCKED' text alongside any icon."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_status import ProfileLockedScreen
     from iris.profile_resolver import PresentationProfile
 
@@ -379,6 +389,7 @@ def test_s3_inactive_chain_rows_have_text_indicator():
     """Inactive chain rows have text indicators — not colour alone (WCAG 1.4.1)."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_status import ProfileLockedScreen
     from iris.profile_resolver import PresentationProfile
 
@@ -412,6 +423,7 @@ def test_s4_trust_tier_field_is_readonly():
     """Trust tier field must be read-only — ADR-0005: profiles never modify trust."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_annotation import ContactAnnotationScreen
 
     async def scenario():
@@ -436,6 +448,7 @@ def test_s4_trust_tier_field_has_accessible_label():
     """Trust tier field exposes an accessible name for screen readers (WCAG 4.1.2)."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_annotation import ContactAnnotationScreen
 
     async def scenario():
@@ -460,6 +473,7 @@ def test_s4_language_dropdown_can_focus():
     """Language preference dropdown is keyboard focusable (WCAG 2.1.1)."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_annotation import ContactAnnotationScreen
 
     async def scenario():
@@ -485,6 +499,7 @@ def test_s4_save_button_keyboard_accessible():
     """Save button is keyboard focusable (WCAG 2.1.1)."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_annotation import ContactAnnotationScreen
 
     async def scenario():
@@ -505,6 +520,7 @@ def test_s4_clear_button_keyboard_accessible():
     """Clear button is keyboard focusable (WCAG 2.1.1)."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_annotation import ContactAnnotationScreen
 
     async def scenario():
@@ -525,6 +541,7 @@ def test_s4_warning_callout_has_text_not_colour_alone():
     """Warning callout uses icon + text + border, not colour alone (WCAG 1.4.1)."""
     pytest.importorskip("textual")
     from textual.app import App
+
     from iris.console.profile_annotation import ContactAnnotationScreen
 
     async def scenario():

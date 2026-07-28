@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 import subprocess
 import tempfile
 import urllib.error
@@ -121,7 +120,7 @@ class KokoroTTS:
                 cmd += ["--lang", lang]
             if self.isolate:
                 cmd = ["unshare", "-rn", *cmd]  # fresh net namespace -> no egress
-            proc = subprocess.run(cmd, capture_output=True, text=True)
+            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
             if proc.returncode != 0:
                 raise RuntimeError(
                     f"kokoro synth failed (rc={proc.returncode}): "
@@ -158,7 +157,7 @@ class KokoroServerTTS:
             with urllib.request.urlopen(req, timeout=1.0) as resp:
                 data = json.loads(resp.read())
                 return bool(data.get("ready"))
-        except (urllib.error.URLError, socket.timeout, json.JSONDecodeError, OSError):
+        except (TimeoutError, urllib.error.URLError, json.JSONDecodeError, OSError):
             return False
 
     def synth(self, text: str, *, voice: str | None = None, speed: float = 1.0,

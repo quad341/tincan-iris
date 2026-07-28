@@ -8,9 +8,7 @@ from __future__ import annotations
 import pathlib
 import tempfile
 
-
 from iris.screen_call import ScreenCallFlow, ScreenPivotFlow
-
 
 # ---------------------------------------------------------------------------
 # Test harness helpers

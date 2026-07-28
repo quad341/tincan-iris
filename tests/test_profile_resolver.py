@@ -30,7 +30,6 @@ from iris.config import Config
 from iris.prefs import PreferencesStore
 from iris.profile_resolver import PresentationProfile, ProfileResolver
 
-
 # ---------------------------------------------------------------------------
 # Stubs
 # ---------------------------------------------------------------------------

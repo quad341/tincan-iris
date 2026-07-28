@@ -20,7 +20,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Pipecat stubs — installed before importing the module under test
 # ---------------------------------------------------------------------------
@@ -91,8 +90,7 @@ def _install_pipecat_stubs() -> None:
 
 _install_pipecat_stubs()
 
-from iris.voice.pipecat_stt import IrisSTTService  # noqa: E402
-
+from iris.voice.pipecat_stt import IrisSTTService
 
 # ---------------------------------------------------------------------------
 # Helpers

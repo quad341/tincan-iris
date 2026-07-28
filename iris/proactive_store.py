@@ -87,7 +87,7 @@ class ProactiveStore:
 
     def enqueue(
         self,
-        proto: "ProactiveItem | None" = None,
+        proto: ProactiveItem | None = None,
         *,
         trigger_class: str | None = None,
         priority: int = 2,

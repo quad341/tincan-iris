@@ -11,7 +11,6 @@ text-in / voice-out.
 from __future__ import annotations
 
 import json
-import socket
 import subprocess
 import urllib.error
 import urllib.request
@@ -86,7 +85,7 @@ class FasterWhisperSTT:
         ]
         if self.isolate:
             cmd = ["unshare", "-rn", *cmd]  # fresh net namespace -> no egress
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if proc.returncode != 0:
             raise RuntimeError(
                 f"whisper transcribe failed (rc={proc.returncode}): "
@@ -129,7 +128,7 @@ class FasterWhisperServerSTT:
             with urllib.request.urlopen(req, timeout=1.0) as resp:
                 data = json.loads(resp.read())
                 return bool(data.get("ready"))
-        except (urllib.error.URLError, socket.timeout, json.JSONDecodeError, OSError):
+        except (TimeoutError, urllib.error.URLError, json.JSONDecodeError, OSError):
             return False
 
     def transcribe(self, wav_path: str) -> str:

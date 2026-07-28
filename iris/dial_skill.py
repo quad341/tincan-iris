@@ -18,6 +18,7 @@ belt-and-suspenders.
 from __future__ import annotations
 
 import threading
+from typing import ClassVar
 
 from .call_control import TincanCallControl
 from .roster import RosterProvider
@@ -58,7 +59,7 @@ class DialSkill:
     name = "dial_contact"
     description = "Call a contact from the roster by name. Operator-only."
     operator_only = True
-    params: list[SkillParam] = [
+    params: ClassVar[list[SkillParam]] = [
         SkillParam(
             name="contact_name",
             type="string",
@@ -101,7 +102,7 @@ class ConfirmDialSkill:
     name = "dial_confirm"
     description = "Confirm and place the staged outgoing call."
     operator_only = True
-    params: list[SkillParam] = []
+    params: ClassVar[list[SkillParam]] = []
 
     def __init__(
         self,
@@ -132,7 +133,7 @@ class CancelDialSkill:
     name = "dial_cancel"
     description = "Cancel the staged outgoing call without dialing."
     operator_only = True
-    params: list[SkillParam] = []
+    params: ClassVar[list[SkillParam]] = []
 
     def __init__(self, pending: _DialState) -> None:
         self._pending = pending
@@ -163,7 +164,7 @@ class DialVoiceSkills:
 
         _orig_emit = ctrl.emit
 
-        def _intercept(ev: tuple) -> None:  # noqa: ANN001
+        def _intercept(ev: tuple) -> None:
             _orig_emit(ev)
             if ev and ev[0] == "call_connected":
                 self._connected.set()

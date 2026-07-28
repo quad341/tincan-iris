@@ -8,7 +8,7 @@ from __future__ import annotations
 
 
 def get_tincand_status() -> dict:
-    import dbus  # noqa: PLC0415
+    import dbus
     bus = dbus.SessionBus()
     obj = bus.get_object("im.tincan.Daemon", "/im/tincan")
     iface = dbus.Interface(obj, "im.tincan.Daemon")

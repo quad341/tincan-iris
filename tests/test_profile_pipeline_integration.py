@@ -28,7 +28,6 @@ from iris.profile_resolver import PresentationProfile, ProfileResolver
 from iris.screen_call import ScreenCallFlow
 from iris.take_message import TakeMessageFlow
 
-
 # ---------------------------------------------------------------------------
 # Stubs and helpers
 # ---------------------------------------------------------------------------
@@ -106,19 +105,19 @@ def _screen_flow(
     stt = _FakeSTT(stt_answers)
     events: list[tuple] = []
 
-    kwargs: dict = dict(
-        tts=tts,
-        stt=stt,
-        play_fn=lambda _: None,
-        capture_fn=lambda _s: "/tmp/cap.wav",
-        relay_fn=lambda _text: None,
-        get_decision=lambda _timeout: decision,
-        put_through_fn=lambda: None,
-        hang_up_fn=lambda: None,
-        emit=events.append,
-        contact_name=contact_name,
-        caller_number=caller_number,
-    )
+    kwargs: dict = {
+        "tts": tts,
+        "stt": stt,
+        "play_fn": lambda _: None,
+        "capture_fn": lambda _s: "/tmp/cap.wav",
+        "relay_fn": lambda _text: None,
+        "get_decision": lambda _timeout: decision,
+        "put_through_fn": lambda: None,
+        "hang_up_fn": lambda: None,
+        "emit": events.append,
+        "contact_name": contact_name,
+        "caller_number": caller_number,
+    }
     if resolver is not None:
         kwargs["resolver"] = resolver
 
@@ -136,15 +135,15 @@ def _take_flow(
     stt = _FakeSTT(stt_answers)
     events: list[tuple] = []
 
-    kwargs: dict = dict(
-        tts=tts,
-        stt=stt,
-        play_fn=lambda _: None,
-        capture_fn=lambda _s: "/tmp/cap.wav",
-        hang_up_fn=lambda: None,
-        emit=events.append,
-        contact_name=contact_name,
-    )
+    kwargs: dict = {
+        "tts": tts,
+        "stt": stt,
+        "play_fn": lambda _: None,
+        "capture_fn": lambda _s: "/tmp/cap.wav",
+        "hang_up_fn": lambda: None,
+        "emit": events.append,
+        "contact_name": contact_name,
+    }
     if resolver is not None:
         kwargs["resolver"] = resolver
 
@@ -382,10 +381,11 @@ def test_detection_does_not_add_latency_after_stt():
         return {"es": 0.9}
 
     # Build a real ProfileResolver with our spy detector
+    import pathlib
+    import tempfile
+
     from iris.config import Config
     from iris.prefs import PreferencesStore
-    import tempfile
-    import pathlib
 
     with tempfile.TemporaryDirectory() as tmp:
         prefs = PreferencesStore(pathlib.Path(tmp) / "prefs.json")
