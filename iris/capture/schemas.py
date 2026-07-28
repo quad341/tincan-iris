@@ -19,6 +19,7 @@ class FactType(str, Enum):
     ACCOUNT_ID = "account_id"
     MEMBER_ID  = "member_id"
     POLICY_ID  = "policy_id"
+    ACTION_ITEM = "action_item"
 
 
 # Fact types promotable to a durable contact_fact row on writeback (ti-hb2dx).
@@ -60,6 +61,7 @@ class ActionItem:
     transcript_offset_s: float
     speaker: str
     confidence: float
+    fact_type: FactType = FactType.ACTION_ITEM
     due_date: str | None = None
     confirmed: bool | None = None
     source_layer: int = 1

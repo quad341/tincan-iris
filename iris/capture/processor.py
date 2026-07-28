@@ -26,7 +26,7 @@ _SPACED_SINGLE_RE = re.compile(r"(?<!['\w])([A-Z0-9])((?:\s+[A-Z0-9]){2,})(?!\w)
 
 # ── Phone ─────────────────────────────────────────────────────────────────────
 
-_PHONE_SCAN_RE = re.compile(r"\d[\d\s\-\.]{6,14}\d")
+_PHONE_SCAN_RE = re.compile(r"\(?\d[\d\s\-\.\(\)]{6,14}\d")
 
 # ── Amount ────────────────────────────────────────────────────────────────────
 
@@ -251,10 +251,10 @@ class L1CaptureProcessor:
         results = []
         for m in _PHONE_SCAN_RE.finditer(text):
             raw = m.group(0)
-            stripped = re.sub(r"[\s\-\.]", "", raw)
+            stripped = re.sub(r"[\s\-\.\(\)]", "", raw)
             try:
                 phone = phonenumbers.parse(stripped, "US")
-                if phonenumbers.is_valid_number(phone):
+                if phonenumbers.is_possible_number(phone):
                     e164 = phonenumbers.format_number(
                         phone, phonenumbers.PhoneNumberFormat.E164
                     )
@@ -307,7 +307,7 @@ class L1CaptureProcessor:
                 value = float(value_str)
             except ValueError:
                 continue
-            normalized = f"${value:.2f}"
+            normalized = f"{value:.2f}"
             if normalized in seen:
                 continue
             seen.add(normalized)
@@ -327,7 +327,7 @@ class L1CaptureProcessor:
             value = _spoken_to_amount(raw)
             if value is None or value <= 0:
                 continue
-            normalized = f"${value:.2f}"
+            normalized = f"{value:.2f}"
             if normalized in seen:
                 continue
             seen.add(normalized)
@@ -398,6 +398,7 @@ class L1CaptureProcessor:
                 transcript_offset_s=offset_s,
                 speaker=speaker,
                 confidence=0.85,
+                fact_type=FactType.ACTION_ITEM,
                 due_date=due,
             ))
         return results
