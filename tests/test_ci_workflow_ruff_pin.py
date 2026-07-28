@@ -6,7 +6,7 @@ CI_YML = Path(__file__).resolve().parent.parent / ".github" / "workflows" / "ci.
 
 def _install_step_block():
     lines = CI_YML.read_text().splitlines()
-    start = next(i for i, l in enumerate(lines) if "Install package" in l and "test deps" in l)
+    start = next(i for i, line in enumerate(lines) if "Install package" in line and "test deps" in line)
     end = next(
         (i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith("- name:")),
         len(lines),
